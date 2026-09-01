@@ -62,6 +62,89 @@ h1 {
   color: inherit;
 }
 
+.toolbar .settings-btn {
+  margin-left: auto;
+}
+
+/* 设置弹窗 */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  width: min(720px, 90vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal h2 {
+  margin: 0;
+  font-size: 1.1em;
+}
+
+.modal-error {
+  color: #c62828;
+  background: #fdecea;
+  border-radius: 6px;
+  padding: 8px;
+  margin: 0;
+}
+
+.adapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.adapter-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.adapter-row input,
+.adapter-row textarea {
+  font-family: inherit;
+  font-size: 0.85em;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+.adapter-row textarea {
+  grid-column: 1 / -1;
+  resize: vertical;
+}
+
+.adapter-row .ok {
+  color: #2e7d32;
+}
+
+.adapter-row .bad {
+  color: #c62828;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .chat {
   flex: 1;
   overflow-y: auto;

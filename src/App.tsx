@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { openSession, type AcpSession } from "./acp/session";
 import { listAdapters, type AdapterWithStatus } from "./config/adapters";
+import { SettingsModal } from "./components/SettingsModal";
 import "./App.css";
 
 type ChatMsg =
@@ -25,17 +26,21 @@ function App() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const sessionRef = useRef<AcpSession | null>(null);
   const toolMap = useRef(new Map<string, ChatMsg>());
   // 权限决策的 resolve（存在 window 上，供弹窗按钮回调）
   const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
 
   // 加载适配器列表
-  useEffect(() => {
+  function reloadAdapters() {
     listAdapters().then((list) => {
       setAdapters(list);
-      if (list.length > 0) setAdapterId((cur) => cur || list[0].id);
+      setAdapterId((cur) => (list.some((a) => a.id === cur) ? cur : list[0]?.id ?? ""));
     });
+  }
+  useEffect(() => {
+    reloadAdapters();
   }, []);
 
   const currentAdapter = adapters.find((a) => a.id === adapterId);
@@ -156,6 +161,9 @@ function App() {
             {currentAdapter.program} {currentAdapter.args.join(" ")}
           </span>
         )}
+        <button className="settings-btn" onClick={() => setSettingsOpen(true)}>
+          设置
+        </button>
       </div>
 
       <div className="chat">
@@ -205,6 +213,12 @@ function App() {
           停止
         </button>
       </form>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={reloadAdapters}
+      />
     </main>
   );
 }
