@@ -1,49 +1,167 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useRef } from "react";
+import { openSession, type AcpSession } from "./acp/session";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+type ChatMsg =
+  | { role: "user"; text: string }
+  | { role: "assistant"; text: string }
+  | { role: "tool"; title: string; status: string };
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+// 硬编码 omp 适配器（P0 已验证的默认值）
+const ADAPTER = {
+  id: "omp",
+  name: "Oh My Pi",
+  program: "omp",
+  args: ["acp", "--model", "duo-king-6.6"],
+  cwd: "/Users/zhubaoduo/dev/ainone-ui",
+};
+
+/** 把最后一条 assistant 消息置为指定文本；若末尾不是 assistant 则追加一条 */
+function upsertAssistant(messages: ChatMsg[], text: string): ChatMsg[] {
+  if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+    const copy = [...messages];
+    copy[copy.length - 1] = { role: "assistant", text };
+    return copy;
+  }
+  return [...messages, { role: "assistant", text }];
+}
+
+function App() {
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
+  const sessionRef = useRef<AcpSession | null>(null);
+  const toolMap = useRef(new Map<string, ChatMsg>());
+
+  async function ensureSession() {
+    if (sessionRef.current) return sessionRef.current;
+    const s = await openSession(ADAPTER, async (params) => {
+      // 阻塞在权限审批弹窗，直到用户点「允许/拒绝」
+      setPending(params.toolCall.title ?? "（无标题工具调用）");
+      const decision = await new Promise<"allow" | "reject">((resolve) => {
+        (window as never as { __resolvePerm?: (d: "allow" | "reject") => void }).__resolvePerm =
+          resolve;
+      });
+      setPending(null);
+      const target = params.options.find((o) =>
+        decision === "allow" ? o.kind === "allow_once" : o.kind === "reject_once",
+      );
+      return {
+        outcome: {
+          outcome: "selected",
+          optionId: target?.optionId ?? params.options[0].optionId,
+        },
+      };
+    });
+    sessionRef.current = s;
+    return s;
+  }
+
+  async function submit() {
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    setBusy(true);
+    setMessages((m) => [...m, { role: "user", text }]);
+    try {
+      const session = await ensureSession();
+      // 本轮累积的 assistant 流式文本：每来一块就整体替换最后一条 assistant 消息
+      let trailing = "";
+      await session.prompt(text, (e) => {
+        switch (e.type) {
+          case "agent_text":
+            trailing += e.text;
+            setMessages((m) => upsertAssistant(m, trailing));
+            break;
+          case "tool_call":
+            trailing = "";
+            const t: ChatMsg = {
+              role: "tool",
+              title: e.title,
+              status: e.status ?? "pending",
+            };
+            toolMap.current.set(e.toolCallId, t);
+            setMessages((m) => [...m, t]);
+            break;
+          case "tool_update": {
+            const prev = toolMap.current.get(e.toolCallId);
+            if (prev && prev.role === "tool") {
+              prev.status = e.status ?? prev.status;
+              setMessages((m) => [...m]);
+            }
+            break;
+          }
+          case "turn_stop":
+            trailing = "";
+            break;
+          default:
+            // agent_thought / error 等 P1 不渲染
+            break;
+        }
+      });
+    } catch (err) {
+      setMessages((m) => [...m, { role: "assistant", text: `⚠️ ${String(err)}` }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onPerm(d: "allow" | "reject") {
+    (window as never as { __resolvePerm?: (d: "allow" | "reject") => void }).__resolvePerm?.(d);
   }
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <h1>ainone-ui · Agent in One</h1>
+      <p className="hint">
+        harness: {ADAPTER.name}（{ADAPTER.args.join(" ")}）
+      </p>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+      <div className="chat">
+        {messages.map((m, i) =>
+          m.role === "user" ? (
+            <div key={i} className="user">
+              <b>你：</b>
+              {m.text}
+            </div>
+          ) : m.role === "assistant" ? (
+            <div key={i} className="assistant">
+              <b>agent：</b>
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="tool" title={m.title}>
+              🔧 {m.title} <span className="status">{m.status}</span>
+            </div>
+          ),
+        )}
+        {pending && (
+          <div className="perm">
+            需要批准执行：<code>{pending}</code>
+            <button onClick={() => onPerm("allow")}>允许</button>
+            <button onClick={() => onPerm("reject")}>拒绝</button>
+          </div>
+        )}
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
       <form
         className="row"
         onSubmit={(e) => {
           e.preventDefault();
-          greet();
+          submit();
         }}
       >
         <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+          value={input}
+          onChange={(e) => setInput(e.currentTarget.value)}
+          placeholder="给 agent 发消息…"
+          disabled={busy}
         />
-        <button type="submit">Greet</button>
+        <button type="submit" disabled={busy}>
+          {busy ? "运行中…" : "发送"}
+        </button>
       </form>
-      <p>{greetMsg}</p>
     </main>
   );
 }
