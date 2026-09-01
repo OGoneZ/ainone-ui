@@ -165,7 +165,9 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 | DEC-3 | 业务逻辑全部 TS，Rust 只做管道 | TS 可测试、类型集中、降低 Rust 维护门槛                                                                  | 全 Rust：性能无必要，开发速度慢                    |
 | DEC-4 | 无 ACP 的 harness 走外部桥接器 | 保持 GUI 单协议；pi-acp/acp-amp 生态已有先例                                                             | GUI 内置多协议：违反原则 1，维护面爆炸             |
 | DEC-5 | JSONL 行切分只认 LF            | pi 文档明确警告勿用通用行读取器（Unicode 分隔符陷阱）                                                    | —                                                 |
-| DEC-6 | Zustand 替代 Redux             | 本项目状态形态（会话×消息列表）用轻量方案足够                                                           | —                                                 |
+| DEC-6 | Zustand 替代 Redux | 本项目状态形态（会话×消息列表）用轻量方案足够 | — |
+| DEC-7 | ACP 协议层采用官方 TS SDK（`@agentclientprotocol/sdk`） | 官方维护、纯 Web API 可直接跑在 WebView、离 React 渲染层零距离（事件免二次序列化）；Rust 层退化为纯字节管道 | 自研状态机：重复造轮子；Rust SDK：事件需过 IPC 二次序列化，且 Client trait 样板重 |
+| DEC-8 | 「成熟实现优先」作为选型纪律 | 用户明确要求：有成熟第三方实现（协议 SDK、diff 渲染、虚拟列表等）一律直接采用，自研仅限无现成方案的业务粘合层 | — |
 
 ### 3.5 错误处理策略（分层）
 
@@ -266,6 +268,7 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 | 层       | 选型                             | 说明     |
 | -------- | -------------------------------- | -------- |
 | 桌面框架 | Tauri 2                          | 见 DEC-1 |
+| ACP 协议 | @agentclientprotocol/sdk（官方） | 见 DEC-7 |
 | UI       | React 18 + TypeScript + Vite     |          |
 | 状态     | zustand                          | 见 DEC-6 |
 | 渲染     | react-markdown + Shiki（P3）     |          |
