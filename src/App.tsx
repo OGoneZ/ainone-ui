@@ -107,6 +107,15 @@ function App() {
     }
   }
 
+  async function stop() {
+    if (!busy) return;
+    try {
+      await sessionRef.current?.cancel();
+    } catch {
+      /* 忽略；可能 agent 已结束 */
+    }
+  }
+
   function onPerm(d: "allow" | "reject") {
     (window as never as { __resolvePerm?: (d: "allow" | "reject") => void }).__resolvePerm?.(d);
   }
@@ -160,6 +169,9 @@ function App() {
         />
         <button type="submit" disabled={busy}>
           {busy ? "运行中…" : "发送"}
+        </button>
+        <button type="button" onClick={stop} disabled={!busy}>
+          停止
         </button>
       </form>
     </main>

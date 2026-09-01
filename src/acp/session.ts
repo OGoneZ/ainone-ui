@@ -31,6 +31,8 @@ export interface AcpSession {
   sessionId: string;
   /** 发送一条用户消息，逐事件回调 onOutgoing（含流式文本与工具状态） */
   prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
+  /** 取消当前正在运行的 prompt turn（session/cancel 通知） */
+  cancel(): Promise<void>;
   /** 终止会话：关连接 + 杀子进程 */
   dispose(): Promise<void>;
 }
@@ -134,6 +136,12 @@ export async function openSession(
             break;
         }
       }
+    },
+    cancel() {
+      // 通知 agent 终止当前 turn；agent 会以 StopReason::Cancelled 回 prompt
+      return connection.agent.notify(acp.methods.agent.session.cancel, {
+        sessionId: session.sessionId,
+      });
     },
     async dispose() {
       try {
