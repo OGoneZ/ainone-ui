@@ -40,7 +40,14 @@ pub fn defaults() -> Vec<Adapter> {
         Adapter {
             id: "claude-code".into(),
             name: "Claude Code".into(),
-            program: "claude-code-acp".into(),
+            program: "claude-agent-acp".into(),
+            args: Vec::new(),
+            cwd: ".".into(),
+        },
+        Adapter {
+            id: "codex".into(),
+            name: "Codex".into(),
+            program: "codex-acp".into(),
             args: Vec::new(),
             cwd: ".".into(),
         },
