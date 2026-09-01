@@ -78,7 +78,6 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 
 | ID  | 风险                                                         | 概率 | 影响 | 缓解措施                                  | 风险期 |
 | --- | ------------------------------------------------------------ | ---- | ---- | ----------------------------------------- | ------ |
-| --- | ---                                                          | ---  | ---  | ---                                       | ---    |
 | R-1 | 各 harness ACP 实现成熟度参差                                | 高   | 高   | P0 逐个验证握手/事件流；适配器可单独禁用  | P0–P2 |
 | R-2 | harness 迭代导致协议行为漂移                                 | 中   | 高   | 报文存档做回归基线；容忍未知 content type | 全程   |
 | R-3 | Linux WebKitGTK 渲染差异                                     | 中   | 中   | CI 三平台构建截图比对；CSS 兼容前缀清单   | P3–P4 |
@@ -113,7 +112,7 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 
 ### 3.1 架构总图
 
-```
+```text
 ┌─ ainone-ui 桌面应用（Tauri 2）──────────────────────────┐
 │                                                          │
 │  UI 层（React + TS，WebView 内）                         │
@@ -147,7 +146,7 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 
 ### 3.3 核心数据流（Prompt 一条消息的完整路径）
 
-```
+```text
 用户输入 → invoke('agent_prompt', sessionId, text)
   → Rust 层封装 {method:"session/prompt", params:{sessionId, prompt}}
   → 写入子进程 stdin
@@ -187,7 +186,7 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 
 #### IPC-1 `agent_spawn`
 
-```
+```jsonc
 入参: { adapterId: string, cwd?: string }
 出参: { agentId: string }   // 长连接代理进程 id，非 ACP sessionId
 错误: { code: 'SPAWN_FAIL'|'ADAPTER_NOT_FOUND', message: string }
@@ -195,7 +194,7 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 
 #### IPC-2 `agent_send`
 
-```
+```jsonc
 入参: { agentId: string, line: string }   // line 为完整 JSON-RPC 行
 出参: { ok: true }
 错误: { code: 'AGENT_DEAD'|'AGENT_NOT_FOUND', message: string }
@@ -231,7 +230,6 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 - **单一编写者**：stdin 只在 Rust 层写，页面不得绕过 IPC 直接接触进程
 - **行完整性**：`agent-stdout` 事件保证 payload.line 为完整一帧（行缓冲保证，见 4.2.3）
 - **背压（P2 起）**：事件队列超长时合并节流，防 UI 假死
-  **事件（Rust → 页面，广播）**：`agent-stdout {agentId, line}`、`agent-stderr {agentId, line}`、`agent-exit {agentId, code}`、`term-stdout {termId, line}`、`term-exit {termId, code}`。
 
 ### 4.2 ACP 协议接口（页面状态机 ↔ harness 子进程）
 
@@ -276,7 +274,7 @@ ainone-ui 是一个跨平台桌面客户端，通过标准化的 ACP 协议统�
 
 ### 5.2 目录结构
 
-```
+```text
 ainone-ui/
 ├─ src/
 │  ├─ acp/            # ACP 状态机（纯 TS，无 DOM 依赖）
@@ -284,11 +282,10 @@ ainone-ui/
 │  ├─ stores/         # zustand
 │  ├─ config/         # 适配器注册表读写
 │  └─ bridge/         # IPC invoke/event 封装
-│  └─ bridge/         # invoke/event 的 Rust 封装
 ├─ src-tauri/src/
 │  ├─ process.rs      # 子进程管理
 │  ├─ rpc.rs          # JSONL 解析/装配
-│  └─ commands.rs     #[tauri::command] 集合
+│  └─ commands.rs     # [tauri::command] 集合
 ├─ docs/
 │  ├─ plan.md         # 本计划书
 │  ├─ acceptance/     # 每期验收执行记录（双签）
@@ -312,15 +309,13 @@ ainone-ui/
 每期完成都产生一个**可安装/可使用的增量**，验收通过即 Latch（状态锁定，只前进不回退）。
 
 | 期 | 主题 | 一句话交付 | 主要需求 | 净工作日 |
-
-| P1 | MVP        | OMP 一条链路端到端可用             | REQ-2 组   | 3–5   |
-| -- | ---------- | ---------------------------------- | ---------- | ------ |
-| P0 | 技术验证   | 协议链路手动打通，报文存档         | REQ-1 组   | 0.5–1 |
-| P1 | MVP        | OMP 一条链路端到端可用             | REQ-2 组   | 3–5   |
-| P2 | 多 harness | 注册表+4 个 harness+会话恢复       | REQ-3/4 组 | 3–4   |
-| P3 | 开发者体验 | diff/终端面板/steering/渲染升级    | REQ-5 组   | 4–6   |
-| P4 | 分发打磨   | 三平台安装包+系统集成+i18n         | REQ-6/7 组 | 3–5   |
-| P5 | 远期       | AG-UI 网关、远程 harness、成本统计 | 暂不展开   | —     |
+| -- | ------ | -------------------------------- | ---------- | ------ |
+| P0 | 技术验证 | 协议链路手动打通，报文存档       | REQ-1 组   | 0.5–1 |
+| P1 | MVP      | OMP 一条链路端到端可用           | REQ-2 组   | 3–5   |
+| P2 | 多 harness | 注册表+4 个 harness+会话恢复     | REQ-3/4 组 | 3–4   |
+| P3 | 开发者体验 | diff/终端面板/steering/渲染升级  | REQ-5 组   | 4–6   |
+| P4 | 分发打磨   | 三平台安装包+系统集成+i18n       | REQ-6/7 组 | 3–5   |
+| P5 | 远期       | AG-UI 网关、远程 harness、成本统计 | 暂不展开 | —     |
 
 ---
 
@@ -379,7 +374,7 @@ ainone-ui/
 
 **F-1-6 命令执行**：非交互 terminal 执行（spawn→收集输出→回传退出码），不做 PTY。
 
-**F-1-7 锐化**：协议边界的错误态全部可感知：命令不存在、子进程崩溃、断管 → 错误横幅+重启按钮，不白屏。
+**F-1-7 容错**：协议边界的错误态全部可感知：命令不存在、子进程崩溃、断管 → 错误横幅+重启按钮，不白屏。
 
 #### 7.1.2 已知技术风险与预防
 
@@ -433,7 +428,7 @@ ainone-ui/
 - **AC-P2-3**：两个 Tab 分别运行 OMP 与 Pi 并同时对话 → 消息互不串扰（各自子进程独立）→ 通过
 - **AC-P2-4**：会话中告知 agent 一个暗号（如 "banana-77"），退出应用（kill 窗口），重启后 `session/load` 该会话并询问暗号 → agent 能复述 → 通过
 - **AC-P2-5**：运行中删除一个会话 Tab → 对应子进程 2 秒内消失 → 通过
-- **A-P2-6**：手工将适配器配置文件截断为非法 JSON → 应用启动不崩溃，提示配置损坏并引导修复 → 通过
+- **AC-P2-6**：手工将适配器配置文件截断为非法 JSON → 应用启动不崩溃，提示配置损坏并引导修复 → 通过
 - **AC-P2-7**：rust/TS 全部测试全绿 → 通过
 - **AC-P2-8**（S 项允许延期）：恢复会话后历史消息可见（不含跨 harness 通用方案可降级为提示行）→ 通过或延期记录
 
@@ -495,13 +490,11 @@ ainone-ui/
 - **AC-P4-2**：在一台**未装开发环境**的干净机器（每平台各一）安装 → 启动 → 完成 AC-P1-2/3 的等价操作 → 通过
 - **AC-P4-3**：应用切到后台，agent 完成长任务 → 收到系统通知；通知点击唤起窗口 → 通过
 - **AC-P4-4**：托盘菜单退出 → 全部子进程 2 秒内清理 → 通过
-- **AC-P4-6**：界面切换中文/英文 → 全 UI 无遗漏（构建时用脚本扫描硬编码字符串）→ 通过
+- **AC-P4-5**：界面切换中文/英文 → 全 UI 无遗漏（构建时用脚本扫描硬编码字符串）→ 通过
 - **AC-P4-7**：README 完整：安装、配置自定义适配器、故障排查 → 通过
 - **AC-P4-8**：全部测试绿 + 三平台 smoke 测试通过 → 通过
 
 ---
-
-#### 7.4.3 P4 完成后的用户能力
 
 #### 7.4.3 P4 完成后的用户能力
 
@@ -535,7 +528,7 @@ ainone-ui/
 | REQ-1-x | F-1-1…F-1-7  | P1     | AC-P1-1…11 |
 | REQ-2-x | F-2-1…F-2-5  | P2     | AC-P2-1…8  |
 | REQ-3-x | F-3-1…F-3-6  | P3     | AC-P3-1…7  |
-| REQ-4-x | F-4-1…F-4-5  | P4     | AC-P4-1…7  |
+| REQ-4-x | F-4-1…F-4-5  | P4     | AC-P4-1…8  |
 
 （需求组内编号见各期 §7.x.1；完整可追溯链：需求 → 功能项 F → 验收条目 AC → 测试证据，入 docs/acceptance/）
 
@@ -544,6 +537,7 @@ ainone-ui/
 ## 10. 术语表
 
 | 术语 | 定义 |
+| ---- | ---- |
 | 方言（dialect） | 一个 agent 私有 RPC 协议的报文格式（如 pi 的 rpc 模式） |
 | harness | coding agent 框架本体（OMP/Pi/Claude Code…），LLM 调用方 |
 | ACP | Agent Client Protocol，Zed+JetBrains 维护的编辑器↔agent 开放协议（JSON-RPC over stdio，v1） |
@@ -576,7 +570,6 @@ macOS 本机：rustup + Xcode CLT + Node 20+ + pnpm。cargo 镜像 rsproxy.cn、
 
 | 日期       | 版本 | 变更                                                        | 决策人        |
 | ---------- | ---- | ----------------------------------------------------------- | ------------- |
-| ---        | ---  | ---                                                         | ---           |
 | 2026-09-01 | v1.0 | 初版创建：定位、范围、架构、P0–P4 规格与验收标准、追溯矩阵 | 所有者+Claude |
 
 ---
