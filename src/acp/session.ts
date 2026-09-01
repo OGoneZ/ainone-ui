@@ -149,7 +149,7 @@ export async function openSession(
       } catch {
         /* ignore */
       }
-      await proc.child.kill().catch(() => {});
+      await invoke("agent_kill", { agentId: proc.agentId }).catch(() => {});
     },
   };
 }

@@ -3,22 +3,5 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "opener:default",
-    "shell:default",
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [
-        {
-          "name": "omp",
-          "cmd": "omp",
-          "args": true,
-          "sidecar": false
-        }
-      ]
-    },
-    "shell:allow-stdin-write",
-    "shell:allow-kill"
-  ]
+  "permissions": ["core:default", "opener:default", "shell:default"]
 }
