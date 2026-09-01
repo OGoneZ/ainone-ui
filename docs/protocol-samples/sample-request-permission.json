@@ -1,0 +1,49 @@
+{
+  "jsonrpc": "2.0",
+  "id": 0,
+  "method": "session/request_permission",
+  "params": {
+    "sessionId": "01a05d68-fb6e-7350-8d4a-3f33fc757cdd",
+    "toolCall": {
+      "toolCallId": "call_function_wc2ehpetvi0u_1",
+      "title": "mkdir -p /tmp/acp-spike2 && echo x > /tmp/acp-spike2/x.txt",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "command": "mkdir -p /tmp/acp-spike2 && echo x > /tmp/acp-spike2/x.txt"
+      },
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "$ mkdir -p /tmp/acp-spike2 && echo x > /tmp/acp-spike2/x.txt"
+          }
+        }
+      ],
+      "locations": []
+    },
+    "options": [
+      {
+        "optionId": "allow_once",
+        "name": "Allow once",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "allow_always",
+        "name": "Always allow",
+        "kind": "allow_always"
+      },
+      {
+        "optionId": "reject_once",
+        "name": "Reject",
+        "kind": "reject_once"
+      },
+      {
+        "optionId": "reject_always",
+        "name": "Always reject",
+        "kind": "reject_always"
+      }
+    ]
+  }
+}

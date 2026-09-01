@@ -1,0 +1,373 @@
+{
+  "dir": "A→C",
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "01a05d61-8787-710b-93d1-4a6c3f5e41b1",
+    "update": {
+      "sessionUpdate": "available_commands_update",
+      "availableCommands": [
+        {
+          "name": "security",
+          "description": "Plan, run, inspect, import, and compare OMP-native security scans",
+          "input": {
+            "hint": "<plan|scan|status|cancel|scans|show|import|export|validate|compare|disposition>"
+          }
+        },
+        {
+          "name": "model",
+          "description": "Show current model selection"
+        },
+        {
+          "name": "fast",
+          "description": "Toggle fast mode",
+          "input": {
+            "hint": "[on|off|status]"
+          }
+        },
+        {
+          "name": "extended-context",
+          "description": "Toggle extended context",
+          "input": {
+            "hint": "[on|off|status]"
+          }
+        },
+        {
+          "name": "computer",
+          "description": "Toggle computer use",
+          "input": {
+            "hint": "[on|off|status]"
+          }
+        },
+        {
+          "name": "vision",
+          "description": "Toggle vision delegation",
+          "input": {
+            "hint": "[on|off|auto|status]"
+          }
+        },
+        {
+          "name": "prewalk",
+          "description": "Prewalk at the next action"
+        },
+        {
+          "name": "advisor",
+          "description": "Toggle advisor",
+          "input": {
+            "hint": "[on|off|status|dump [raw]|configure]"
+          }
+        },
+        {
+          "name": "export",
+          "description": "Export session to HTML file",
+          "input": {
+            "hint": "[--themes] [path]"
+          }
+        },
+        {
+          "name": "trace",
+          "description": "Open this session's trace in the stats dashboard"
+        },
+        {
+          "name": "dump",
+          "description": "Return full transcript as plain text, with LLM request JSON path"
+        },
+        {
+          "name": "share",
+          "description": "Share session via an encrypted link (share server or secret gist)"
+        },
+        {
+          "name": "browser",
+          "description": "Toggle browser headless vs visible mode",
+          "input": {
+            "hint": "[headless|visible]"
+          }
+        },
+        {
+          "name": "todo",
+          "description": "Manage todos",
+          "input": {
+            "hint": "<subcommand>"
+          }
+        },
+        {
+          "name": "session",
+          "description": "Show or configure the current session",
+          "input": {
+            "hint": "[info|delete|pin [account]]"
+          }
+        },
+        {
+          "name": "jobs",
+          "description": "Show background jobs"
+        },
+        {
+          "name": "usage",
+          "description": "Show token usage",
+          "input": {
+            "hint": "[show|reset [account|active]]"
+          }
+        },
+        {
+          "name": "stats",
+          "description": "Launch the local stats dashboard",
+          "input": {
+            "hint": "[--port <port>] [--host <host>]"
+          }
+        },
+        {
+          "name": "changelog",
+          "description": "Show changelog",
+          "input": {
+            "hint": "[full]"
+          }
+        },
+        {
+          "name": "tools",
+          "description": "Show available tools"
+        },
+        {
+          "name": "context",
+          "description": "Show context usage"
+        },
+        {
+          "name": "mcp",
+          "description": "Manage MCP servers",
+          "input": {
+            "hint": "<subcommand>"
+          }
+        },
+        {
+          "name": "ssh",
+          "description": "Manage SSH connections",
+          "input": {
+            "hint": "<subcommand>"
+          }
+        },
+        {
+          "name": "fresh",
+          "description": "Reset provider stream state without changing the local transcript"
+        },
+        {
+          "name": "compact",
+          "description": "Compact the conversation",
+          "input": {
+            "hint": "[soft|remote|snapcompact] [focus]"
+          }
+        },
+        {
+          "name": "shake",
+          "description": "Shake heavy content out of the conversation context",
+          "input": {
+            "hint": "[elide|images|thinking]"
+          }
+        },
+        {
+          "name": "handoff",
+          "description": "Summarize the session into a handoff document and compact in place",
+          "input": {
+            "hint": "[focus instructions]"
+          }
+        },
+        {
+          "name": "pin",
+          "description": "Pin or unpin a session at the top of the resume list",
+          "input": {
+            "hint": "[session id]"
+          }
+        },
+        {
+          "name": "retry",
+          "description": "Retry the last failed agent turn"
+        },
+        {
+          "name": "memory",
+          "description": "Manage memory",
+          "input": {
+            "hint": "<subcommand>"
+          }
+        },
+        {
+          "name": "rename",
+          "description": "Rename the current session",
+          "input": {
+            "hint": "<title>"
+          }
+        },
+        {
+          "name": "move",
+          "description": "Move the current session to a different directory",
+          "input": {
+            "hint": "[<path>]"
+          }
+        },
+        {
+          "name": "add-dir",
+          "description": "Add a workspace directory to this session",
+          "input": {
+            "hint": "<path>"
+          }
+        },
+        {
+          "name": "remove-dir",
+          "description": "Remove a workspace directory from this session",
+          "input": {
+            "hint": "<path>"
+          }
+        },
+        {
+          "name": "dirs",
+          "description": "List this session's workspace directories"
+        },
+        {
+          "name": "marketplace",
+          "description": "Manage plugins from marketplaces",
+          "input": {
+            "hint": "<subcommand>"
+          }
+        },
+        {
+          "name": "plugins",
+          "description": "Manage plugins",
+          "input": {
+            "hint": "[list|enable|disable]"
+          }
+        },
+        {
+          "name": "reload-plugins",
+          "description": "Reload all plugins"
+        },
+        {
+          "name": "force",
+          "description": "Force next turn to use a specific tool",
+          "input": {
+            "hint": "<tool-name> [prompt]"
+          }
+        },
+        {
+          "name": "skill:codebase-to-course",
+          "description": "Turn any codebase into a beautiful, interactive single-page HTML course that teaches how the code works to non-technical people. Use this skill whenever someone wants to create an interactive course, tutorial, or educational walkthrough from a codebase or project. Also trigger when users mention 'turn this into a course,' 'explain this codebase interactively,' 'teach this code,' 'interactive tutorial from code,' 'codebase walkthrough,' 'learn from this codebase,' or 'make a course from this project.' This skill produces a stunning, self-contained HTML file with scroll-based navigation, animated visualizations, embedded quizzes, and code-with-plain-English side-by-side translations.",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "skill:gitlab",
+          "description": "GitLab、lejuhub 操作指南。覆盖 MR、Issue、Pipeline、CI 项目管理等常用操作。当用户需要与 GitLab 或 lejuhub（www.lejuhub.com，本质是自托管 GitLab 实例）交互时自动触发。",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "skill:neat-freak",
+          "description": "Knowledge and governance closeout: reconcile project docs, rule files (CLAUDE.md/AGENTS.md), authorized agent memory, and workspace residue with what the code and runtime actually do, so the next session or the next person starts from one current answer. Trigger when the user names \"neat-freak\", \"洁癖\", or \"/neat\" — and also on clear knowledge-closeout intent without the name: syncing or tidying project docs/rules/memory after development (\"把文档和记忆整理一下\", \"收尾时把文档同步掉\", \"docs 和代码对不上了\"), stale or conflicting CLAUDE.md/memory, a clean handoff to a teammate or a fresh session, or auditing whether workspace rules are actually followed. Do not trigger for pure coding/refactoring/debugging tasks, tidying data or prose (JSON, 周报, changelog announcements), or a bare \"整理\" with no project-knowledge context.",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "skill:robot-connect",
+          "description": "连接机器人。查看在线列表、SSH 登录下位机/上位机并执行命令。当用户提到\"连接机器人\"、\"连XX号\"时自动触发。",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "skill:tutor",
+          "description": "Interactive quiz tutor for Obsidian StudyVault learning. Use when the user wants to: (1) Take a diagnostic assessment of their knowledge, (2) Study or review specific sections/topics, (3) Drill weak areas identified in previous sessions, (4) Check their learning progress or dashboard, or says things like \"quiz me\", \"test me\", \"let's study\", \"/tutor\", \"학습\", \"퀴즈\", \"평가\".\n",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "skill:tutor-setup",
+          "description": "Transforms knowledge sources into an Obsidian StudyVault. Two modes: (1) Document Mode — PDF/text/web sources → study notes with practice questions. (2) Codebase Mode — source code project → onboarding vault for new developers. Mode is auto-detected based on project markers in CWD.\n",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "autoresearch",
+          "description": "Toggle builtin autoresearch mode, or pass off / clear, or a goal message.",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "green",
+          "description": "Generate a prompt to iterate on CI failures until the branch is green",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "review",
+          "description": "Launch interactive code review",
+          "input": {
+            "hint": "arguments"
+          }
+        },
+        {
+          "name": "commit",
+          "description": "生成 Conventional Commit 并提交 → 成功后展示 commit hash + 改动统计（文件数/行数增删）"
+        },
+        {
+          "name": "e2e-skill-test",
+          "description": "对指定 skill 启 QEMU VM 跑端到端测试（前置健康检查 → 启 VM → 配 mate-server → HTTP 发消息 → 三层验证 [skill 加载/脚本执行/状态识别] → 销毁 VM，session 保留）。已登记 chassis-check（11 变体）并沉淀执行踩坑（PATH/VM 名解析/消息历史聚合/workflow L3 ground-truth/变体前置检查）"
+        },
+        {
+          "name": "faraday-review",
+          "description": "以法拉第人格对当前分支改动做代码审查——怀疑一切、只信证据、追问因果"
+        },
+        {
+          "name": "inv-check",
+          "description": "扫描 carlos/softdev-department-stuff 开放 Issue，分析评论找出每个物品的当前保管人，输出已确认/未确认两类汇总。"
+        },
+        {
+          "name": "issue-creator",
+          "description": "在 lejuhub 创建 GitLab Issue，支持多仓库（qa/mate），先查询格式→写草稿文件→用户编辑确认→读文件创建"
+        },
+        {
+          "name": "kuavo-control",
+          "description": "SSH 到指定机器人，在 tmux 里启动/停止 kuavo 运控程序，远程触发起立"
+        },
+        {
+          "name": "learn",
+          "description": "引导式学习 —— 用苏格拉底提问教编程概念或技术话题"
+        },
+        {
+          "name": "mr-work",
+          "description": "总结当前分支已提交工作，推送并创建 MR；不在对话里复述总结"
+        },
+        {
+          "name": "scan-robot",
+          "description": "扫描局域网内在线机器人，连接并进行通用测试"
+        },
+        {
+          "name": "scenario-test",
+          "description": "为指定 Skill 设计并运行 Scenario 测试（端到端）"
+        },
+        {
+          "name": "scoremark",
+          "description": "对指定 MR 生成需求实现记录或 bug 修复记录并评论到该 MR，@code_bot 评分"
+        },
+        {
+          "name": "tech-case",
+          "description": "从与某人（或多人）的飞书聊天中整理今天的技术支持案例汇总，每人一个案例，合并到一份 markdown"
+        },
+        {
+          "name": "tech-send",
+          "description": "向技术支持排班当天人员发送自定义消息；也可手动指定姓名"
+        },
+        {
+          "name": "weekly-summary",
+          "description": "生成本周研发工时总结（从 GitLab wiki 拉取 KPI 数据，AI 总结为一行）"
+        },
+        {
+          "name": "init",
+          "description": "Generate AGENTS.md for current codebase"
+        }
+      ]
+    }
+  }
+}

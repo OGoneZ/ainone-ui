@@ -344,12 +344,37 @@ ainone-ui/
 
 **验收标准**（在干净环境执行，git tag `v0.0.1`）：
 
-- **AC-P0-1**：执行 `node tools/spike/acp-probe.js omp`，脚本以退出码 0 结束，stdout 含 `initialize` 响应且 `protocolVersion` 为 1 → 通过
-- **AC-P0-2**：同一运行中发送 prompt「say exactly: ACP-OK」，事件流中出现 `agent_message_chunk` 且最终拼出完整文本 `ACP-OK` → 通过
-- **AC-P0-3**：发送 prompt「在 /tmp/acp-spike 写文件 hi.txt 内容 hi」，收到 `session/request_permission` 请求（记录 options 结构）→ 通过
-- **AC-P0-4**：同一会话内触发 `fs/read_text_file` 或 `terminal/create` 至少各一次并记录报文 → 通过
-- **AC-P0-5**：`docs/protocol-samples/README.md` 列出每条样例的文件名、事件类型、触发命令 → 通过
-- **AC-P0-6**：`docs/plan.md` §7.0 末尾追加「P0 结论」小节，写明主接入 harness、启动命令、已知偏差 → 通过
+- **AC-P0-1**：执行 `ACP_ARGS="acp --model duo-king-6.6" node tools/spike/acp-probe.js`，脚本以退出码 0 结束，stdout 含 `initialize` 响应且 `protocolVersion` 为 1 → **已验证（2026-09-01）**
+- **AC-P0-2**：同一运行中发送 prompt「say exactly: ACP-OK」，事件流中出现 `agent_message_chunk` 且最终拼出完整文本 `ACP-OK` → **已验证**
+- **AC-P0-3**：`--approval-mode=always-ask` 下触发 `session/request_permission`，options 结构已存档（4 个选项，kind: allow_once/allow_always/reject_once/reject_always）→ **已验证**
+- **AC-P0-4**：同一会话内触发 `fs/read_text_file` 与 `fs/write_text_file` 各一次并记录报文；`terminal/*` 未观察到（omp 在进程内执行 bash，见 P0 结论第 4 条）→ **已验证（含偏差记录）**
+- **AC-P0-5**：`docs/protocol-samples/README.md` 列出每条样例的文件名、事件类型、触发命令 → **已验证**
+- **AC-P0-6**：本节「P0 结论」小节已追加 → **已验证**
+
+#### P0 结论（2026-09-01）
+
+**主接入 harness**：omp（Oh My Pi v18.1.0），原生 ACP 服务器模式。
+
+**启动命令**：
+
+```bash
+omp acp --model <model> [--approval-mode=always-ask]
+```
+
+**验证结论**：
+
+1. ✅ 协议链路全通：initialize（protocolVersion=1）→ session/new → session/prompt → 流式 session/update → request_permission → fs 读写回调，全部按 ACP v1 规范往返
+2. ✅ omp 原生 `omp acp` 子进程模式即标准 ACP 服务器，无需桥接器——P1 适配器配置零成本
+3. ⚠️ **权限响应格式踩坑**：必须返回 `{outcome:{outcome:'selected', optionId:<options 里的 optionId>}}`；返回非标准结构（如 `{outcome:'rejected'}`）会导致 agent 报 "unknown option ID: undefined"——P1 状态机必须按此实现
+4. ⚠️ **terminal/* 回调未出现**：omp 在自己进程内执行 bash（ACP client 的 terminal 能力未使用）。P1 的 `terminal/create` 等 Rust 代理降级为「按需实现、非阻塞验收项」；终端输出渲染从 `tool_call` 的 content 取
+5. ⚠️ **模型前置条件**：omp 需在 `~/.omp/agent/models.yml` 配置自定义 provider（本机为自建 OpenAI 兼容网关，api 取值 `openai-completions`）才能调用模型；默认环境变量 OPENAI_API_BASE 不会被透传为 baseUrl
+6. ✅ 消息流顺序已存档：`available_commands_update` → `session_info_update` → `agent_thought_chunk`×N → `tool_call` → `tool_call_update`×N → `agent_message_chunk`×N → `usage_update` → `session_info_update`
+
+**P1 修订项**（写入 P1 实现要点）：
+
+- 权限弹窗响应格式按踩坑记录第 3 条实现
+- `terminal/*` Rust 代理从 M 降级为 S（非阻塞验收项）
+- omp 适配器预置 `--approval-mode` 参数透传
 
 ---
 

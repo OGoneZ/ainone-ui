@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 0,
+  "method": "fs/read_text_file",
+  "params": {
+    "sessionId": "01a05d62-c137-7129-94bf-13f531b037c8",
+    "path": "/tmp/acp-spike/readme-src.txt"
+  }
+}

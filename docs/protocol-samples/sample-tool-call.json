@@ -1,0 +1,24 @@
+{
+  "dir": "A→C",
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "01a05d61-8787-710b-93d1-4a6c3f5e41b1",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "call_function_7fy9z8ulcz9b_1",
+      "title": "Create hi.txt in /tmp/acp-spike",
+      "kind": "edit",
+      "status": "pending",
+      "rawInput": {
+        "content": "hi",
+        "path": "/tmp/acp-spike/hi.txt"
+      },
+      "locations": [
+        {
+          "path": "/tmp/acp-spike/hi.txt"
+        }
+      ]
+    }
+  }
+}

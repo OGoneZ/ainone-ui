@@ -1,0 +1,11 @@
+{
+  "dir": "A→C",
+  "jsonrpc": "2.0",
+  "id": 0,
+  "method": "fs/write_text_file",
+  "params": {
+    "sessionId": "01a05d61-8787-710b-93d1-4a6c3f5e41b1",
+    "path": "/tmp/acp-spike/hi.txt",
+    "content": "hi"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "dir": "A→C",
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "01a05d61-8787-710b-93d1-4a6c3f5e41b1",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "ACP-OK"
+      },
+      "messageId": "f97b26e6-d543-4f5d-83ad-760cdc214919"
+    }
+  }
+}
