@@ -1,20 +1,12 @@
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openSession, type AcpSession } from "./acp/session";
+import { listAdapters, type AdapterWithStatus } from "./config/adapters";
 import "./App.css";
 
 type ChatMsg =
   | { role: "user"; text: string }
   | { role: "assistant"; text: string }
   | { role: "tool"; title: string; status: string };
-
-// 硬编码 omp 适配器（P0 已验证的默认值）
-const ADAPTER = {
-  id: "omp",
-  name: "Oh My Pi",
-  program: "omp",
-  args: ["acp", "--model", "duo-king-6.6"],
-  cwd: "/Users/zhubaoduo/dev/ainone-ui",
-};
 
 /** 把最后一条 assistant 消息置为指定文本；若末尾不是 assistant 则追加一条 */
 function upsertAssistant(messages: ChatMsg[], text: string): ChatMsg[] {
@@ -27,21 +19,34 @@ function upsertAssistant(messages: ChatMsg[], text: string): ChatMsg[] {
 }
 
 function App() {
+  const [adapters, setAdapters] = useState<AdapterWithStatus[]>([]);
+  const [adapterId, setAdapterId] = useState<string>("");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const sessionRef = useRef<AcpSession | null>(null);
   const toolMap = useRef(new Map<string, ChatMsg>());
+  // 权限决策的 resolve（存在 window 上，供弹窗按钮回调）
+  const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
+
+  // 加载适配器列表
+  useEffect(() => {
+    listAdapters().then((list) => {
+      setAdapters(list);
+      if (list.length > 0) setAdapterId((cur) => cur || list[0].id);
+    });
+  }, []);
+
+  const currentAdapter = adapters.find((a) => a.id === adapterId);
 
   async function ensureSession() {
     if (sessionRef.current) return sessionRef.current;
-    const s = await openSession(ADAPTER, async (params) => {
-      // 阻塞在权限审批弹窗，直到用户点「允许/拒绝」
+    if (!currentAdapter) throw new Error("未选择 harness");
+    const s = await openSession(currentAdapter, async (params) => {
       setPending(params.toolCall.title ?? "（无标题工具调用）");
       const decision = await new Promise<"allow" | "reject">((resolve) => {
-        (window as never as { __resolvePerm?: (d: "allow" | "reject") => void }).__resolvePerm =
-          resolve;
+        permResolver.current = resolve;
       });
       setPending(null);
       const target = params.options.find((o) =>
@@ -66,7 +71,6 @@ function App() {
     setMessages((m) => [...m, { role: "user", text }]);
     try {
       const session = await ensureSession();
-      // 本轮累积的 assistant 流式文本：每来一块就整体替换最后一条 assistant 消息
       let trailing = "";
       await session.prompt(text, (e) => {
         switch (e.type) {
@@ -96,7 +100,6 @@ function App() {
             trailing = "";
             break;
           default:
-            // agent_thought / error 等 P1 不渲染
             break;
         }
       });
@@ -112,20 +115,48 @@ function App() {
     try {
       await sessionRef.current?.cancel();
     } catch {
-      /* 忽略；可能 agent 已结束 */
+      /* ignore */
+    }
+  }
+
+  /** 切换 harness：销毁旧子进程并清空会话 */
+  async function switchAdapter(id: string) {
+    if (id === adapterId) return;
+    setAdapterId(id);
+    setMessages([]);
+    toolMap.current.clear();
+    if (sessionRef.current) {
+      await sessionRef.current.dispose().catch(() => {});
+      sessionRef.current = null;
     }
   }
 
   function onPerm(d: "allow" | "reject") {
-    (window as never as { __resolvePerm?: (d: "allow" | "reject") => void }).__resolvePerm?.(d);
+    permResolver.current?.(d);
+    permResolver.current = null;
   }
 
   return (
     <main className="container">
       <h1>ainone-ui · Agent in One</h1>
-      <p className="hint">
-        harness: {ADAPTER.name}（{ADAPTER.args.join(" ")}）
-      </p>
+      <div className="toolbar">
+        <label>
+          harness：
+          <select value={adapterId} onChange={(e) => switchAdapter(e.target.value)}>
+            {adapters.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.available ? "" : "（未安装）"}
+              </option>
+            ))}
+          </select>
+        </label>
+        {currentAdapter && (
+          <span className="hint">
+            {currentAdapter.program} {currentAdapter.args.join(" ")}
+          </span>
+        )}
+      </div>
 
       <div className="chat">
         {messages.map((m, i) =>
@@ -167,7 +198,7 @@ function App() {
           placeholder="给 agent 发消息…"
           disabled={busy}
         />
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || !currentAdapter}>
           {busy ? "运行中…" : "发送"}
         </button>
         <button type="button" onClick={stop} disabled={!busy}>

@@ -10,6 +10,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { invoke } from "@tauri-apps/api/core";
 import { spawnHarness } from "./bridge";
+import type { Adapter } from "../config/adapters";
 
 export type Outgoing =
   | { type: "agent_text"; text: string; messageId?: string | null }
@@ -18,8 +19,6 @@ export type Outgoing =
   | { type: "tool_update"; toolCallId: string; status?: string | null }
   | { type: "turn_stop"; stopReason: string }
   | { type: "error"; message: string };
-
-export type Adapter = { id: string; name: string; program: string; args: string[]; cwd: string };
 
 /** 权限请求被挂起时，交给 UI 决策；resolve 掉 SDK 就继续 */
 export type PermissionDecision = (
