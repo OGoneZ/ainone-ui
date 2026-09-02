@@ -46,6 +46,8 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
   const toolMap = useRef(new Map<string, ChatMsg>());
   const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
   const promptedOnce = useRef(false);
+  // steering：运行中打断时，待发消息暂存于此，当前 turn 结束后自动续跑
+  const pendingTextRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -86,63 +88,86 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
 
   async function submit() {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text) return;
     setInput("");
-    setBusy(true);
     setMessages((m) => [...m, { role: "user", text }]);
-    try {
-      const session = await ensureSession();
-      if (!promptedOnce.current) {
-        promptedOnce.current = true;
-        onFirstPrompt?.(text, session.sessionId);
-      }
-      let trailing = "";
-      let thought = "";
-      await session.prompt(text, (e) => {
-        switch (e.type) {
-          case "agent_text":
-            trailing += e.text;
-            setMessages((m) => upsertLast(m, { role: "assistant", text: trailing }));
-            break;
-          case "agent_thought":
-            thought += e.text;
-            setMessages((m) => upsertLast(m, { role: "thought", text: thought }));
-            break;
-          case "tool_call":
-            trailing = "";
-            thought = "";
-            const t: ChatMsg = {
-              role: "tool",
-              toolCallId: e.toolCallId,
-              title: e.title,
-              status: e.status ?? "pending",
-              content: e.content,
-            };
-            toolMap.current.set(e.toolCallId, t);
-            setMessages((m) => [...m, t]);
-            break;
-          case "tool_update": {
-            const prev = toolMap.current.get(e.toolCallId);
-            if (prev && prev.role === "tool") {
-              prev.status = e.status ?? prev.status;
-              if (e.content.length > 0) prev.content = e.content;
-              setMessages((m) => [...m]);
-            }
-            break;
-          }
-          case "turn_stop":
-            trailing = "";
-            thought = "";
-            break;
-          default:
-            break;
-        }
-      });
-    } catch (err) {
-      setMessages((m) => [...m, { role: "assistant", text: `⚠️ ${String(err)}` }]);
-    } finally {
-      setBusy(false);
+
+    // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
+    if (busy) {
+      await stop();
+      pendingTextRef.current = text;
+      return;
     }
+    await runPrompt(text);
+  }
+
+  const runRef = useRef<{ promise: Promise<void> } | null>(null);
+
+  async function runPrompt(text: string) {
+    setBusy(true);
+    const p = (async () => {
+      try {
+        const session = await ensureSession();
+        if (!promptedOnce.current) {
+          promptedOnce.current = true;
+          onFirstPrompt?.(text, session.sessionId);
+        }
+        let trailing = "";
+        let thought = "";
+        await session.prompt(text, (e) => {
+          switch (e.type) {
+            case "agent_text":
+              trailing += e.text;
+              setMessages((m) => upsertLast(m, { role: "assistant", text: trailing }));
+              break;
+            case "agent_thought":
+              thought += e.text;
+              setMessages((m) => upsertLast(m, { role: "thought", text: thought }));
+              break;
+            case "tool_call":
+              trailing = "";
+              thought = "";
+              const t: ChatMsg = {
+                role: "tool",
+                toolCallId: e.toolCallId,
+                title: e.title,
+                status: e.status ?? "pending",
+                content: e.content,
+              };
+              toolMap.current.set(e.toolCallId, t);
+              setMessages((m) => [...m, t]);
+              break;
+            case "tool_update": {
+              const prev = toolMap.current.get(e.toolCallId);
+              if (prev && prev.role === "tool") {
+                prev.status = e.status ?? prev.status;
+                if (e.content.length > 0) prev.content = e.content;
+                setMessages((m) => [...m]);
+              }
+              break;
+            }
+            case "turn_stop":
+              trailing = "";
+              thought = "";
+              break;
+            default:
+              break;
+          }
+        });
+      } catch (err) {
+        setMessages((m) => [...m, { role: "assistant", text: `⚠️ ${String(err)}` }]);
+      } finally {
+        setBusy(false);
+        runRef.current = null;
+        // steering 排队续跑
+        const queued = pendingTextRef.current;
+        pendingTextRef.current = null;
+        if (queued) {
+          void runPrompt(queued);
+        }
+      }
+    })();
+    runRef.current = { promise: p };
   }
 
   async function stop() {
@@ -215,11 +240,13 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
         <input
           value={input}
           onChange={(e) => setInput(e.currentTarget.value)}
-          placeholder={`给 ${adapter.name} 发消息…`}
-          disabled={busy || starting}
+          placeholder={
+            busy ? "运行中，输入将打断当前 turn…" : `给 ${adapter.name} 发消息…`
+          }
+          disabled={starting}
         />
-        <button type="submit" disabled={busy || starting}>
-          {starting ? "启动中…" : busy ? "运行中…" : "发送"}
+        <button type="submit" disabled={starting}>
+          {starting ? "启动中…" : busy ? "打断并发送" : "发送"}
         </button>
         <button type="button" onClick={stop} disabled={!busy}>
           停止
