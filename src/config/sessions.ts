@@ -34,3 +34,8 @@ export async function logRead(sessionId: string): Promise<string> {
 export async function logAppend(sessionId: string, lines: string[]): Promise<void> {
   await invoke("log_append", { sessionId, lines });
 }
+
+/** F-8-6 回溯：把会话日志截断到前 N 行（之后消息丢弃） */
+export async function logTruncate(sessionId: string, keepLines: number): Promise<void> {
+  await invoke("log_truncate", { sessionId, keepLines });
+}

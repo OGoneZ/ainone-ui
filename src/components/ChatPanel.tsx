@@ -13,12 +13,13 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
-import { logRead, logAppend } from "../config/sessions";
+import { logRead, logAppend, logTruncate } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
 import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
+import { truncateToMessageIndex } from "../acp/rewind";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
@@ -57,6 +58,8 @@ interface Props {
   onFirstPrompt?: (text: string, sessionId: string) => void;
   /** F-8-5 分叉：返回 (父 sessionId, 新 sessionId) 供 App 落索引 */
   onFork?: (fromSessionId: string, toSessionId: string) => void;
+  /** F-8-6 回溯：启用用户消息「回溯到这里」入口 */
+  onRewind?: (index: number) => void;
 }
 
 // F-7-6 打字机 placeholder：80ms/字循环打出；prefers-reduced-motion 直接显全文（AC-P7-6-1/6）
@@ -78,7 +81,7 @@ function useTypewriter(full: string): string {
   return full.slice(0, n);
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork }: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onRewind }: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -139,6 +142,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [files, setFiles] = useState<FileRef[]>([]);
   // F-8-3 拖拽悬停高亮
   const [dragging, setDragging] = useState(false);
+  // F-8-6 回溯：待确认的目标消息下标（null = 无）
+  const [rewindTarget, setRewindTarget] = useState<number | null>(null);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -343,6 +348,29 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
   }
 
+  // —— F-8-6 消息回溯：确认后截断消息列表 + 本地日志 ——
+  function askRewind(index: number) {
+    setRewindTarget(index);
+  }
+  async function doRewind() {
+    if (rewindTarget === null) return;
+    const target = rewindTarget;
+    setRewindTarget(null);
+    logger.warn("chat", "rewind", { toIndex: target, withFiles: false });
+    // 情况一（M）：只回上下文 —— 截 store 消息 + 截本地日志
+    const truncated = truncateToMessageIndex(messages, target);
+    useSessionStore.getState().setMessages(tabKey, truncated);
+    persistedRef.current = truncated.length;
+    const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+    if (sid) {
+      logTruncate(sid, truncated.length).catch(() => {});
+    }
+    // 断开当前子进程，下次 prompt 时重新 session/load 恢复（不丢已截断历史）
+    sessionRef.current?.dispose().catch(() => {});
+    sessionRef.current = null;
+    toast.success(`已回溯到第 ${target} 条之前`);
+  }
+
   // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
   function onSelectText(text: string, e?: React.MouseEvent) {
     setQuickSel(text);
@@ -507,6 +535,7 @@ function pickSlash(w: CommandWord) {
                   isLast={vi.index === messages.length - 1}
                   onSelect={onSelectText}
                   onFork={onFork ? doFork : undefined}
+                  onRewind={onRewind ? () => askRewind(vi.index) : undefined}
                 />
               </div>
             );
@@ -590,6 +619,21 @@ function pickSlash(w: CommandWord) {
             </DialogContent>
           </Dialog>
         )}
+        {/* F-8-6 回溯确认（破坏性操作，二次确认） */}
+        <Dialog open={rewindTarget !== null} onOpenChange={() => setRewindTarget(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>回溯到这里？</DialogTitle>
+            </DialogHeader>
+            <p className="perm-code">
+              将截断到第 {rewindTarget} 条消息之前，之后的消息与上下文都会被丢弃。此操作不可撤销。
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRewindTarget(null)}>取消</Button>
+              <Button variant="destructive" onClick={doRewind}>确认回溯</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="harness-badge inline-flex items-center gap-2">
@@ -780,6 +824,7 @@ function MessageLine({
   isLast,
   onSelect,
   onFork,
+  onRewind,
 }: {
   msg: ChatMsg;
   adapter: AdapterWithStatus;
@@ -787,13 +832,26 @@ function MessageLine({
   isLast: boolean;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
+  onRewind?: () => void;
 }) {
   if (msg.role === "user") {
     return (
-      <div className="flex justify-end my-1.5">
+      <div className="group flex justify-end my-1.5">
         <div className="user-bubble max-w-[75%] px-3.5 py-2.5" style={{ backgroundColor: "var(--message-user-bg)", color: "#fff", borderRadius: "var(--radius-lg)", borderBottomRightRadius: "4px" }}>
           <span className="whitespace-pre-wrap break-words">{msg.text}</span>
         </div>
+        {/* F-8-6 回溯：用户消息 hover 操作行（回溯到这里） */}
+        {onRewind && (
+          <button
+            type="button"
+            aria-label="回溯到这里"
+            className="ml-2 self-center rounded-md px-2 py-1 text-xs opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
+            style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+            onClick={onRewind}
+          >
+            ↩ 回溯
+          </button>
+        )}
       </div>
     );
   }

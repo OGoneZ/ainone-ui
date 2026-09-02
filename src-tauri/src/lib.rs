@@ -194,6 +194,7 @@ pub fn run() {
             sessions::sessions_remove,
             sessions::log_read,
             sessions::log_append,
+            sessions::log_truncate,
             workspaces::workspaces_list,
             workspaces::workspaces_upsert,
             workspaces::workspaces_remove,

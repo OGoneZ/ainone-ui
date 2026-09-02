@@ -362,6 +362,7 @@ function App() {
                 cwd={activeTab!.cwd}
                 onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text, activeTab!.workspaceId, activeTab!.cwd)}
                 onFork={(fromId, toId) => handleFork(fromId, toId, activeTab!.adapterId, activeTab!.workspaceId, activeTab!.cwd)}
+                onRewind={() => {}}
               />
             ) : (
               <EmptyState
