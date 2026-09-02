@@ -44,6 +44,22 @@ fn save_all(app: &tauri::AppHandle, entries: &[SessionEntry]) -> Result<(), Stri
     std::fs::write(sessions_path(app)?, json).map_err(|e| format!("写入会话索引失败: {e}"))
 }
 
+/// F-5-4 迁移匹配（纯函数）：按 cwd 规范化给会话找所属工作区 id。
+/// 返回 None = 未归组（cwd 为空或无匹配）。
+pub(crate) fn match_workspace(
+    session_cwd: &str,
+    workspaces: &[crate::workspaces::Workspace],
+) -> Option<String> {
+    if session_cwd.is_empty() {
+        return None;
+    }
+    let norm = crate::workspaces::normalize_path(session_cwd);
+    workspaces
+        .iter()
+        .find(|w| crate::workspaces::normalize_path(&w.cwd) == norm)
+        .map(|w| w.id.clone())
+}
+
 #[tauri::command]
 pub fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String> {
     let mut list = load_all(&app)?;
@@ -55,12 +71,8 @@ pub fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String>
             if e.workspace_id.is_some() {
                 continue;
             }
-            if e.cwd.is_empty() {
-                continue; // 无 cwd 信息 → 未归组
-            }
-            let norm = crate::workspaces::normalize_path(&e.cwd);
-            if let Some(w) = workspaces.iter().find(|w| crate::workspaces::normalize_path(&w.cwd) == norm) {
-                e.workspace_id = Some(w.id.clone());
+            if let Some(wid) = match_workspace(&e.cwd, &workspaces) {
+                e.workspace_id = Some(wid);
                 changed = true;
             }
         }
@@ -145,4 +157,33 @@ pub fn log_append(app: tauri::AppHandle, session_id: String, lines: Vec<String>)
         writeln!(file, "{}", line).map_err(|e| format!("追加会话日志失败: {e}"))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::match_workspace;
+    use crate::workspaces::Workspace;
+
+    fn ws(id: &str, cwd: &str) -> Workspace {
+        Workspace { id: id.into(), name: id.into(), cwd: cwd.into(), created_ms: 1 }
+    }
+
+    #[test]
+    fn match_workspace_hits_normalized_cwd() {
+        let ws_list = vec![ws("w1", "/a/b")];
+        assert_eq!(match_workspace("/a/b", &ws_list), Some("w1".into()));
+        assert_eq!(match_workspace("/a/b/", &ws_list), Some("w1".into())); // 尾斜杠
+    }
+
+    #[test]
+    fn match_workspace_miss_returns_none() {
+        let ws_list = vec![ws("w1", "/a/b")];
+        assert_eq!(match_workspace("/a/c", &ws_list), None);
+    }
+
+    #[test]
+    fn match_workspace_empty_cwd_returns_none() {
+        let ws_list = vec![ws("w1", "/a/b")];
+        assert_eq!(match_workspace("", &ws_list), None);
+    }
 }
