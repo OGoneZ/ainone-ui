@@ -11,11 +11,21 @@
 
 import * as acp from "@agentclientprotocol/sdk";
 
+export type DiffContent = { path: string; oldText?: string | null; newText: string };
+export type TerminalContent = { terminalId: string };
+export type TextContent = { text: string };
+
+/** 工具调用的三类内容（ACP ToolCallContent）：文本 / diff / terminal */
+export type ToolContent =
+  | { kind: "text"; text: string }
+  | { kind: "diff"; diff: DiffContent }
+  | { kind: "terminal"; terminal: TerminalContent };
+
 export type Outgoing =
   | { type: "agent_text"; text: string }
   | { type: "agent_thought"; text: string }
-  | { type: "tool_call"; toolCallId: string; title: string; status?: string | null }
-  | { type: "tool_update"; toolCallId: string; status?: string | null }
+  | { type: "tool_call"; toolCallId: string; title: string; status?: string | null; content: ToolContent[] }
+  | { type: "tool_update"; toolCallId: string; status?: string | null; content: ToolContent[] }
   | { type: "turn_stop"; stopReason: string }
   | { type: "error"; message: string };
 
@@ -175,6 +185,7 @@ function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgoing) =>
         toolCallId: u.update.toolCallId,
         title: u.update.title,
         status: u.update.status ?? null,
+        content: toToolContent(u.update.content),
       });
       break;
     case "tool_call_update":
@@ -182,9 +193,31 @@ function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgoing) =>
         type: "tool_update",
         toolCallId: u.update.toolCallId,
         status: u.update.status ?? null,
+        content: toToolContent(u.update.content),
       });
       break;
     default:
       break;
   }
+}
+
+function toToolContent(content: acp.ToolCallContent[] | null | undefined): ToolContent[] {
+  if (!content) return [];
+  const out: ToolContent[] = [];
+  for (const c of content) {
+    switch (c.type) {
+      case "content":
+        if (c.content.type === "text") out.push({ kind: "text", text: c.content.text });
+        break;
+      case "diff":
+        out.push({ kind: "diff", diff: { path: c.path, oldText: c.oldText, newText: c.newText } });
+        break;
+      case "terminal":
+        out.push({ kind: "terminal", terminal: { terminalId: c.terminalId } });
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
 }

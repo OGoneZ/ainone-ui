@@ -290,22 +290,6 @@ h1 {
   color: #2e7d32;
 }
 
-.tool {
-  font-size: 0.85em;
-  color: #7a5c00;
-  background: #fff8e1;
-  border-radius: 6px;
-  padding: 6px 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tool .status {
-  margin-left: 8px;
-  color: #b8832c;
-  font-size: 0.8em;
-}
 
 .perm {
   background: #fdecea;
@@ -378,13 +362,180 @@ button:hover:not(:disabled) {
     border-color: #3a3a3a;
   }
 
-  .tool {
-    background: #3a3120;
-    color: #e8c66b;
-  }
 
   .perm {
     background: #3a2424;
     border-color: #6b3a3a;
   }
+}
+
+
+/* P3 Markdown 渲染 */
+.md {
+  text-align: left;
+}
+
+.md p {
+  margin: 0.4em 0;
+}
+
+.md pre {
+  background: #f6f8fa;
+  border-radius: 6px;
+  padding: 10px;
+  overflow-x: auto;
+  font-size: 0.85em;
+}
+
+.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.md pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.md ul, .md ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+
+.md blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid #ccc;
+  color: #666;
+}
+
+.md table {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+
+.md th, .md td {
+  border: 1px solid #ddd;
+  padding: 4px 8px;
+  font-size: 0.9em;
+}
+
+/* thinking 折叠 */
+.thought {
+  color: #999;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  border-left: 2px solid #ddd;
+  padding-left: 8px;
+  margin: 4px 0;
+}
+
+.thought-toggle {
+  font-size: 0.8em;
+  color: #666;
+  background: transparent;
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+/* 工具调用折叠 */
+.tool {
+  border: 1px solid #eee;
+  border-radius: 6px;
+}
+
+.tool-head {
+  cursor: pointer;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  color: #7a5c00;
+  background: #fff8e1;
+}
+
+.tool-head .status {
+  margin-left: auto;
+  color: #b8832c;
+  font-size: 0.8em;
+}
+
+.tool-body {
+  padding: 8px;
+  background: #fafafa;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tool-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.8em;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.tool-terminal {
+  font-size: 0.85em;
+  color: #666;
+}
+
+/* diff 视图 */
+.diff {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.diff-path {
+  background: #f0f0f0;
+  padding: 4px 8px;
+  font-weight: 600;
+}
+
+.diff-line {
+  display: flex;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-line.del {
+  background: #ffeef0;
+  color: #c62828;
+}
+
+.diff-line.add {
+  background: #e6ffec;
+  color: #2e7d32;
+}
+
+.diff-line.ctx {
+  color: #555;
+}
+
+.diff-sign {
+  width: 1.2em;
+  flex-shrink: 0;
+  text-align: center;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .md pre { background: #282c34; }
+  .md code { color: #e6e6e6; }
+  .md blockquote { border-left-color: #555; color: #999; }
+  .md th, .md td { border-color: #444; }
+  .tool-head { background: #3a3120; color: #e8c66b; }
+  .tool-body { background: #1f1f1f; }
+  .diff-line.del { background: #3a2424; color: #f5a8a8; }
+  .diff-line.add { background: #1f3a29; color: #9fd6a9; }
+  .diff-line.ctx { color: #aaa; }
+  .diff-path { background: #292929; }
 }

@@ -9,6 +9,7 @@ import { createAcpSession } from "../../src/acp/session-core";
 
 const CWD = path.resolve("/Users/zhubaoduo/dev/ainone-ui");
 const child = spawn("pi-acp", [], { cwd: CWD, stdio: ["pipe", "pipe", "inherit"] });
+child.stdin?.on("error", () => {});
 
 const session = await createAcpSession({
   streams: {
