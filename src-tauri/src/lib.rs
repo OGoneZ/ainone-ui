@@ -21,15 +21,23 @@ static NEXT_AGENT_ID: AtomicU64 = AtomicU64::new(1);
 
 #[tauri::command]
 fn fd_read(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("读取失败 {}: {}", path, e))
+    let r = std::fs::read_to_string(&path);
+    r.map_err(|e| {
+        log::warn!("[fs_read] 读取失败 {path}: {e}");
+        format!("读取失败 {}: {}", path, e)
+    })
 }
 
 #[tauri::command]
 fn fd_write(path: String, content: String) -> Result<(), String> {
+    log::debug!("[fs_write] 写入 {path}（{} 字节）", content.len());
     if let Some(parent) = std::path::Path::new(&path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
     }
-    std::fs::write(&path, content).map_err(|e| format!("写入失败 {}: {}", path, e))
+    std::fs::write(&path, content).map_err(|e| {
+        log::warn!("[fs_write] 写入失败 {path}: {e}");
+        format!("写入失败 {}: {}", path, e)
+    })
 }
 
 /// 返回给 harness 子进程的基础环境。
@@ -91,7 +99,10 @@ fn agent_kill(app: AppHandle, agent_id: u64) -> Result<(), String> {
     let state: State<'_, agent::AgentStore> = app.state();
     let mut map = state.0.lock().map_err(|_| "进程表锁中毒".to_string())?;
     if let Some(child) = map.remove(&agent_id) {
+        log::info!("[agent:{agent_id}] 主动 kill");
         let _ = child.kill();
+    } else {
+        log::warn!("[agent:{agent_id}] kill 请求命中不存在的 agentId");
     }
     Ok(())
 }
@@ -114,12 +125,29 @@ fn abs_path(path: String) -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 日志：stdout（dev 终端）+ 日志目录（macOS ~/Library/Logs/com.zhubaoduo.ainone-ui/）
+    // 到达 1MB 轮转并保留全部（KeepAll），级别过滤到 WARN 以上可用 level_for 单独调。
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("ainone-ui".into()),
+                    }),
+                ])
+                .max_file_size(1_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .setup(|app| {
             agent::init_state(app);
+            log::info!("ainone-ui 启动完成");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

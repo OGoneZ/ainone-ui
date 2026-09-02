@@ -1,8 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { attach, installConsoleForward } from "./lib/logger";
 import "./index.css"; // Tailwind v4 + 设计令牌层（P7 F-7-1/F-7-2）
-import "highlight.js/styles/github.css"; // F-7-10 会改为随 data-theme 切换双主题
+import "highlight.js/styles/github.css"; // F-7-10 深色覆盖见 index.css
+
+// 尽早接入日志：前端 console 转发到 log 插件（与 Rust 同文件落盘）+ Rust 日志灌入 devtools
+void attach();
+installConsoleForward();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

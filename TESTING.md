@@ -18,6 +18,36 @@
 
 ---
 
+## 1.1 日志体系（定位问题的入口）
+
+**位置**：
+
+- **前端日志**：统一走 `src/lib/logger.ts` 的 `logger`（`trace/debug/info/warn/error`），不要直接用 `console.*`。
+  `main.tsx` 已 `installConsoleForward()`——即使散落的 `console.*` 也会被转发进日志文件。
+- **Rust 日志**：`log::info!/warn!/error!`（`tauri-plugin-log`）。
+- **落盘文件**（三平台）：
+
+```text
+macOS   ~/Library/Logs/com.zhubaoduo.ainone-ui/ainone-ui.log
+Linux   ~/.local/share/com.zhubaoduo.ainone-ui/logs/ainone-ui.log
+Windows %LOCALAPPDATA%/com.zhubaoduo.ainone-ui/logs/ainone-ui.log
+```
+
+- 1MB 轮转、KeepAll 保留、本地时区；dev 下同时打到 stdout 与浏览器控制台。
+
+**当前埋点覆盖的关键链路**：
+
+| 层 | 埋点 |
+|---|---|
+| Rust | 启动、agent spawn/kill/退出/进程错误、fs_read/fs_write、sessions/workspaces 索引损坏 |
+| 前端 bridge | spawn 成功、进程错误、进程退出 |
+| 前端 session | openSession、session/new、session/load、session/prompt 起止、session/cancel、dispose |
+| 前端 chat | prompt 失败（含 error 汇总）|
+
+**定位套路**：报错时先看日志文件里的 `[session]`/`[acp]`/`[agent]` 前缀，按时间轴串起来：spawn → initialize → new/load → prompt 起止 → 进程退出。前端 `[chat] prompt 失败` 与 Rust `[agent]` 进程错误通常是同一条故障链。
+
+---
+
 ## 2. 为什么这么分层
 
 - **纯函数层是地基**：协议解析、消息序列化、turn 累加、状态推导、去重、slash 过滤、路径规范化……凡是「输入确定 → 输出确定」的，全抽纯函数 + node 单测。快（几十 ms）、稳、可穷举边界。

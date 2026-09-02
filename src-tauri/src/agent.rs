@@ -37,6 +37,7 @@ pub fn spawn_inner(
     args: &[String],
     cwd: &str,
 ) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
+    log::info!("[agent:{agent_id}] spawn {program} {:?} cwd={cwd}", args);
     let mut cmd = app.shell().command(program).args(args).set_raw_out(true);
     if !cwd.is_empty() {
         cmd = cmd.current_dir(cwd);
@@ -60,11 +61,18 @@ pub fn pump_events(
             let js = match event {
                 CommandEvent::Stdout(b) => AgentEvent::Stdout(b),
                 CommandEvent::Stderr(b) => AgentEvent::Stderr(b),
-                CommandEvent::Error(e) => AgentEvent::Error(e),
-                CommandEvent::Terminated(p) => AgentEvent::Terminated { code: p.code },
+                CommandEvent::Error(e) => {
+                    log::warn!("[agent] 进程错误: {e}");
+                    AgentEvent::Error(e)
+                }
+                CommandEvent::Terminated(p) => {
+                    log::info!("[agent] 进程退出 code={:?}", p.code);
+                    AgentEvent::Terminated { code: p.code }
+                }
                 _ => continue,
             };
             if on_event.send(js).is_err() {
+                log::warn!("[agent] 前端 channel 已断开，停止转发事件");
                 break;
             }
         }

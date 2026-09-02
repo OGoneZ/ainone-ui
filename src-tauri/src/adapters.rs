@@ -89,7 +89,10 @@ pub fn adapters_list(app: tauri::AppHandle) -> Result<Vec<Adapter>, String> {
     }
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取适配器配置失败: {e}"))?;
     let mut list: Vec<Adapter> =
-        serde_json::from_str(&raw).map_err(|e| format!("适配器配置解析失败（JSON 损坏）: {e}"))?;
+        serde_json::from_str(&raw).map_err(|e| {
+            log::warn!("[adapters] 配置 JSON 损坏: {e}");
+            format!("适配器配置解析失败（JSON 损坏）: {e}")
+        })?;
     // 轻量迁移：旧配置（v0.3.x）无 logo 字段，预设 adapter 缺 logo 时用 defaults 补齐
     for preset in defaults() {
         if let Some(e) = list.iter_mut().find(|e| e.id == preset.id) {
@@ -98,6 +101,7 @@ pub fn adapters_list(app: tauri::AppHandle) -> Result<Vec<Adapter>, String> {
             }
         }
     }
+    log::debug!("[adapters] 读取 {} 条适配器", list.len());
     Ok(list)
 }
 

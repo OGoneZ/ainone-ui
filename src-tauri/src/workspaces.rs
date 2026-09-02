@@ -31,7 +31,10 @@ fn load_all(app: &tauri::AppHandle) -> Result<Vec<Workspace>, String> {
         return Ok(Vec::new());
     }
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取工作区索引失败: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("工作区索引解析失败: {e}"))
+    serde_json::from_str(&raw).map_err(|e| {
+        log::warn!("[workspaces] 索引 JSON 损坏: {e}");
+        format!("工作区索引解析失败: {e}")
+    })
 }
 
 /// 供 sessions.rs 迁移复用的工作区加载（读时迁移需要匹配 cwd）
