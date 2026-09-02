@@ -18,11 +18,12 @@ interface EditableAdapter {
   program: string;
   argsText: string; // 每行一个参数
   cwd: string;
+  logo: string; // 编辑态为空串；保存时转 null
   available: boolean | null; // null = 探测中
 }
 
 function toEditable(a: Adapter): EditableAdapter {
-  return { ...a, argsText: a.args.join("\n"), available: null };
+  return { ...a, argsText: a.args.join("\n"), logo: a.logo ?? "", available: null };
 }
 
 function fromEditable(a: EditableAdapter): Adapter {
@@ -32,6 +33,7 @@ function fromEditable(a: EditableAdapter): Adapter {
     program: a.program,
     args: a.argsText.split("\n").map((s) => s.trim()).filter(Boolean),
     cwd: a.cwd,
+    logo: a.logo.trim() || null,
   };
 }
 
@@ -71,7 +73,7 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
     const id = `custom-${Date.now()}`;
     setItems((prev) => [
       ...prev,
-      { id, name: "自定义 harness", program: "", argsText: "", cwd: ".", available: null },
+      { id, name: "自定义 harness", program: "", argsText: "", cwd: ".", logo: "", available: null },
     ]);
   }
 
@@ -128,6 +130,11 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
                 placeholder="cwd"
                 value={a.cwd}
                 onChange={(e) => update(a.id, { cwd: e.target.value })}
+              />
+              <input
+                placeholder="logo 色 (#rrggbb)"
+                value={a.logo}
+                onChange={(e) => update(a.id, { logo: e.target.value })}
               />
               <textarea
                 placeholder={'启动参数（每行一个）\n例如：\nacp\n--model\nopus'}

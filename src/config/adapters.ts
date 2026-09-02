@@ -8,6 +8,8 @@ export interface Adapter {
   program: string;
   args: string[];
   cwd: string;
+  /** 头像品牌色（hex），缺失用首字母灰色占位（F-4-1） */
+  logo: string | null;
 }
 
 export interface AdapterWithStatus extends Adapter {

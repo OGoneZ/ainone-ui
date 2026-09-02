@@ -17,6 +17,9 @@ pub struct Adapter {
     pub args: Vec<String>,
     /// 默认工作目录占位（真实 cwd 由前端在会话创建时覆盖为会话目录）
     pub cwd: String,
+    /// 头像品牌色（hex，如 "#7c3aed"）。None = 用灰色首字母占位（plan-v2 F-4-1）
+    #[serde(default)]
+    pub logo: Option<String>,
 }
 
 /// 预置适配器：OMP / Pi / Claude Code / OpenCode。
@@ -29,6 +32,7 @@ pub fn defaults() -> Vec<Adapter> {
             program: "omp".into(),
             args: vec!["acp".into(), "--model".into(), "duo-king-6.6".into()],
             cwd: ".".into(),
+            logo: Some("#7c3aed".into()),
         },
         Adapter {
             id: "pi".into(),
@@ -36,6 +40,7 @@ pub fn defaults() -> Vec<Adapter> {
             program: "pi-acp".into(),
             args: Vec::new(),
             cwd: ".".into(),
+            logo: Some("#2563eb".into()),
         },
         Adapter {
             id: "claude-code".into(),
@@ -43,6 +48,7 @@ pub fn defaults() -> Vec<Adapter> {
             program: "claude-agent-acp".into(),
             args: Vec::new(),
             cwd: ".".into(),
+            logo: Some("#d97706".into()),
         },
         Adapter {
             id: "codex".into(),
@@ -50,6 +56,7 @@ pub fn defaults() -> Vec<Adapter> {
             program: "codex-acp".into(),
             args: Vec::new(),
             cwd: ".".into(),
+            logo: Some("#16a34a".into()),
         },
         Adapter {
             id: "opencode".into(),
@@ -57,6 +64,7 @@ pub fn defaults() -> Vec<Adapter> {
             program: "opencode".into(),
             args: vec!["acp".into()],
             cwd: ".".into(),
+            logo: Some("#dc2626".into()),
         },
     ]
 }
@@ -80,7 +88,17 @@ pub fn adapters_list(app: tauri::AppHandle) -> Result<Vec<Adapter>, String> {
         return Ok(d);
     }
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取适配器配置失败: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("适配器配置解析失败（JSON 损坏）: {e}"))
+    let mut list: Vec<Adapter> =
+        serde_json::from_str(&raw).map_err(|e| format!("适配器配置解析失败（JSON 损坏）: {e}"))?;
+    // 轻量迁移：旧配置（v0.3.x）无 logo 字段，预设 adapter 缺 logo 时用 defaults 补齐
+    for preset in defaults() {
+        if let Some(e) = list.iter_mut().find(|e| e.id == preset.id) {
+            if e.logo.is_none() {
+                e.logo = preset.logo;
+            }
+        }
+    }
+    Ok(list)
 }
 
 /// 覆盖保存全部适配器。
