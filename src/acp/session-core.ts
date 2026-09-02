@@ -44,6 +44,8 @@ export interface SessionIpc {
   fsRead(path: string): Promise<string>;
   fsWrite(path: string, content: string): Promise<void>;
   kill(): Promise<void>;
+  /** 空闲超时回收（P8 F-8-1）：带最后活动时间 kill；缺省回退到 kill */
+  recycle?(lastActivityMs: number): Promise<void>;
 }
 
 export interface Streams {
@@ -56,6 +58,8 @@ export interface AcpSession {
   sessionId: string;
   prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
   cancel(): Promise<void>;
+  /** 空闲超时回收：关闭连接 + kill 子进程（区别于 dispose 的常规清理） */
+  recycle(lastActivityMs: number): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -178,6 +182,17 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     cancel() {
       console.info("[acp] session/cancel sessionId=", sessionId);
       return connection.agent.notify(acp.methods.agent.session.cancel, { sessionId });
+    },
+    /** 空闲超时回收（P8 F-8-1）：关闭连接 + 带活动时间 kill 子进程 */
+    async recycle(lastActivityMs) {
+      console.info("[acp] 空闲回收关闭连接 sessionId=", sessionId);
+      try {
+        connection.close();
+      } catch {
+        /* ignore */
+      }
+      if (ipc.recycle) await ipc.recycle(lastActivityMs).catch(() => {});
+      else await ipc.kill().catch(() => {});
     },
     async dispose() {
       console.info("[acp] dispose sessionId=", sessionId);

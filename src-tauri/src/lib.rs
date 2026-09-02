@@ -107,6 +107,31 @@ fn agent_kill(app: AppHandle, agent_id: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// 空闲超时回收（P8 F-8-1）：kill 并带最后活动时间留痕。
+#[tauri::command]
+fn agent_kill_idle(app: AppHandle, agent_id: u64, last_activity_ms: f64) -> Result<(), String> {
+    let state: State<'_, agent::AgentStore> = app.state();
+    let mut map = state.0.lock().map_err(|_| "进程表锁中毒".to_string())?;
+    if let Some(child) = map.remove(&agent_id) {
+        log::info!(
+            "[agent:{agent_id}] 空闲超时回收（最后活动 {} ms 前）",
+            now_ms() - last_activity_ms
+        );
+        let _ = child.kill();
+    } else {
+        log::warn!("[agent:{agent_id}] 空闲回收命中不存在的 agentId");
+    }
+    Ok(())
+}
+
+/// 当前 Unix 毫秒时间戳（回收留痕用）。
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0)
+}
+
 /// 把可能是相对的路径解析成绝对路径（ACP 要求 cwd 为绝对路径）。
 #[tauri::command]
 fn abs_path(path: String) -> Result<String, String> {
@@ -161,6 +186,7 @@ pub fn run() {
             agent_spawn,
             agent_stdin_write,
             agent_kill,
+            agent_kill_idle,
             abs_path,
             sessions::sessions_list,
             sessions::sessions_upsert,

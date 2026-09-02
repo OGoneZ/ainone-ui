@@ -18,6 +18,7 @@ import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
+import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
 import {
   useSessionStore,
@@ -114,6 +115,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const turnRef = useRef(newTurn());
   // 已落盘的消息条数（JSONL 日志增量追加的游标）
   const persistedRef = useRef(0);
+  // F-8-1 空闲回收：最近一次交互时间戳（prompt 发起时刷新）+ 定时器句柄
+  const lastActivityRef = useRef(0);
+  const recycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -131,7 +135,20 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         })
         .catch(() => setHistoryDegraded(true));
     }
+    // F-8-1 空闲超时回收：周期检查，空闲超阈值且无运行中 turn → 回收子进程
+    recycleTimerRef.current = setInterval(() => {
+      const s = sessionRef.current;
+      if (!s) return;
+      // 读 store 快照的 busy（闭包里的 busy 是挂载时的旧值）
+      const isBusy = useSessionStore.getState().runtime[tabKey]?.busy ?? false;
+      if (shouldRecycleSession(lastActivityRef.current, Date.now(), RECYCLE_THRESHOLD_MS, isBusy)) {
+        sessionRef.current = null;
+        logger.info("session", "reopen after recycle", { sessionId: s.sessionId });
+        void s.recycle(lastActivityRef.current).catch(() => {});
+      }
+    }, 15_000);
     return () => {
+      if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
       sessionRef.current?.dispose().catch(() => {});
       drop(tabKey);
     };
@@ -208,6 +225,8 @@ function pickSlash(w: CommandWord) {
   const runRef = useRef<{ promise: Promise<void> } | null>(null);
 
   async function runPrompt(text: string) {
+    // F-8-1：刷新最近交互时间戳（回收判定的数据源）
+    lastActivityRef.current = Date.now();
     patch(tabKey, { busy: true });
     turnRef.current = newTurn();
     const p = (async () => {
