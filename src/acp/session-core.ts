@@ -27,7 +27,14 @@ export type Outgoing =
   | { type: "tool_call"; toolCallId: string; title: string; status?: string | null; content: ToolContent[] }
   | { type: "tool_update"; toolCallId: string; status?: string | null; content: ToolContent[] }
   | { type: "turn_stop"; stopReason: string }
+  | { type: "available_commands"; commands: CommandWord[] }
   | { type: "error"; message: string };
+
+export interface CommandWord {
+  name: string;
+  description: string;
+  hint?: string;
+}
 
 export type PermissionDecision = (
   params: acp.RequestPermissionRequest,
@@ -58,10 +65,12 @@ export interface OpenOptions {
   onPermission: PermissionDecision;
   ipc: SessionIpc;
   resumeSessionId?: string;
+  /** 收到 available_commands_update 通知时回调（F-4-7 slash 补全数据源） */
+  onCommands?: (words: CommandWord[]) => void;
 }
 
 export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
-  const { streams, cwd, onPermission, ipc, resumeSessionId } = opts;
+  const { streams, cwd, onPermission, ipc, resumeSessionId, onCommands } = opts;
 
   // —— update 队列：onNotification 塞入，prompt 内消费 ——
   let boundSessionId = "";
@@ -94,7 +103,15 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
       await ipc.fsWrite(ctx.params.path, ctx.params.content);
       return {};
     })
-    .onNotification(acp.methods.client.session.update, (ctx) => enqueue(ctx.params));
+    .onNotification(acp.methods.client.session.update, (ctx) => {
+      const u = ctx.params;
+      // available_commands_update 与 turn 内容无关（F-4-7）：不进队列，直接回调
+      if (u.update.sessionUpdate === "available_commands_update") {
+        onCommands?.(u.update.availableCommands.map(toCommandWord));
+        return;
+      }
+      enqueue(u);
+    });
 
   const stream = acp.ndJsonStream(streams.stdin, streams.stdout);
   const connection = app.connect(stream);
@@ -199,6 +216,14 @@ function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgoing) =>
     default:
       break;
   }
+}
+
+function toCommandWord(c: acp.AvailableCommand): CommandWord {
+  return {
+    name: c.name,
+    description: c.description,
+    hint: c.input?.hint,
+  };
 }
 
 function toToolContent(content: acp.ToolCallContent[] | null | undefined): ToolContent[] {

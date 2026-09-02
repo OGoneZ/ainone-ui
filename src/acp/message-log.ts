@@ -6,14 +6,16 @@
 //   - 本地日志是「单一真源」：恢复会话 = session/load（agent 上下文）+ 读日志回填 UI
 //   - fs 操作经 LogStore 注入，本模块只做纯逻辑，vitest 直接覆盖
 //
-// 注意：ToolContent 来自 session-core，为保持日志层零 ACP 依赖，这里接受
-//   unknown 内容并在 normalize 后透传，不在此层理解 ToolContent 结构。
+// 注意：ToolContent 来自 session-core（type-only，不引入运行时依赖）；本模块只做
+//   序列化/解析纯逻辑，vitest 直接覆盖。
+
+import type { ToolContent } from "./session-core";
 
 export type ChatMsg =
   | { role: "user"; text: string }
   | { role: "assistant"; text: string }
   | { role: "thought"; text: string }
-  | { role: "tool"; toolCallId: string; title: string; status: string; content: unknown[] };
+  | { role: "tool"; toolCallId: string; title: string; status: string; content: ToolContent[] };
 
 export interface LogStore {
   /** 读回当前日志全量文本（可能为空串） */

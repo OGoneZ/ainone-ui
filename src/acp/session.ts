@@ -6,7 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { spawnHarness } from "./bridge";
-import { createAcpSession, type AcpSession, type PermissionDecision } from "./session-core";
+import { createAcpSession, type AcpSession, type CommandWord, type PermissionDecision } from "./session-core";
 import type { Adapter } from "../config/adapters";
 
 export type { AcpSession, PermissionDecision, Outgoing } from "./session-core";
@@ -15,6 +15,7 @@ export async function openSession(
   adapter: Adapter,
   onPermission: PermissionDecision,
   resumeSessionId?: string,
+  onCommands?: (words: CommandWord[]) => void,
 ): Promise<AcpSession> {
   const cwd = await invoke<string>("abs_path", { path: adapter.cwd }).catch(() => adapter.cwd);
   const proc = await spawnHarness(adapter.program, adapter.args, cwd);
@@ -24,6 +25,7 @@ export async function openSession(
     cwd,
     onPermission,
     resumeSessionId,
+    onCommands,
     ipc: {
       fsRead: (path) => invoke<string>("fd_read", { path }),
       fsWrite: (path, content) => invoke("fd_write", { path, content }),
