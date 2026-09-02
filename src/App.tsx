@@ -141,6 +141,19 @@ function App() {
     sessionsRemove(id).then(reloadHistory);
   }
 
+  // F-8-5 分叉：新 sessionId 落索引（标题标「从 XX 分叉」，与父会话同工作区/目录）
+  function handleFork(fromSessionId: string, toSessionId: string, adapterId: string, workspaceId?: string | null, cwd?: string) {
+    const parent = history.find((h) => h.session_id === fromSessionId);
+    sessionsUpsert({
+      session_id: toSessionId,
+      adapter_id: adapterId,
+      title: parent ? `从「${parent.title}」分叉` : "分叉会话",
+      cwd: cwd ?? "",
+      workspace_id: workspaceId ?? null,
+      mtime_ms: Date.now(),
+    }).then(reloadHistory);
+  }
+
   function confirmNewSession(adapterId: string, workspaceId: string | null, cwd?: string) {
     newTab(adapterId, workspaceId, cwd);
   }
@@ -348,6 +361,7 @@ function App() {
                 resumeSessionId={activeTab!.sessionId}
                 cwd={activeTab!.cwd}
                 onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text, activeTab!.workspaceId, activeTab!.cwd)}
+                onFork={(fromId, toId) => handleFork(fromId, toId, activeTab!.adapterId, activeTab!.workspaceId, activeTab!.cwd)}
               />
             ) : (
               <EmptyState

@@ -59,6 +59,8 @@ export interface AcpSession {
   sessionId: string;
   prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
   cancel(): Promise<void>;
+  /** F-8-5 会话分叉：从当前状态 fork，返回新 sessionId */
+  fork(cwdOverride: string): Promise<string>;
   /** F-8-4 元数据：拉取当前 provider 路由信息（apiType/baseUrl），无则空数组 */
   listProviders(): Promise<Array<{ providerId?: string; current?: { apiType?: string; baseUrl?: string } | null }>>;
   /** 空闲超时回收：关闭连接 + kill 子进程（区别于 dispose 的常规清理） */
@@ -194,6 +196,19 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     cancel() {
       console.info("[acp] session/cancel sessionId=", sessionId);
       return connection.agent.notify(acp.methods.agent.session.cancel, { sessionId });
+    },
+    /**
+     * F-8-5 会话分叉：`session/fork`（sessionId + cwd，从当前状态 fork，DEC-14）。
+     * 返回新 sessionId；harness 未实现 fork 能力时抛错（上层降级提示）。
+     */
+    async fork(cwdOverride) {
+      const forkResp = await connection.agent.request(acp.methods.agent.session.fork as any, {
+        sessionId,
+        cwd: cwdOverride,
+        mcpServers: [],
+      });
+      console.info("[acp] session/fork 完成 sessionId=", sessionId, "→", forkResp.sessionId);
+      return forkResp.sessionId as string;
     },
     /** 空闲超时回收（P8 F-8-1）：关闭连接 + 带活动时间 kill 子进程 */
     async recycle(lastActivityMs) {

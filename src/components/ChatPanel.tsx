@@ -55,6 +55,8 @@ interface Props {
   /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
   cwd?: string;
   onFirstPrompt?: (text: string, sessionId: string) => void;
+  /** F-8-5 分叉：返回 (父 sessionId, 新 sessionId) 供 App 落索引 */
+  onFork?: (fromSessionId: string, toSessionId: string) => void;
 }
 
 // F-7-6 打字机 placeholder：80ms/字循环打出；prefers-reduced-motion 直接显全文（AC-P7-6-1/6）
@@ -76,7 +78,7 @@ function useTypewriter(full: string): string {
   return full.slice(0, n);
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt }: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork }: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -317,6 +319,30 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     void runPrompt(text);
   }
 
+  // —— F-8-5 会话分叉：从当前状态 fork，新会话落索引（标注来源）——
+  async function doFork() {
+    if (busy) {
+      toast.warning("当前 turn 运行中，等待结束后再分叉");
+      return;
+    }
+    const fromSessionId = sessionRef.current?.sessionId ?? resumeSessionId;
+    if (!fromSessionId) {
+      toast.error("会话尚未建立（请先发送一条消息）");
+      return;
+    }
+    try {
+      const s = await ensureSession();
+      const cwdAbs = cwd ?? adapter.cwd;
+      const newId = await s.fork(cwdAbs);
+      logger.info("session", "fork", { fromSessionId, toSessionId: newId });
+      onFork?.(fromSessionId, newId);
+      toast.success("已分叉出新会话");
+    } catch (e) {
+      logger.error("session", "fork 失败", { fromSessionId, error: String(e) });
+      toast.error(`分叉失败：${String(e)}`);
+    }
+  }
+
   // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
   function onSelectText(text: string, e?: React.MouseEvent) {
     setQuickSel(text);
@@ -480,6 +506,7 @@ function pickSlash(w: CommandWord) {
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
                   onSelect={onSelectText}
+                  onFork={onFork ? doFork : undefined}
                 />
               </div>
             );
@@ -752,12 +779,14 @@ function MessageLine({
   busy,
   isLast,
   onSelect,
+  onFork,
 }: {
   msg: ChatMsg;
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
   onSelect?: (text: string, e: React.MouseEvent) => void;
+  onFork?: () => void;
 }) {
   if (msg.role === "user") {
     return (
@@ -780,26 +809,39 @@ function MessageLine({
             onSelect={onSelect}
           />
         ))}
-        {/* hover 浮现复制按钮（F-7-4 AC-P7-4-2） */}
-        <button
-          type="button"
-          aria-label="复制回复"
-          className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
-          style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
-          onClick={() => {
-            const text = msg.blocks
-              .map((b) => (b.kind === "text" ? b.text : b.kind === "thought" ? b.text : ""))
-              .filter(Boolean)
-              .join("\n");
-            navigator.clipboard?.writeText(text).then(
-              () => toast.success("已复制"),
-              () => toast.error("复制失败"),
-            );
-          }}
-        >
-          <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
-          复制
-        </button>
+        {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制） */}
+        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          {onFork && (
+            <button
+              type="button"
+              aria-label="从这里分叉"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              onClick={onFork}
+            >
+              ⑂ 分叉
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="复制回复"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
+            style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+            onClick={() => {
+              const text = msg.blocks
+                .map((b) => (b.kind === "text" ? b.text : b.kind === "thought" ? b.text : ""))
+                .filter(Boolean)
+                .join("\n");
+              navigator.clipboard?.writeText(text).then(
+                () => toast.success("已复制"),
+                () => toast.error("复制失败"),
+              );
+            }}
+          >
+            <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+            复制
+          </button>
+        </div>
       </div>
     </div>
   );
