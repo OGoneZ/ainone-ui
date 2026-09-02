@@ -21,6 +21,7 @@ import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
 import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
 import { truncateToMessageIndex } from "../acp/rewind";
+import { searchMessages } from "../acp/search";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
@@ -145,6 +146,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [dragging, setDragging] = useState(false);
   // F-8-6 回溯：待确认的目标消息下标（null = 无）
   const [rewindTarget, setRewindTarget] = useState<number | null>(null);
+  // F-9-2 搜索：关键词 + 命中列表 + 当前命中下标
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [searchIdx, setSearchIdx] = useState(0);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -189,7 +194,18 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       }
     } catch {
       /* ignore */
+    }
+    // F-9-2 搜索：Cmd/Ctrl+F 唤起/收起搜索条
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+      if (e.key === "Escape" && searchOpen) {
+        closeSearch();
+      }
     };
+    window.addEventListener("keydown", onKeyDown);
     // F-8-1 空闲超时回收：周期检查，空闲超阈值且无运行中 turn → 回收子进程
     recycleTimerRef.current = setInterval(() => {
       const s = sessionRef.current;
@@ -204,6 +220,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }, 15_000);
     return () => {
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
+      window.removeEventListener("keydown", onKeyDown);
       unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
       drop(tabKey);
@@ -500,6 +517,28 @@ function pickSlash(w: CommandWord) {
 
   const pending = rt?.pending ?? null;
 
+  // F-9-2 搜索：命中列表（随关键词变化）
+  const searchHits = searchOpen ? searchMessages(messages, searchKeyword) : [];
+  const currentHit = searchHits.length > 0 ? searchHits[searchIdx % searchHits.length] : null;
+  const searchCurIndex = currentHit ? currentHit.index : -1;
+
+  // F-9-2 跳转：滚动到命中消息索引（虚拟列表按索引定位到序）
+  function jumpToSearch(index: number) {
+    logger.info("chat", "search-jump", { index });
+    virtualizer.scrollToIndex(index, { align: "start" });
+  }
+  function nextHit(delta: 1 | -1) {
+    if (searchHits.length === 0) return;
+    const next = (searchIdx + delta + searchHits.length) % searchHits.length;
+    setSearchIdx(next);
+    jumpToSearch(searchHits[next].index);
+  }
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchKeyword("");
+    setSearchIdx(0);
+  }
+
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
@@ -513,6 +552,40 @@ function pickSlash(w: CommandWord) {
 
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
+      {/* F-9-2 会话内搜索条 */}
+      {searchOpen && (
+        <div className="search-bar">
+          <input
+            aria-label="搜索会话"
+            className="search-input"
+            placeholder="搜索会话内容…（Enter 下一条 / Shift+Enter 上一条）"
+            value={searchKeyword}
+            onChange={(e) => {
+              setSearchKeyword(e.target.value);
+              setSearchIdx(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                nextHit(1);
+              } else if (e.key === "Enter" && e.shiftKey) {
+                e.preventDefault();
+                nextHit(-1);
+              }
+            }}
+          />
+          <span className="search-count">
+            {searchKeyword.trim()
+              ? searchHits.length > 0
+                ? `${searchIdx % searchHits.length + 1} / ${searchHits.length}`
+                : "无结果"
+              : ""}
+          </span>
+          <button type="button" className="search-close" aria-label="关闭搜索" onClick={closeSearch}>
+            <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+          </button>
+        </div>
+      )}
       <div className="chat" ref={chatScrollRef}>
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
         {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
@@ -533,6 +606,7 @@ function pickSlash(w: CommandWord) {
                 key={vi.key}
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
+                data-search-hit={vi.index === searchCurIndex ? "true" : "false"}
                 style={{
                   position: "absolute",
                   top: 0,
