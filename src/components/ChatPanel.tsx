@@ -39,7 +39,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
-  const commands = useSessionStore((s) => s.commands[adapter.id] ?? []);
+  // 订阅整个 commands 对象（稳定引用）再取本 adapter 的列表——避免 `?? []`
+  // 每次返回新数组触发 zustand「getSnapshot 未缓存」无限重渲染（白屏根因）。
+  const commandsMap = useSessionStore((s) => s.commands);
+  const commands = commandsMap[adapter.id] ?? [];
 
   const ensure = useSessionStore((s) => s.ensure);
   const drop = useSessionStore((s) => s.drop);
