@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import type { ToolContent } from "../acp/session-core";
 import type { AdapterWithStatus } from "../config/adapters";
@@ -189,33 +190,46 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
     [messages],
   );
 
+  // 长会话虚拟列表（AC-P3-5）：只渲染可见区消息
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => chatScrollRef.current,
+    estimateSize: () => 80,
+    overscan: 10,
+  });
+
   return (
     <div className="panel">
-      <div className="chat">
+      <div className="chat" ref={chatScrollRef}>
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
-        {messages.map((m, i) =>
-          m.role === "user" ? (
-            <div key={i} className="user">
-              <b>你：</b>
-              <span className="md">{m.text}</span>
-            </div>
-          ) : m.role === "assistant" ? (
-            <div key={i} className="assistant">
-              <b>agent：</b>
-              <div className="md">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                  {m.text}
-                </ReactMarkdown>
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          {virtualizer.getVirtualItems().map((vi) => {
+            const m = messages[vi.index];
+            return (
+              <div
+                key={vi.key}
+                data-index={vi.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              >
+                <MessageView msg={m} />
               </div>
-            </div>
-          ) : m.role === "thought" ? (
-            <div key={i} className="thought">
-              💭 {m.text}
-            </div>
-          ) : (
-            <ToolBlock key={i} msg={m} />
-          ),
-        )}
+            );
+          })}
+        </div>
         {thoughtCount > 0 && (
           <button className="thought-toggle" onClick={() => setShowThoughts((v) => !v)}>
             {showThoughts ? "隐藏" : "显示"}思考过程（{thoughtCount}）
@@ -253,6 +267,28 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
         </button>
       </form>
     </div>
+  );
+}
+
+function MessageView({ msg: m }: { msg: ChatMsg }) {
+  return m.role === "user" ? (
+    <div className="user">
+      <b>你：</b>
+      <span className="md">{m.text}</span>
+    </div>
+  ) : m.role === "assistant" ? (
+    <div className="assistant">
+      <b>agent：</b>
+      <div className="md">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+          {m.text}
+        </ReactMarkdown>
+      </div>
+    </div>
+  ) : m.role === "thought" ? (
+    <div className="thought">💭 {m.text}</div>
+  ) : (
+    <ToolBlock msg={m} />
   );
 }
 
