@@ -13,11 +13,22 @@ import userEvent from "@testing-library/user-event";
 import { ChatPanel } from "./ChatPanel";
 import { useSessionStore } from "../store/sessionStore";
 import { openSession } from "../acp/session";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { AcpSession } from "../acp/session";
 import type { AdapterWithStatus } from "../config/adapters";
 
 vi.mock("../acp/session", () => ({
   openSession: vi.fn(),
+}));
+
+// F-8-3 文件引用：mock 文件选择对话框 + Tauri 拖拽事件（jsdom 无 Tauri 运行时）
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+}));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: () => Promise.resolve(() => {}),
+  }),
 }));
 
 // F-8-7 快问：mock 配置与调用（组件内挂载即读配置）
@@ -235,5 +246,63 @@ describe("ChatPanel 交互行为", () => {
       .map((m: any) => m.text)
       .join("\n");
     expect(allUserText).not.toContain("这是快问的解释");
+  });
+
+  it("F-8-3 文件引用：按钮选文件 → 附件胶囊 → 发送含 @file 路径（AC-P8-15）", async () => {
+    const openMock = vi.mocked(open);
+    openMock.mockResolvedValue("/Users/me/project/readme.md" as any);
+
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "收到文件" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+
+    // 点「添加文件」按钮 → 附件胶囊出现
+    await user.click(screen.getByRole("button", { name: "添加文件" }));
+    expect(await screen.findByText("readme.md")).toBeInTheDocument();
+
+    // 输入文字发送 → user 气泡含 @file:/abs/path
+    await user.type(input(), "请分析这个文件");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(
+      await screen.findByText(/@file:\/Users\/me\/project\/readme\.md/),
+    ).toBeInTheDocument();
+  });
+
+  it("F-8-3 文件引用：附件 × 移除 → 发送不含该文件（AC-P8-17）", async () => {
+    const openMock = vi.mocked(open);
+    openMock.mockResolvedValue(["/a/one.ts", "/b/two.ts"] as any);
+
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "ok" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "添加文件" }));
+    expect(await screen.findByText("one.ts")).toBeInTheDocument();
+    expect(screen.getByText("two.ts")).toBeInTheDocument();
+
+    // 移除第一个附件
+    await user.click(screen.getByRole("button", { name: "移除附件 1" }));
+    expect(screen.queryByText("one.ts")).not.toBeInTheDocument();
+
+    await user.type(input(), "看剩下的文件");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    const userBubble = await screen.findByText(/@file:\/b\/two\.ts/);
+    expect(userBubble).toBeInTheDocument();
+    // 被移除的文件不出现在气泡
+    const userMsg = (useSessionStore.getState().runtime["k1"]?.messages ?? []).find(
+      (m) => m.role === "user",
+    );
+    expect(userMsg && userMsg.role === "user" ? userMsg.text : "").not.toContain("/a/one.ts");
   });
 });

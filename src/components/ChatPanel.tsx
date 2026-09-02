@@ -18,10 +18,13 @@ import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
 import { composeQuotedPrompt, type Quote } from "../acp/quote";
+import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
 import { quickAsk, quickAskConfigGet } from "../config/quickask";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   useSessionStore,
   type ChatMsg,
@@ -130,6 +133,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [quickAnchor, setQuickAnchor] = useState({ x: 120, y: 80 });
   // F-8-7 悬浮窗：null=关闭；加载中/结果/错误三态
   const [quickPop, setQuickPop] = useState<{ state: "loading" | "ok" | "error"; text: string } | null>(null);
+  // F-8-3 文件引用：待发送附件集（按钮选择 / 拖拽 同路径）
+  const [files, setFiles] = useState<FileRef[]>([]);
+  // F-8-3 拖拽悬停高亮
+  const [dragging, setDragging] = useState(false);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -151,6 +158,30 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     quickAskConfigGet()
       .then((c) => setQuickAskReady(Boolean(c.base_url.trim() && c.model.trim())))
       .catch(() => setQuickAskReady(false));
+    // F-8-3 拖拽：监听 Tauri 原生拖拽事件（enter/drop/leave）转附件
+    // 错误环境（jsdom 测试 / 浏览器预览）静默降级——拖拽是增强能力，非必需
+    let unlisten: (() => void) | undefined;
+    try {
+      const wv = getCurrentWebview();
+      if (wv && typeof wv.onDragDropEvent === "function") {
+        wv
+          .onDragDropEvent(async (ev) => {
+            if (ev.payload.type === "enter") setDragging(true);
+            else if (ev.payload.type === "leave") setDragging(false);
+            else if (ev.payload.type === "drop") {
+              setDragging(false);
+              const abs = filterAbsoluteFiles(ev.payload.paths.map((p) => ({ path: p })));
+              if (abs.length > 0) addFiles(abs);
+            }
+          })
+          .then((fn) => {
+            unlisten = fn;
+          })
+          .catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    };
     // F-8-1 空闲超时回收：周期检查，空闲超阈值且无运行中 turn → 回收子进程
     recycleTimerRef.current = setInterval(() => {
       const s = sessionRef.current;
@@ -165,6 +196,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }, 15_000);
     return () => {
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
+      unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
       drop(tabKey);
     };
@@ -207,18 +239,47 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   async function submit() {
     const text = input.trim();
-    if (!text) return;
+    // F-8-3：组装文件引用 → 拼入发送文本（传路径语义，@file:/abs/path）
+    const filePart = files.length > 0 ? composeFileReference(files) : "";
+    const full = [filePart, text].filter(Boolean).join("\n\n");
+    if (!full.trim()) return;
     setInput("");
     setSlashIdx(-1);
-    appendUser(tabKey, text);
+    setFiles([]);
+    if (files.length > 0) logger.info("chat", "send-with-files", { count: files.length });
+    appendUser(tabKey, full);
 
     // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
     if (busy) {
       await stop();
-      pendingTextRef.current = text;
+      pendingTextRef.current = full;
       return;
     }
-    await runPrompt(text);
+    await runPrompt(full);
+  }
+
+  // —— F-8-3 文件引用：按钮选择 / 拖拽 同一条「待发送附件」路径 ——
+  async function pickFiles() {
+    const picked = await open({ multiple: true, directory: false });
+    const paths = picked ? (Array.isArray(picked) ? picked : [picked]) : [];
+    const abs = filterAbsoluteFiles(paths.map((p) => ({ path: p })));
+    addFiles(abs);
+  }
+  function addFiles(list: FileRef[]) {
+    setFiles((prev) => {
+      const seen = new Set(prev.map((f) => f.path));
+      const merged = [...prev];
+      for (const f of list) {
+        if (seen.has(f.path)) continue;
+        seen.add(f.path);
+        merged.push(f);
+        logger.info("chat", "attach-file", { path: f.path, count: merged.length });
+      }
+      return merged;
+    });
+  }
+  function removeFile(idx: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   }
 
   // 建议 prompt 直接发送（F-6-3，不经输入框）
@@ -370,7 +431,7 @@ function pickSlash(w: CommandWord) {
   const empty = messages.length === 0;
 
   return (
-    <div className="panel">
+    <div className="panel" data-dragging={dragging ? "true" : "false"}>
       <div className="chat" ref={chatScrollRef}>
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
         {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
@@ -521,6 +582,27 @@ function pickSlash(w: CommandWord) {
         </div>
       )}
 
+      {/* F-8-3 附件胶囊列表：文件名 + × 移除（拖拽高亮反馈） */}
+      {files.length > 0 && (
+        <div className="attach-list">
+          {files.map((f, i) => (
+            <span key={f.path} className="attach-chip">
+              <span className="attach-name" title={f.path}>
+                {f.path.split("/").filter(Boolean).pop() ?? f.path}
+              </span>
+              <button
+                type="button"
+                className="attach-remove"
+                aria-label={`移除附件 ${i + 1}`}
+                onClick={() => removeFile(i)}
+              >
+                <CloseIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <form
         className="row"
         onSubmit={(e) => {
@@ -528,6 +610,15 @@ function pickSlash(w: CommandWord) {
           submit();
         }}
       >
+        <button
+          type="button"
+          className="attach-btn"
+          aria-label="添加文件"
+          title="添加文件"
+          onClick={pickFiles}
+        >
+          ＋
+        </button>
         <div className="input-wrap">
           {slashOpen && slashMatches.length > 0 && (
             <div className="slash-menu">

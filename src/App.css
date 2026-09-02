@@ -1117,3 +1117,67 @@ button:hover:not(:disabled) {
   margin: 0;
   font-size: 0.95em;
 }
+
+/* ======================= P8 · F-8-3 文件引用 ======================= */
+.attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 2px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.attach-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+}
+
+.attach-remove:hover {
+  color: var(--danger);
+}
+
+.attach-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.attach-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* 拖拽悬停高亮：整个面板描边 */
+.panel[data-dragging="true"] {
+  outline: 2px dashed var(--primary);
+  outline-offset: -4px;
+  border-radius: var(--radius);
+}
