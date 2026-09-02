@@ -18,6 +18,8 @@ function spawnAgent() {
 }
 
 function makeStreams(child: any) {
+  // dispose kill 子进程时 stdin 可能有 pending 写 → 吞掉 EPIPE（见 e2e-probe.mjs 同款）
+  child.stdin?.on("error", () => {});
   return {
     stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
     stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,

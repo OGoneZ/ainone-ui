@@ -7,14 +7,10 @@ import { listAdapters, type AdapterWithStatus } from "./config/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./config/sessions";
 import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
+import { resolveHistoryOpen, type Tab } from "./store/tabs";
 import "./App.css";
 
-interface Tab {
-  key: string; // 唯一键（并行 Tab 复用同一会话时也需区分）
-  adapterId: string;
-  sessionId?: string; // 恢复时带，新建时 undefined
-  title: string;
-}
+// Tab 类型定义抽到 store/tabs.ts（F-4-4 可单测）
 
 function App() {
   const [adapters, setAdapters] = useState<AdapterWithStatus[]>([]);
@@ -56,18 +52,12 @@ function App() {
   }
 
   function openFromHistory(entry: SessionEntry) {
-    // F-4-4 去重：同 sessionId 已有打开 Tab → 激活既有 Tab，不新开（避免多子进程分叉）
-    const existing = tabs.find((t) => t.sessionId === entry.session_id);
-    if (existing) {
-      setActiveKey(existing.key);
-      return;
+    const r = resolveHistoryOpen(tabs, entry, `tab-${nextKey.current}`);
+    if (r.newTab) {
+      nextKey.current++;
+      setTabs((ts) => [...ts, r.newTab!]);
     }
-    const key = `tab-${nextKey.current++}`;
-    setTabs((ts) => [
-      ...ts,
-      { key, adapterId: entry.adapter_id, sessionId: entry.session_id, title: entry.title },
-    ]);
-    setActiveKey(key);
+    setActiveKey(r.activateKey);
   }
 
   function closeTab(key: string) {
