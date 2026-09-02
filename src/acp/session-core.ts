@@ -28,6 +28,7 @@ export type Outgoing =
   | { type: "tool_update"; toolCallId: string; status?: string | null; content: ToolContent[] }
   | { type: "turn_stop"; stopReason: string }
   | { type: "available_commands"; commands: CommandWord[] }
+  | { type: "usage"; used: number; size: number; cost: number | null }
   | { type: "error"; message: string };
 
 export interface CommandWord {
@@ -58,6 +59,8 @@ export interface AcpSession {
   sessionId: string;
   prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
   cancel(): Promise<void>;
+  /** F-8-4 元数据：拉取当前 provider 路由信息（apiType/baseUrl），无则空数组 */
+  listProviders(): Promise<Array<{ providerId?: string; current?: { apiType?: string; baseUrl?: string } | null }>>;
   /** 空闲超时回收：关闭连接 + kill 子进程（区别于 dispose 的常规清理） */
   recycle(lastActivityMs: number): Promise<void>;
   dispose(): Promise<void>;
@@ -179,6 +182,15 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
       console.info("[acp] session/prompt 结束 stopReason=", resp.stopReason);
       onOutgoing({ type: "turn_stop", stopReason: resp.stopReason });
     },
+    /** F-8-4 元数据：拉取当前 provider 路由信息（apiType/baseUrl），失败静默。 */
+    async listProviders() {
+      try {
+        const resp = await connection.agent.request(acp.methods.agent.providers.list as any, {});
+        return (resp?.providers ?? []) as Array<{ providerId?: string; current?: { apiType?: string; baseUrl?: string } | null }>;
+      } catch {
+        return [];
+      }
+    },
     cancel() {
       console.info("[acp] session/cancel sessionId=", sessionId);
       return connection.agent.notify(acp.methods.agent.session.cancel, { sessionId });
@@ -233,6 +245,15 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
         toolCallId: u.update.toolCallId,
         status: u.update.status ?? null,
         content: toToolContent(u.update.content),
+      });
+      break;
+    case "usage_update":
+      // F-8-4 元数据侧栏：上下文占用 / token / 成本
+      onOutgoing({
+        type: "usage",
+        used: u.update.used,
+        size: u.update.size,
+        cost: u.update.cost?.amount ?? null,
       });
       break;
     default:

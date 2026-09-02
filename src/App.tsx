@@ -10,6 +10,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { EmptyState } from "./components/EmptyState";
+import { MetadataPanel } from "./components/MetadataPanel";
 import { AgentAvatar } from "./components/AgentAvatar";
 import {
   WorkspaceIcon,
@@ -357,6 +358,15 @@ function App() {
               />
             )}
           </div>
+          {/* F-8-4 元数据侧栏：右侧可折叠第二侧栏 */}
+          {activeAdapter && activeTab && (
+            <MetadataPanel
+              tabKey={activeTab.key}
+              adapter={activeAdapter}
+              sessionId={activeTab.sessionId ?? null}
+              cwd={activeTab.cwd}
+            />
+          )}
         </section>
       </div>
 

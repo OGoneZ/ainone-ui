@@ -1181,3 +1181,127 @@ button:hover:not(:disabled) {
   outline-offset: -4px;
   border-radius: var(--radius);
 }
+
+/* ======================= P8 · F-8-4 元数据侧栏 ======================= */
+.meta-railing {
+  width: 20px;
+  flex-shrink: 0;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.meta-railing:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.meta-panel {
+  width: 260px;
+  flex-shrink: 0;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.meta-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.meta-title {
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.meta-close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.meta-close:hover {
+  color: var(--text-primary);
+}
+
+.meta-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-item dt {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.meta-item dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.meta-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.meta-cost {
+  margin-left: 6px;
+  color: var(--success);
+}
+
+.meta-na {
+  color: var(--text-disabled);
+}
+
+.meta-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.meta-bar {
+  margin-top: 4px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.meta-bar-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  transition: width var(--motion-default);
+}
+
+.meta-pct {
+  font-size: 11px;
+  color: var(--text-secondary);
+}

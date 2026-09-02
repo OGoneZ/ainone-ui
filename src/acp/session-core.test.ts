@@ -72,8 +72,18 @@ describe("session-core · dispatchUpdate", () => {
     expect(r).toEqual([{ type: "tool_update", toolCallId: "t1", status: "completed", content: [] }]);
   });
 
-  it("未知 update 类型（usage_update 等）被忽略", () => {
-    expect(collect(notif({ sessionUpdate: "usage_update", usage: {} }))).toEqual([]);
+  it("usage_update → usage（含 cost 数值 / 无 cost → null）", () => {
+    expect(
+      collect(notif({ sessionUpdate: "usage_update", used: 100, size: 1000, cost: { amount: 1.5, currency: "USD" } })),
+    ).toEqual([{ type: "usage", used: 100, size: 1000, cost: 1.5 }]);
+
+    expect(
+      collect(notif({ sessionUpdate: "usage_update", used: 100, size: 1000 })),
+    ).toEqual([{ type: "usage", used: 100, size: 1000, cost: null }]);
+  });
+
+  it("未知 update 类型被忽略", () => {
+    expect(collect(notif({ sessionUpdate: "current_mode_update", currentModeId: "ask" }))).toEqual([]);
   });
 });
 

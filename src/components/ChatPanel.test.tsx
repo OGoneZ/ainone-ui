@@ -90,6 +90,7 @@ function fakeSession(events: Array<{ type: string; [k: string]: any }>): AcpSess
       for (const e of events) onOutgoing(e);
     },
     cancel: async () => {},
+    listProviders: async () => [],
     recycle: async () => {},
     dispose: async () => {},
   };

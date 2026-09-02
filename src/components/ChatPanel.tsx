@@ -357,10 +357,24 @@ function pickSlash(w: CommandWord) {
         if (!promptedOnce.current) {
           promptedOnce.current = true;
           onFirstPrompt?.(text, session.sessionId);
+          // F-8-4：建会话后拉一次 provider 路由（apiType/baseUrl）填侧栏
+          void session
+            .listProviders()
+            .then((providers) => {
+              const cur = providers.find((p) => p.current?.baseUrl)?.current;
+              useSessionStore.getState().setMeta(tabKey, cur ?? null);
+            })
+            .catch(() => {});
         }
         await session.prompt(text, (e) => {
           if (e.type === "available_commands") {
             setCommands(adapter.id, e.commands);
+            return;
+          }
+          if (e.type === "usage") {
+            // F-8-4：usage_update → 存 store（侧栏订阅）
+            logger.debug("session", "usage", { used: e.used, size: e.size, cost: e.cost });
+            useSessionStore.getState().setUsage(tabKey, { used: e.used, size: e.size, cost: e.cost });
             return;
           }
           const next = applyEvent(turnRef.current, e, Date.now);
