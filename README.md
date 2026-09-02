@@ -27,10 +27,12 @@ pnpm tauri dev    # 桌面应用（含 Rust 后端）
 ## 测试
 
 ```bash
-pnpm test                               # vitest 单测（消息日志 / turn 累加 / slash 补全 / 去重）
-bun tools/spike/e2e-load-probe.ts       # session/load 暗号续聊（协议层）
-bun tools/spike/e2e-p4-history-probe.ts # P4 日志回填完整链路
+pnpm test        # vitest：纯函数(node) + 组件交互(jsdom+testing-library)，56 条
+pnpm test:e2e    # 真实 harness e2e 探针（按 PATH 自动跳过缺的 harness）
+pnpm test:all    # 前端 + Rust cargo test + e2e 三件套
 ```
+
+完整的分层策略、mock 约定、防回归护栏见 **`TESTING.md`**——接手重构前必读。
 
 ## 架构
 
