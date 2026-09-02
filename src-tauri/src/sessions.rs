@@ -63,16 +63,29 @@ pub(crate) fn match_workspace(
 #[tauri::command]
 pub fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String> {
     let mut list = load_all(&app)?;
-    // F-5-4 读时迁移：存量会话无 workspace_id → 按 cwd 规范化匹配已有工作区归组；
-    // 无 cwd / 无匹配则保持 None（未归组）。幂等：只有发生变更才落盘。
+    // F-5-4 读时迁移 + 悬空自愈：
+    //   - workspace_id 为 None → 按 cwd **精确相等**匹配已有工作区（子目录不会归到父目录）
+    //   - workspace_id 悬空（指向已删除/被去重丢弃的工作区）→ 同一套精确匹配重新绑定；
+    //     仍匹配不到才归「未归组」
+    // 幂等：只有发生变更才落盘。
     let mut changed = false;
     if let Ok(workspaces) = crate::workspaces::load_workspaces(&app) {
+        let valid_ids: std::collections::HashSet<&str> =
+            workspaces.iter().map(|w| w.id.as_str()).collect();
         for e in list.iter_mut() {
-            if e.workspace_id.is_some() {
+            let dangling = match &e.workspace_id {
+                Some(id) => !valid_ids.contains(id.as_str()),
+                None => true,
+            };
+            if !dangling {
                 continue;
             }
             if let Some(wid) = match_workspace(&e.cwd, &workspaces) {
                 e.workspace_id = Some(wid);
+                changed = true;
+            } else if e.workspace_id.is_some() {
+                // 悬空且 cwd 匹配不到任何工作区 → 归未归组
+                e.workspace_id = None;
                 changed = true;
             }
         }
@@ -179,6 +192,13 @@ mod tests {
     fn match_workspace_miss_returns_none() {
         let ws_list = vec![ws("w1", "/a/b")];
         assert_eq!(match_workspace("/a/c", &ws_list), None);
+    }
+
+    #[test]
+    fn match_workspace_subdir_does_not_match_parent() {
+        // 子目录 /a/b/c 不能归到父级工作区 /a/b（用户明确要求）
+        let ws_list = vec![ws("w1", "/a/b")];
+        assert_eq!(match_workspace("/a/b/c", &ws_list), None);
     }
 
     #[test]

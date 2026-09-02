@@ -14,8 +14,8 @@ export async function workspacesList(): Promise<Workspace[]> {
   return invoke<Workspace[]>("workspaces_list");
 }
 
-export async function workspacesUpsert(w: Workspace): Promise<void> {
-  await invoke("workspaces_upsert", { workspace: w });
+export async function workspacesUpsert(w: Workspace): Promise<string> {
+  return invoke<string>("workspaces_upsert", { workspace: w });
 }
 
 export async function workspacesRemove(id: string): Promise<void> {

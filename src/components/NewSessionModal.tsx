@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import type { AdapterWithStatus } from "../config/adapters";
 import { workspacesUpsert, pickDirectory, type Workspace } from "../config/workspaces";
+import { normPath } from "../store/normPath";
 
 interface Props {
   open: boolean;
@@ -13,6 +14,8 @@ interface Props {
   presetWorkspaceId?: string | null;
   onClose: () => void;
   onConfirm: (adapterId: string, workspaceId: string | null, cwd?: string) => void;
+  /** 新建工作区后回调（父级刷新 workspaces 列表，避免侧栏分组状态过期） */
+  onWorkspaceCreated?: () => void;
 }
 
 export function NewSessionModal({
@@ -22,6 +25,7 @@ export function NewSessionModal({
   presetWorkspaceId,
   onClose,
   onConfirm,
+  onWorkspaceCreated,
 }: Props) {
   // 本地工作区副本：新建工作区后即时回显，无需父级刷新
   const [localWs, setLocalWs] = useState<Workspace[]>([]);
@@ -39,13 +43,26 @@ export function NewSessionModal({
   async function newWorkspace() {
     const dir = await pickDirectory();
     if (!dir) return;
+    // 若所选目录已被某工作区占用，直接选中既有工作区（不重复创建）
+    const existing = localWs.find((w) => normPath(w.cwd) === normPath(dir));
+    if (existing) {
+      setWorkspaceId(existing.id);
+      return;
+    }
     setCreating(true);
     try {
       const name = dir.split("/").filter(Boolean).pop() || dir;
       const w: Workspace = { id: `ws-${Date.now()}`, name, cwd: dir, created_ms: Date.now() };
-      await workspacesUpsert(w);
-      setLocalWs((ws) => [...ws, w]);
-      setWorkspaceId(w.id);
+      // upsert 按 cwd 以新换旧，返回落盘后的权威 id（可能覆盖并发创建的同目录工作区）
+      const authoritativeId = await workspacesUpsert(w);
+      const authoritative: Workspace = { ...w, id: authoritativeId };
+      setLocalWs((ws) => {
+        // 移除同 cwd 的本地副本，填入权威工作区，避免下拉出现重复项
+        const rest = ws.filter((x) => normPath(x.cwd) !== normPath(dir));
+        return [...rest, authoritative];
+      });
+      setWorkspaceId(authoritativeId);
+      onWorkspaceCreated?.();
     } finally {
       setCreating(false);
     }

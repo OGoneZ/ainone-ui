@@ -124,7 +124,10 @@ function App() {
   function renameWorkspace(id: string, name: string) {
     const w = workspaces.find((x) => x.id === id);
     if (!w || !name.trim()) return;
-    workspacesUpsert({ ...w, name: name.trim() }).then(reloadWorkspaces);
+    workspacesUpsert({ ...w, name: name.trim() }).then(() => {
+      reloadWorkspaces();
+      reloadHistory(); // upsert 按 cwd 以新换旧，可能换了 id → 会话重绑定
+    });
   }
 
   function removeWorkspace(id: string) {
@@ -277,6 +280,7 @@ function App() {
         presetWorkspaceId={newSession.workspaceId}
         onClose={() => setNewSession({ open: false })}
         onConfirm={confirmNewSession}
+        onWorkspaceCreated={reloadWorkspaces}
       />
 
       {ctxMenu && (

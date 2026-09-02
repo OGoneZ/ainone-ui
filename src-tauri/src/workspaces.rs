@@ -88,14 +88,30 @@ pub fn workspaces_list(app: tauri::AppHandle) -> Result<Vec<Workspace>, String> 
 }
 
 #[tauri::command]
-pub fn workspaces_upsert(app: tauri::AppHandle, workspace: Workspace) -> Result<(), String> {
-    let mut list = load_all(&app)?;
-    if let Some(w) = list.iter_mut().find(|w| w.id == workspace.id) {
-        *w = workspace;
-    } else {
-        list.push(workspace);
+pub fn workspaces_upsert(app: tauri::AppHandle, workspace: Workspace) -> Result<String, String> {
+    // 按 cwd「以新换旧」：同一目录只保留一个工作区。传入的 workspace 成为
+    // 该目录的权威工作区（旧记录被替换丢弃），返回它的 id——保证前端拿到的 id
+    // 一定在落盘文件里，不会因去重被丢弃而悬空。
+    let list = load_all(&app)?;
+    let norm = normalize_path(&workspace.cwd);
+    let mut next: Vec<Workspace> = Vec::with_capacity(list.len() + 1);
+    let mut replaced = false;
+    for w in list {
+        if normalize_path(&w.cwd) == norm {
+            if !replaced {
+                next.push(workspace.clone());
+                replaced = true;
+            }
+            // 同 cwd 的其余旧记录丢弃
+        } else {
+            next.push(w);
+        }
     }
-    save_all(&app, &list)
+    if !replaced {
+        next.push(workspace.clone());
+    }
+    save_all(&app, &next)?;
+    Ok(workspace.id)
 }
 
 #[tauri::command]
