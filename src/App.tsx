@@ -70,12 +70,13 @@ function App() {
   }
 
   // 首条消息 → 写会话索引
-  function handleFirstPrompt(sessionId: string, adapterId: string, text: string) {
+  function handleFirstPrompt(sessionId: string, adapterId: string, text: string, workspaceId?: string | null) {
     sessionsUpsert({
       session_id: sessionId,
       adapter_id: adapterId,
       title: text.slice(0, 40) || "未命名会话",
       cwd: "",
+      workspace_id: workspaceId ?? null,
       mtime_ms: Date.now(),
     }).then(reloadHistory);
   }

@@ -14,6 +14,9 @@ pub struct SessionEntry {
     pub adapter_id: String,
     pub title: String,
     pub cwd: String,
+    /// 所属工作区 id（F-5-4）；None = 未归组（旧数据迁移而来或移除工作区后）
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     /// Unix 时间戳（毫秒），用于排序
     pub mtime_ms: u64,
 }
@@ -44,6 +47,27 @@ fn save_all(app: &tauri::AppHandle, entries: &[SessionEntry]) -> Result<(), Stri
 #[tauri::command]
 pub fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String> {
     let mut list = load_all(&app)?;
+    // F-5-4 读时迁移：存量会话无 workspace_id → 按 cwd 规范化匹配已有工作区归组；
+    // 无 cwd / 无匹配则保持 None（未归组）。幂等：只有发生变更才落盘。
+    let mut changed = false;
+    if let Ok(workspaces) = crate::workspaces::load_workspaces(&app) {
+        for e in list.iter_mut() {
+            if e.workspace_id.is_some() {
+                continue;
+            }
+            if e.cwd.is_empty() {
+                continue; // 无 cwd 信息 → 未归组
+            }
+            let norm = crate::workspaces::normalize_path(&e.cwd);
+            if let Some(w) = workspaces.iter().find(|w| crate::workspaces::normalize_path(&w.cwd) == norm) {
+                e.workspace_id = Some(w.id.clone());
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        save_all(&app, &list)?;
+    }
     list.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
     Ok(list)
 }

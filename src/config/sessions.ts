@@ -8,6 +8,8 @@ export interface SessionEntry {
   adapter_id: string;
   title: string;
   cwd: string;
+  /** 所属工作区 id（null = 未归组） */
+  workspace_id: string | null;
   mtime_ms: number;
 }
 

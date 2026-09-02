@@ -34,6 +34,11 @@ fn load_all(app: &tauri::AppHandle) -> Result<Vec<Workspace>, String> {
     serde_json::from_str(&raw).map_err(|e| format!("工作区索引解析失败: {e}"))
 }
 
+/// 供 sessions.rs 迁移复用的工作区加载（读时迁移需要匹配 cwd）
+pub(crate) fn load_workspaces(app: &tauri::AppHandle) -> Result<Vec<Workspace>, String> {
+    load_all(app)
+}
+
 fn save_all(app: &tauri::AppHandle, list: &[Workspace]) -> Result<(), String> {
     // 按 cwd 规范化去重（F-5-4）：路径重复的工作区只保留一条
     let mut seen: Vec<(String, String)> = Vec::new(); // (cwd_norm, id)
@@ -50,9 +55,29 @@ fn save_all(app: &tauri::AppHandle, list: &[Workspace]) -> Result<(), String> {
     std::fs::write(workspaces_path(app)?, json).map_err(|e| format!("写入工作区索引失败: {e}"))
 }
 
-fn normalize_path(p: &str) -> String {
+pub(crate) fn normalize_path(p: &str) -> String {
     // 轻量规范化：去尾部斜杠 + 小写比较（macOS 默认大小写不敏感）
     p.trim_end_matches('/').to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_path;
+
+    #[test]
+    fn normalize_path_strips_trailing_slash() {
+        assert_eq!(normalize_path("/a/b/"), normalize_path("/a/b"));
+    }
+
+    #[test]
+    fn normalize_path_is_case_insensitive() {
+        assert_eq!(normalize_path("/Users/Dev"), normalize_path("/users/dev"));
+    }
+
+    #[test]
+    fn normalize_path_distinct_paths_stay_distinct() {
+        assert_ne!(normalize_path("/a/b"), normalize_path("/a/c"));
+    }
 }
 
 #[tauri::command]
