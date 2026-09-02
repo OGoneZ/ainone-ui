@@ -39,6 +39,7 @@ import {
 } from "./ui/icons";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
+import { toast } from "sonner";
 
 interface Props {
   tabKey: string;
@@ -229,6 +230,7 @@ function pickSlash(w: CommandWord) {
         useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
       } catch (err) {
         logger.error("chat", "prompt 失败", { tabKey, adapter: adapter.id, error: String(err) });
+        toast.error(`出错了：${String(err)}`);
         const next: TurnAccumulator = {
           ...turnRef.current,
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
@@ -506,7 +508,10 @@ function MessageLine({
               .map((b) => (b.kind === "text" ? b.text : b.kind === "thought" ? b.text : ""))
               .filter(Boolean)
               .join("\n");
-            navigator.clipboard?.writeText(text).catch(() => {});
+            navigator.clipboard?.writeText(text).then(
+              () => toast.success("已复制"),
+              () => toast.error("复制失败"),
+            );
           }}
         >
           <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
@@ -559,7 +564,10 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
         className="code-copy"
         onClick={() => {
           const code = ref.current?.querySelector("code")?.textContent ?? "";
-          navigator.clipboard?.writeText(code).catch(() => {});
+          navigator.clipboard?.writeText(code).then(
+            () => toast.success("代码已复制"),
+            () => toast.error("复制失败"),
+          );
         }}
       >
         <CopyIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />

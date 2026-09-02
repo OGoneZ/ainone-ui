@@ -27,6 +27,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
 } from "./components/ui/context-menu";
+import { Toaster } from "./components/ui/sonner";
 import { resolveHistoryOpen, type Tab } from "./store/tabs";
 import { groupSessions } from "./store/workspaceGroup";
 import { useSessionStore } from "./store/sessionStore";
@@ -372,6 +373,13 @@ function App() {
         onClose={() => setNewSession({ open: false })}
         onConfirm={confirmNewSession}
         onWorkspaceCreated={reloadWorkspaces}
+      />
+
+      {/* 全局 toast（sonner，右下 3s）：错误 / 复制成功提示（F-7-8） */}
+      <Toaster
+        theme={theme === "dark" || (theme === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light"}
+        position="bottom-right"
+        duration={3000}
       />
     </main>
   );

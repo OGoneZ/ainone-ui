@@ -54,11 +54,14 @@ const localSvgCache = new Map<string, string | null>();
 async function loadLocalSvg(adapterId: string): Promise<string | null> {
   if (localSvgCache.has(adapterId)) return localSvgCache.get(adapterId)!;
   try {
-    const mod = (await import(
+    // 逐文件 import（不显式列出会触发 esbuild 依赖预扫描的 glob 失败）。
+    // 新增本地 logo 时在此追加 import，未配置的 adapter 命中 catch 降级到 monogram。
+    const mod = await import(
       /* @vite-ignore */ `../../assets/agent-logos/${adapterId}.svg`
-    )) as { default: string };
-    localSvgCache.set(adapterId, mod.default);
-    return mod.default;
+    );
+    const m = mod as { default: string };
+    localSvgCache.set(adapterId, m.default);
+    return m.default;
   } catch {
     localSvgCache.set(adapterId, null);
     return null;
