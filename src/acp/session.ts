@@ -45,7 +45,11 @@ export async function openSession(
   adapter: Adapter,
   onPermission: PermissionDecision,
 ): Promise<AcpSession> {
-  const proc = await spawnHarness(adapter.program, adapter.args, adapter.cwd);
+  // 解析为绝对路径（ACP 要求 cwd 必须绝对）；adapter.cwd 默认 "." 时落到当前工作目录
+  const cwd = await invoke<string>("abs_path", { path: adapter.cwd }).catch(
+    () => adapter.cwd,
+  );
+  const proc = await spawnHarness(adapter.program, adapter.args, cwd);
 
   const app = acp
     .client({ name: "ainone-ui" })
@@ -85,7 +89,7 @@ export async function openSession(
   });
   console.log(`[acp] 已连接 ${initResult.agentInfo?.name ?? "agent"} protocol v${initResult.protocolVersion}`);
 
-  const session = await connection.agent.buildSession(adapter.cwd).start();
+  const session = await connection.agent.buildSession(cwd).start();
 
   return {
     sessionId: session.sessionId,

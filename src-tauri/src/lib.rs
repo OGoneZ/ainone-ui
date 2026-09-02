@@ -94,6 +94,22 @@ fn agent_kill(app: AppHandle, agent_id: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// 把可能是相对的路径解析成绝对路径（ACP 要求 cwd 为绝对路径）。
+#[tauri::command]
+fn abs_path(path: String) -> Result<String, String> {
+    let p = std::path::Path::new(&path);
+    if p.is_absolute() {
+        Ok(path)
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(p))
+            .map_err(|e| format!("解析当前目录失败: {e}"))?
+            .to_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "路径含非法字符".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -114,6 +130,7 @@ pub fn run() {
             agent_spawn,
             agent_stdin_write,
             agent_kill,
+            abs_path,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
