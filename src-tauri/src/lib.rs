@@ -10,6 +10,7 @@
 
 mod adapters;
 mod agent;
+mod fslist;
 mod quickask;
 mod sessions;
 mod workspaces;
@@ -198,6 +199,7 @@ pub fn run() {
             workspaces::workspaces_list,
             workspaces::workspaces_upsert,
             workspaces::workspaces_remove,
+            fslist::workspace_list_dir,
             quickask::quick_ask,
             quickask::quickask_config_get,
             quickask::quickask_config_save,

@@ -15,7 +15,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
 import { CommandQueuePanel } from "./CommandQueuePanel";
+import { FileTree } from "./FileTree";
 import { useQueueStore } from "../store/queueStore";
+import { collectModifiedPaths } from "../acp/fileTree";
 import { logRead, logAppend, logTruncate } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
@@ -577,6 +579,9 @@ function pickSlash(w: CommandWord) {
 
   const empty = messages.length === 0;
 
+  // F-9-4 最近改动的文件路径（diff 出现过的，供文件树「M」徽标）
+  const modifiedPaths = useMemo(() => collectModifiedPaths(messages), [messages]);
+
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
       {/* F-9-2 会话内搜索条 */}
@@ -807,6 +812,20 @@ function pickSlash(w: CommandWord) {
 
       {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
       <CommandQueuePanel tabKey={tabKey} />
+
+      {/* F-9-4 工作区文件树（当前会话 cwd） */}
+      <FileTree
+        cwd={cwd}
+        modifiedPaths={modifiedPaths}
+        onRefFile={(path) => {
+          logger.info("fs", "ref-file", { path });
+          setFiles((prev) => {
+            const seen = new Set(prev.map((f) => f.path));
+            if (seen.has(path)) return prev;
+            return [...prev, { path }];
+          });
+        }}
+      />
 
       <form
         className="row"
