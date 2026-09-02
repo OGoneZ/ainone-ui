@@ -17,6 +17,7 @@ import { logRead, logAppend } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
+import { welcomeGreeting, suggestionsFor } from "../store/welcome";
 import {
   useSessionStore,
   type ChatMsg,
@@ -147,6 +148,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     await runPrompt(text);
   }
 
+  // 建议 prompt 直接发送（F-6-3，不经输入框）
+  function sendSuggestion(text: string) {
+    appendUser(tabKey, text);
+    if (busy) {
+      pendingTextRef.current = text;
+      return;
+    }
+    void runPrompt(text);
+  }
+
   // slash 选中回填：命令名回填输入框，光标留在命令后（不自动发送）
 function pickSlash(w: CommandWord) {
     setInput(completeCommand(w));
@@ -240,7 +251,7 @@ function pickSlash(w: CommandWord) {
     <div className="panel">
       <div className="chat" ref={chatScrollRef}>
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
-        {empty && !historyDegraded && <Welcome onSuggest={(t) => setInput(t)} />}
+        {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
         {empty && historyDegraded && (
           <div className="hint degraded">⚠️ 上下文已恢复，历史消息未找到</div>
         )}
@@ -358,15 +369,12 @@ function pickSlash(w: CommandWord) {
   );
 }
 
-function Welcome({ onSuggest }: { onSuggest: (t: string) => void }) {
-  const suggestions = [
-    "帮我看看这个项目是做什么的",
-    "总结当前目录的结构",
-    "写一个 Hello World",
-  ];
+function Welcome({ adapter, onSuggest }: { adapter: AdapterWithStatus; onSuggest: (t: string) => void }) {
+  const greeting = welcomeGreeting(new Date().getHours());
+  const suggestions = suggestionsFor(adapter);
   return (
     <div className="welcome">
-      <h2>你好！我可以帮你做什么？</h2>
+      <h2>{greeting}！我可以帮你做什么？</h2>
       <div className="suggestions">
         {suggestions.map((s) => (
           <button key={s} className="suggestion" onClick={() => onSuggest(s)}>

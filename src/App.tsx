@@ -11,6 +11,8 @@ import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { resolveHistoryOpen, type Tab } from "./store/tabs";
 import { groupSessions } from "./store/workspaceGroup";
+import { useSessionStore } from "./store/sessionStore";
+import { collectSignals, deriveStatus, type SessionStatus } from "./store/sessionStatus";
 import "./App.css";
 
 // 工作区右键菜单状态
@@ -18,6 +20,19 @@ interface ContextMenu {
   x: number;
   y: number;
   workspaceId: string | null; // null = 未归组（仅有新建会话）
+}
+
+function statusLabel(st: SessionStatus): string {
+  switch (st) {
+    case "working":
+      return "工作中";
+    case "awaiting_input":
+      return "等待输入";
+    case "done":
+      return "已完成";
+    case "idle":
+      return "空闲";
+  }
 }
 
 function App() {
@@ -122,6 +137,21 @@ function App() {
   // 分组：侧栏渲染用
   const groups = useMemo(() => groupSessions(workspaces, history), [workspaces, history]);
 
+  // 会话状态（F-6-1）：非活跃 Tab 的 runtime 状态仍可读（zustand store）
+  const runtime = useSessionStore((s) => s.runtime);
+  const statusBySession = useMemo(() => {
+    const signals = collectSignals(tabs, runtime);
+    const out = new Map<string, SessionStatus>();
+    for (const [sid, sigs] of signals) {
+      out.set(sid, deriveStatus(sigs));
+    }
+    return out;
+  }, [tabs, runtime]);
+
+  function statusOf(sessionId: string): SessionStatus {
+    return statusBySession.get(sessionId) ?? "done";
+  }
+
   return (
     <main className="container">
       <h1>ainone-ui · Agent in One</h1>
@@ -181,16 +211,20 @@ function App() {
                 <span className="ws-count">{g.sessions.length}</span>
               </div>
               <div className="ws-sessions">
-                {g.sessions.map((h) => (
-                  <div key={h.session_id} className="history-item">
-                    <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
-                      {h.title}
-                    </button>
-                    <button className="history-del" onClick={() => deleteHistory(h.session_id)}>
-                      ×
-                    </button>
-                  </div>
-                ))}
+                {g.sessions.map((h) => {
+                  const st = statusOf(h.session_id);
+                  return (
+                    <div key={h.session_id} className={`history-item status-${st}`}>
+                      <span className={`status-dot dot-${st}`} title={statusLabel(st)} />
+                      <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
+                        {h.title}
+                      </button>
+                      <button className="history-del" onClick={() => deleteHistory(h.session_id)}>
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
                 {g.sessions.length === 0 && <div className="hint ws-empty">（空）</div>}
               </div>
             </div>

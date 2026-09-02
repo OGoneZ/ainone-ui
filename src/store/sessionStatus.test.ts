@@ -1,0 +1,51 @@
+import { describe, it, expect } from "vitest";
+import { deriveStatus, collectSignals, type RuntimeSignal } from "./sessionStatus";
+
+const idl: RuntimeSignal = { busy: false, pending: null, hasMessages: false };
+
+describe("会话状态推导（F-6-1）", () => {
+  it("空闲 → idle", () => {
+    expect(deriveStatus([idl])).toBe("idle");
+  });
+
+  it("工作中 → working", () => {
+    expect(deriveStatus([{ ...idl, busy: true }])).toBe("working");
+  });
+
+  it("等批准 → awaiting_input（优先于 working）", () => {
+    expect(deriveStatus([{ ...idl, busy: true, pending: "read_file" }])).toBe("awaiting_input");
+  });
+
+  it("有历史消息 → done", () => {
+    expect(deriveStatus([{ ...idl, hasMessages: true }])).toBe("done");
+  });
+
+  it("无任何 runtime（纯历史会话未打开）→ done", () => {
+    expect(deriveStatus([])).toBe("done");
+  });
+
+  it("多 runtime 聚合取最活跃（一个 waiting、一个 working）", () => {
+    expect(
+      deriveStatus([
+        { ...idl, busy: true },
+        { ...idl, pending: "x" },
+      ]),
+    ).toBe("awaiting_input");
+  });
+
+  it("collectSignals 把 tabs+runtime 聚合成 sessionId → 信号", () => {
+    const signals = collectSignals(
+      [
+        { key: "k1", sessionId: "s-1" },
+        { key: "k2", sessionId: "s-1" },
+        { key: "k3" }, // 新建中（无 sessionId）
+      ],
+      {
+        k1: { busy: true, pending: null, messages: [] },
+        k2: { busy: false, pending: "x", messages: [1, 2, 3] },
+      },
+    );
+    expect(signals.get("s-1")).toHaveLength(2);
+    expect(signals.has("s-1")).toBe(true);
+  });
+});
