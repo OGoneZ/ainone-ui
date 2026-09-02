@@ -16,6 +16,7 @@ import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
 import { CommandQueuePanel } from "./CommandQueuePanel";
 import { FileTree } from "./FileTree";
+import { VoiceInput } from "./VoiceInput";
 import { useQueueStore } from "../store/queueStore";
 import { collectModifiedPaths } from "../acp/fileTree";
 import { logRead, logAppend, logTruncate } from "../config/sessions";
@@ -843,6 +844,7 @@ function pickSlash(w: CommandWord) {
         >
           ＋
         </button>
+        <VoiceInput onTranscribed={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))} />
         <div className="input-wrap">
           {slashOpen && slashMatches.length > 0 && (
             <div className="slash-menu">

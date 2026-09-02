@@ -10,6 +10,7 @@
 
 mod adapters;
 mod agent;
+mod asr;
 mod fslist;
 mod quickask;
 mod sessions;
@@ -203,6 +204,7 @@ pub fn run() {
             quickask::quick_ask,
             quickask::quickask_config_get,
             quickask::quickask_config_save,
+            asr::asr_transcribe,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
