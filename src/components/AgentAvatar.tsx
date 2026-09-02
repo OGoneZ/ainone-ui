@@ -49,23 +49,32 @@ function fetchCdnSvg(adapterId: string): Promise<string | null> {
   return p;
 }
 
-/** 本地品牌 SVG：用 Vite 动态 import（命中则返回模块 URL，未命中抛错降级） */
+/** 本地品牌 SVG：显式静态 import（?raw 拿文本）。
+ *
+ * 关键：Vite 里 `.svg` 默认 import 返回 URL 字符串，必须用 `?raw` 才拿到 SVG 标记。
+ * 只有 5 个固定 harness，直接显式列出最可靠（此前 import.meta.glob 在本项目展开为空对象
+ * 导致全部降级 monogram，已弃用）。
+ */
+import ompSvg from "../assets/agent-logos/omp.svg?raw";
+import piSvg from "../assets/agent-logos/pi.svg?raw";
+import claudeCodeSvg from "../assets/agent-logos/claude-code.svg?raw";
+import codexSvg from "../assets/agent-logos/codex.svg?raw";
+import opencodeSvg from "../assets/agent-logos/opencode.svg?raw";
+
+const LOCAL_SVGS: Record<string, string> = {
+  omp: ompSvg,
+  pi: piSvg,
+  "claude-code": claudeCodeSvg,
+  codex: codexSvg,
+  opencode: opencodeSvg,
+};
+
 const localSvgCache = new Map<string, string | null>();
 async function loadLocalSvg(adapterId: string): Promise<string | null> {
   if (localSvgCache.has(adapterId)) return localSvgCache.get(adapterId)!;
-  try {
-    // 逐文件 import（不显式列出会触发 esbuild 依赖预扫描的 glob 失败）。
-    // 新增本地 logo 时在此追加 import，未配置的 adapter 命中 catch 降级到 monogram。
-    const mod = await import(
-      /* @vite-ignore */ `../../assets/agent-logos/${adapterId}.svg`
-    );
-    const m = mod as { default: string };
-    localSvgCache.set(adapterId, m.default);
-    return m.default;
-  } catch {
-    localSvgCache.set(adapterId, null);
-    return null;
-  }
+  const svg = LOCAL_SVGS[adapterId] ?? null;
+  localSvgCache.set(adapterId, svg);
+  return svg;
 }
 
 /** SVG 含 currentColor → 用 CSS mask 渲染跟随主题文字色（AionUi ThemedLogo 方案） */
