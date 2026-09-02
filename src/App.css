@@ -454,6 +454,64 @@ textarea {
   line-height: 1.4;
 }
 
+/* —— P4 slash 补全菜单（F-4-7）—— */
+.input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.input-wrap textarea {
+  width: 100%;
+}
+
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+  padding: 4px;
+}
+
+.slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.slash-item.active {
+  background: #eef2ff;
+}
+
+.slash-name {
+  font-weight: 600;
+  color: #396cd8;
+  white-space: nowrap;
+}
+
+.slash-desc {
+  font-size: 0.85em;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 button {
   cursor: pointer;
   font-weight: 500;
@@ -494,6 +552,19 @@ button:hover:not(:disabled) {
 
   .thought-body {
     border-left-color: #555;
+  }
+
+  .slash-menu {
+    background: #1f1f1f;
+    border-color: #3a3a3a;
+  }
+
+  .slash-item.active {
+    background: #2a3a5c;
+  }
+
+  .slash-desc {
+    color: #aaa;
   }
 
 

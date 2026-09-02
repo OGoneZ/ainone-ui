@@ -7,7 +7,7 @@
 //   - 一轮 agent 回复内部 blocks 顺序渲染：text / thought / tool
 //   - thinking 流式中浅色小字展开，结束后自动折叠为「已思考 N 秒」，可点击展开
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -16,6 +16,7 @@ import { openSession, type AcpSession } from "../acp/session";
 import { logRead, logAppend } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
+import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
 import {
   useSessionStore,
   type ChatMsg,
@@ -35,6 +36,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: P
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
+  const commands = useSessionStore((s) => s.commands[adapter.id] ?? []);
 
   const ensure = useSessionStore((s) => s.ensure);
   const drop = useSessionStore((s) => s.drop);
@@ -48,6 +50,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: P
   const [starting, setStarting] = useState(false);
   // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
   const [historyDegraded, setHistoryDegraded] = useState(false);
+  // slash 补全：高亮项下标，-1 = 无（未展开或已收起）
+  const [slashIdx, setSlashIdx] = useState(-1);
+  const slashRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // slash 候选（F-4-7）：输入以 / 开头才计算
+  const slashOpen = isSlashInput(input);
+  const slashMatches = useMemo(
+    () => (slashOpen ? filterCommands(commands, input) : []),
+    [commands, input, slashOpen],
+  );
 
   const sessionRef = useRef<AcpSession | null>(null);
   const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
@@ -120,6 +132,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: P
     const text = input.trim();
     if (!text) return;
     setInput("");
+    setSlashIdx(-1);
     appendUser(tabKey, text);
 
     // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
@@ -129,6 +142,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: P
       return;
     }
     await runPrompt(text);
+  }
+
+  // slash 选中回填：命令名回填输入框，光标留在命令后（不自动发送）
+function pickSlash(w: CommandWord) {
+    setInput(completeCommand(w));
+    setSlashIdx(-1);
+    slashRef.current?.focus();
   }
 
   const runRef = useRef<{ promise: Promise<void> } | null>(null);
@@ -265,19 +285,65 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: P
           submit();
         }}
       >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={busy ? "运行中，输入将打断当前 turn…" : `给 ${adapter.name} 发消息…`}
-          disabled={starting}
-          rows={1}
-        />
+        <div className="input-wrap">
+          {slashOpen && slashMatches.length > 0 && (
+            <div className="slash-menu">
+              {slashMatches.map((w, i) => (
+                <button
+                  type="button"
+                  key={w.name}
+                  className={i === slashIdx ? "slash-item active" : "slash-item"}
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // 抢在 textarea blur 前选中
+                    pickSlash(w);
+                  }}
+                >
+                  <span className="slash-name">/{w.name}</span>
+                  <span className="slash-desc">{w.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={slashRef}
+            value={input}
+            onChange={(e) => {
+              setInput(e.currentTarget.value);
+              setSlashIdx(-1); // 输入变化重置高亮
+            }}
+            onKeyDown={(e) => {
+              if (slashOpen && slashMatches.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSlashIdx((i) => (i + 1) % slashMatches.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSlashIdx((i) => (i <= 0 ? slashMatches.length - 1 : i - 1));
+                  return;
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  pickSlash(slashMatches[slashIdx >= 0 ? slashIdx : 0]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setSlashIdx(-1);
+                  return;
+                }
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder={busy ? "运行中，输入将打断当前 turn…" : `给 ${adapter.name} 发消息…`}
+            disabled={starting}
+            rows={1}
+          />
+        </div>
         <button type="submit" disabled={starting}>
           {starting ? "启动中…" : busy ? "打断并发送" : "发送"}
         </button>
