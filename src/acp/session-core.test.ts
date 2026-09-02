@@ -82,6 +82,12 @@ describe("session-core · dispatchUpdate", () => {
     ).toEqual([{ type: "usage", used: 100, size: 1000, cost: null }]);
   });
 
+  it("plan → plan（entries 透传 content/status/priority）", () => {
+    expect(
+      collect(notif({ sessionUpdate: "plan", entries: [{ content: "a", status: "pending", priority: "high" }] })),
+    ).toEqual([{ type: "plan", entries: [{ content: "a", status: "pending", priority: "high" }] }]);
+  });
+
   it("未知 update 类型被忽略", () => {
     expect(collect(notif({ sessionUpdate: "current_mode_update", currentModeId: "ask" }))).toEqual([]);
   });

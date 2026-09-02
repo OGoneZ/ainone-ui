@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
+import { PlanBar } from "./PlanBar";
 import { logRead, logAppend, logTruncate } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
@@ -431,6 +432,16 @@ function pickSlash(w: CommandWord) {
             useSessionStore.getState().setUsage(tabKey, { used: e.used, size: e.size, cost: e.cost });
             return;
           }
+          if (e.type === "plan") {
+            // F-9-1：plan 全量替换（DEC-16）
+            logger.debug("session", "plan", {
+              entries: e.entries.length,
+              done: e.entries.filter((x) => x.status === "completed").length,
+              total: e.entries.length,
+            });
+            useSessionStore.getState().setPlan(tabKey, e.entries);
+            return;
+          }
           const next = applyEvent(turnRef.current, e, Date.now);
           turnRef.current = next;
           useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
@@ -448,6 +459,8 @@ function pickSlash(w: CommandWord) {
       } finally {
         patch(tabKey, { busy: false });
         runRef.current = null;
+        // F-9-1 计划栏：turn 结束清除 plan，不悬挂下一轮（AC-P9-3）
+        useSessionStore.getState().setPlan(tabKey, null);
         // 落盘增量（turn 结束一次性追加，避免流式期间高频 IO）
         persistNew();
         // steering 排队续跑
@@ -640,6 +653,9 @@ function pickSlash(w: CommandWord) {
         <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
         <span>正在和 {adapter.name} 对话</span>
       </div>
+
+      {/* F-9-1 计划栏（输入框上方最上层，DEC-19） */}
+      <PlanBar tabKey={tabKey} />
 
       {/* F-8-2 批注卡列表：多段批注 + 统一发送 */}
       {quotes.length > 0 && (

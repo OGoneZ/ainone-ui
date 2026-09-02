@@ -38,6 +38,8 @@ export interface RuntimeState {
   usage: { used: number; size: number; cost: number | null } | null;
   /** F-8-4 元数据：provider 路由（providers/list 采集），无则为 null */
   meta: { apiType?: string; baseUrl?: string } | null;
+  /** F-9-1 计划：当前 turn 的 plan 条目（全量替换，turn 结束清除） */
+  plan: { content: string; status: string; priority?: string }[] | null;
 }
 
 interface SessionStore {
@@ -54,6 +56,8 @@ interface SessionStore {
   setUsage: (key: string, usage: { used: number; size: number; cost: number | null }) => void;
   /** 更新采集到的 provider 路由（F-8-4） */
   setMeta: (key: string, meta: { apiType?: string; baseUrl?: string } | null) => void;
+  /** 更新当前 turn 的 plan（F-9-1 全量替换） */
+  setPlan: (key: string, plan: { content: string; status: string; priority?: string }[] | null) => void;
   /** 整体覆盖消息列表（用于 readLog 回填） */
   setMessages: (key: string, messages: ChatMsg[]) => void;
   /** 追加一条 user 消息（新气泡） */
@@ -87,6 +91,7 @@ export const useSessionStore = create<SessionStore>()(
                 prompted: false,
                 usage: null,
                 meta: null,
+                plan: null,
               },
             },
           };
@@ -104,6 +109,13 @@ export const useSessionStore = create<SessionStore>()(
           const cur = s.runtime[key];
           if (!cur) return {};
           return { runtime: { ...s.runtime, [key]: { ...cur, meta } } };
+        }),
+
+      setPlan: (key, plan) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          return { runtime: { ...s.runtime, [key]: { ...cur, plan } } };
         }),
 
       drop: (key) =>

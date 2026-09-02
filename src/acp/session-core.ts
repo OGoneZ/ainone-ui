@@ -29,7 +29,15 @@ export type Outgoing =
   | { type: "turn_stop"; stopReason: string }
   | { type: "available_commands"; commands: CommandWord[] }
   | { type: "usage"; used: number; size: number; cost: number | null }
+  | { type: "plan"; entries: PlanEntry[] }
   | { type: "error"; message: string };
+
+/** P9 F-9-1 计划条目（从 ACP plan block 提取） */
+export interface PlanEntry {
+  content: string;
+  status: string;
+  priority?: string;
+}
 
 export interface CommandWord {
   name: string;
@@ -269,6 +277,17 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
         used: u.update.used,
         size: u.update.size,
         cost: u.update.cost?.amount ?? null,
+      });
+      break;
+    case "plan":
+      // F-9-1 计划栏：plan block 全量替换（DEC-16）
+      onOutgoing({
+        type: "plan",
+        entries: (u.update.entries ?? []).map((e) => ({
+          content: e.content,
+          status: e.status,
+          priority: e.priority,
+        })),
       });
       break;
     default:
