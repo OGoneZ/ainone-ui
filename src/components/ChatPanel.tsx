@@ -21,6 +21,7 @@ import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
+import { quickAsk, quickAskConfigGet } from "../config/quickask";
 import {
   useSessionStore,
   type ChatMsg,
@@ -122,6 +123,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-8-1 空闲回收：最近一次交互时间戳（prompt 发起时刷新）+ 定时器句柄
   const lastActivityRef = useRef(0);
   const recycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // F-8-7 快问：是否已配置快问模型（未配置则入口禁用）
+  const [quickAskReady, setQuickAskReady] = useState(false);
+  // F-8-7 快问：选中的待解释文本 + 悬浮窗口坐标
+  const [quickSel, setQuickSel] = useState<string | null>(null);
+  const [quickAnchor, setQuickAnchor] = useState({ x: 120, y: 80 });
+  // F-8-7 悬浮窗：null=关闭；加载中/结果/错误三态
+  const [quickPop, setQuickPop] = useState<{ state: "loading" | "ok" | "error"; text: string } | null>(null);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -139,6 +147,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         })
         .catch(() => setHistoryDegraded(true));
     }
+    // F-8-7 快问：读配置判定入口是否可用（未配置则禁用）
+    quickAskConfigGet()
+      .then((c) => setQuickAskReady(Boolean(c.base_url.trim() && c.model.trim())))
+      .catch(() => setQuickAskReady(false));
     // F-8-1 空闲超时回收：周期检查，空闲超阈值且无运行中 turn → 回收子进程
     recycleTimerRef.current = setInterval(() => {
       const s = sessionRef.current;
@@ -242,6 +254,26 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       return;
     }
     void runPrompt(text);
+  }
+
+  // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
+  function onSelectText(text: string, e?: React.MouseEvent) {
+    setQuickSel(text);
+    // 悬浮窗锚定到选区附近
+    setQuickAnchor({ x: e?.clientX ?? 120, y: e?.clientY ?? 80 });
+    setQuickPop(null);
+  }
+  async function runQuickAsk() {
+    if (!quickSel) return;
+    const text = quickSel;
+    logger.info("chat", "quick-ask", { textLen: text.length });
+    setQuickPop({ state: "loading", text: "" });
+    try {
+      const out = await quickAsk(text);
+      setQuickPop({ state: "ok", text: out });
+    } catch (e) {
+      setQuickPop({ state: "error", text: String(e) });
+    }
   }
 
   // slash 选中回填：命令名回填输入框，光标留在命令后（不自动发送）
@@ -372,12 +404,74 @@ function pickSlash(w: CommandWord) {
                   adapter={adapter}
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
-                  onQuote={addQuote}
+                  onSelect={onSelectText}
                 />
               </div>
             );
           })}
         </div>
+        {/* F-8-7 快问悬浮窗 */}
+        {quickSel && (
+          <div
+            className="quick-pop"
+            style={{
+              position: "absolute",
+              top: quickAnchor.y,
+              left: quickAnchor.x,
+              zIndex: 40,
+            }}
+          >
+            {!quickPop ? (
+              <>
+                <div className="quick-pop-title">对选中文本：</div>
+                <div className="quick-pop-sel" title={quickSel}>{quickSel}</div>
+                <div className="quick-pop-actions">
+                  {/* 统一入口（ideas IDEA-001）：批注＝加入批注卡；快速解释＝独立轻量模型 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      addQuote(quickSel);
+                      setQuickSel(null);
+                    }}
+                  >
+                    批注
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!quickAskReady}
+                    title={quickAskReady ? "" : "未配置快问模型"}
+                    onClick={runQuickAsk}
+                  >
+                    快速解释
+                  </button>
+                  <button type="button" onClick={() => setQuickSel(null)}>关闭</button>
+                </div>
+              </>
+            ) : quickPop.state === "loading" ? (
+              <div className="quick-pop-body">解释中…</div>
+            ) : quickPop.state === "error" ? (
+              <div className="quick-pop-body quick-pop-error">解释失败：{quickPop.text}</div>
+            ) : (
+              <>
+                <div className="quick-pop-body">{quickPop.text}</div>
+                <div className="quick-pop-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(quickPop.text).then(
+                        () => toast.success("已复制"),
+                        () => toast.error("复制失败"),
+                      );
+                    }}
+                  >
+                    复制
+                  </button>
+                  <button type="button" onClick={() => setQuickSel(null)}>关闭</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {pending && (
           <Dialog open onOpenChange={() => {}}>
             <DialogContent className="max-w-md" showCloseButton={false}>
@@ -552,13 +646,13 @@ function MessageLine({
   adapter,
   busy,
   isLast,
-  onQuote,
+  onSelect,
 }: {
   msg: ChatMsg;
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
-  onQuote?: (text: string) => void;
+  onSelect?: (text: string, e: React.MouseEvent) => void;
 }) {
   if (msg.role === "user") {
     return (
@@ -578,7 +672,7 @@ function MessageLine({
             key={i}
             block={b}
             live={busy && isLast && i === msg.blocks.length - 1 && b.kind === "thought" && b.ms === undefined}
-            onQuote={onQuote}
+            onSelect={onSelect}
           />
         ))}
         {/* hover 浮现复制按钮（F-7-4 AC-P7-4-2） */}
@@ -609,24 +703,23 @@ function MessageLine({
 function BlockView({
   block,
   live,
-  onQuote,
+  onSelect,
 }: {
   block: BlockMsg;
   live: boolean;
-  onQuote?: (text: string) => void;
+  onSelect?: (text: string, e: React.MouseEvent) => void;
 }) {
   switch (block.kind) {
     case "text":
       return (
         <div
           className="md"
-          onMouseUp={() => {
-            // F-8-2（用法1）：选中 assistant 正文文字 → 生成批注卡入口
+          onMouseUp={(e) => {
+            // F-8-2（用法1）+ F-8-7（快问）：选中 assistant 正文文字 → 记录选区
             const sel = window.getSelection();
-            if (!sel || sel.isCollapsed || !onQuote) return;
-            // 仅当选区落在本文本块内（非全选整页/跨多块首段）才触发
+            if (!sel || sel.isCollapsed) return;
             const text = sel.toString().trim();
-            if (text) onQuote(text);
+            if (text) onSelect?.(text, e);
           }}
         >
           <ReactMarkdown

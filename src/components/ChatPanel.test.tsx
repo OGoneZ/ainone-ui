@@ -20,6 +20,17 @@ vi.mock("../acp/session", () => ({
   openSession: vi.fn(),
 }));
 
+// F-8-7 快问：mock 配置与调用（组件内挂载即读配置）
+vi.mock("../config/quickask", () => ({
+  quickAskConfigGet: vi.fn().mockResolvedValue({
+    base_url: "https://qa.example.com/v1",
+    model: "qa-model",
+    timeout_ms: 30000,
+    has_api_key: false,
+  }),
+  quickAsk: vi.fn().mockResolvedValue("这是快问的解释"),
+}));
+
 // logger 内部走 @tauri-apps/plugin-log（依赖 Tauri invoke），jsdom 无 Tauri 运行时 → mock 掉
 vi.mock("../lib/logger", () => ({
   logger: {
@@ -156,7 +167,7 @@ describe("ChatPanel 交互行为", () => {
     // 点击后剪贴板含正文（mock clipboard）
   });
 
-  it("F-8-2 批注：选中文本 → 批注卡 → 发送 → user 气泡含引用组装（AC-P8-6）", async () => {
+  it("F-8-2 批注：选中文本 → 悬浮窗「批注」→ 批注卡 → 发送 → user 气泡含引用组装（AC-P8-6）", async () => {
     mockOpen.mockResolvedValue(
       fakeSession([
         { type: "agent_text", text: "第一段需要追问的原文" },
@@ -173,10 +184,13 @@ describe("ChatPanel 交互行为", () => {
     await user.type(input(), "hi");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    // agent 回复渲染后，选中触发 onQuote → 批注卡出现
+    // agent 回复渲染后，选中触发 onSelect → 悬浮窗出现（含「批注」入口）
     const mdText = await screen.findByText(/第一段需要追问的原文/);
     expect(mdText).toBeInTheDocument();
     mdText.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // 点「批注」加入批注卡
+    await user.click(await screen.findByRole("button", { name: "批注" }));
 
     // 批注卡出现，填疑问
     const qInput = await screen.findByLabelText("批注疑问 1");
@@ -187,5 +201,39 @@ describe("ChatPanel 交互行为", () => {
     expect(
       await screen.findByText(/\[引用 1\] 需要追问[\s\S]*疑问：为什么这样？/),
     ).toBeInTheDocument();
+  });
+
+  it("F-8-7 快问：选中 → 悬浮窗「快速解释」→ 解释结果不进入会话（AC-P8-10）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "某个需要解释的疑难名词" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    const selText = "疑难名词";
+    const sel = { isCollapsed: false, toString: () => selText };
+    (window as any).getSelection = () => sel;
+
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const mdText = await screen.findByText(/某个需要解释的疑难名词/);
+    mdText.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // 悬浮窗出现，点「快速解释」
+    await user.click(await screen.findByRole("button", { name: "快速解释" }));
+
+    // 悬浮窗显示解释内容
+    expect(await screen.findByText("这是快问的解释")).toBeInTheDocument();
+
+    // 解释内容不进入会话消息列表（程序化检查 store：无 user 气泡包含解释）
+    const runtime = useSessionStore.getState().runtime["k1"];
+    const allUserText = (runtime?.messages ?? [])
+      .filter((m: any) => m.role === "user")
+      .map((m: any) => m.text)
+      .join("\n");
+    expect(allUserText).not.toContain("这是快问的解释");
   });
 });

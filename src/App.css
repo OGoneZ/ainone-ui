@@ -1040,3 +1040,80 @@ button:hover:not(:disabled) {
   font-size: 13px;
   cursor: pointer;
 }
+
+/* ======================= P8 · F-8-7 快问悬浮窗 ======================= */
+.quick-pop {
+  min-width: 240px;
+  max-width: 360px;
+  background: var(--bg-1);
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-pop-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.quick-pop-sel {
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 2px solid var(--bg-3);
+  padding-left: 8px;
+  max-height: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quick-pop-body {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.quick-pop-error {
+  color: var(--danger);
+}
+
+.quick-pop-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.quick-pop-actions button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.quick-pop-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ======================= P8 · F-8-7 快问模型配置 ======================= */
+.quickask-config {
+  border-top: 1px solid var(--bg-3);
+  margin-top: 4px;
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quickask-config h3 {
+  margin: 0;
+  font-size: 0.95em;
+}

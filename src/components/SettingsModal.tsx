@@ -1,10 +1,11 @@
-// 设置页：适配器增删改查。
+// 设置页：适配器增删改查 + 快问模型（P8 F-8-7）。
 // 验收目标（plan.md AC-P2-1/6）：新增一条自定义适配器 → 保存后新会话下拉可用，全程不改代码；
 // 配置损坏时应用不崩溃并提示修复。
 
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Adapter } from "../config/adapters";
+import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "../config/quickask";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface Props {
@@ -42,15 +43,24 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
   const [items, setItems] = useState<EditableAdapter[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // F-8-7 快问模型配置
+  const [qa, setQa] = useState<QuickAskConfigView>({ base_url: "", model: "", timeout_ms: 30000, has_api_key: false });
+  const [qaKey, setQaKey] = useState("");
+  const [qaMsg, setQaMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     setLoading(true);
+    setQaMsg(null);
+    setQaKey("");
     invoke<Adapter[]>("adapters_list")
       .then((list) => setItems(list.map(toEditable)))
       .catch((e) => setError(`读取适配器失败：${String(e)}`))
       .finally(() => setLoading(false));
+    quickAskConfigGet()
+      .then(setQa)
+      .catch(() => {});
   }, [open]);
 
   // 逐项探测可用性
@@ -94,6 +104,16 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
     const adapters = items.map(fromEditable);
     try {
       await invoke("adapters_save", { adapters });
+      // F-8-7：快问模型配置一并保存（apiKey 留空 = 保留既有密钥）
+      setQaMsg(null);
+      await quickAskConfigSave({
+        base_url: qa.base_url,
+        model: qa.model,
+        timeout_ms: qa.timeout_ms,
+        api_key: qaKey,
+      });
+      setQaKey("");
+      setQaMsg("快问模型已保存");
       onSaved();
       onClose();
     } catch (e) {
@@ -156,6 +176,37 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
           <button onClick={addRow}>新增 harness</button>
           <button onClick={save}>保存</button>
           <button onClick={onClose}>关闭</button>
+        </div>
+
+        {/* F-8-7 快问模型配置（独立轻量模型，仅快问用，密钥不落 WebView） */}
+        <div className="quickask-config">
+          <h3>快问模型（选中文本「快速解释」用）</h3>
+          <label className="ns-label">
+            接口地址（OpenAI 兼容 base_url）
+            <input
+              placeholder="https://api.openai.com/v1"
+              value={qa.base_url}
+              onChange={(e) => setQa((q) => ({ ...q, base_url: e.target.value }))}
+            />
+          </label>
+          <label className="ns-label">
+            模型名
+            <input
+              placeholder="gpt-4o-mini"
+              value={qa.model}
+              onChange={(e) => setQa((q) => ({ ...q, model: e.target.value }))}
+            />
+          </label>
+          <label className="ns-label">
+            API Key（留空 = 保留既有密钥{qa.has_api_key ? "，已配置 ✓" : ""}）
+            <input
+              type="password"
+              placeholder={qa.has_api_key ? "已配置（留空不改）" : "sk-…"}
+              value={qaKey}
+              onChange={(e) => setQaKey(e.target.value)}
+            />
+          </label>
+          {qaMsg && <p className="ok" style={{ color: "var(--success)" }}>{qaMsg}</p>}
         </div>
       </DialogContent>
     </Dialog>
