@@ -958,3 +958,85 @@ button:hover:not(:disabled) {
   background: #fff;
   color: inherit;
 }
+
+/* ======================= P8 · F-8-2 批注卡 ======================= */
+.quote-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 2px;
+  padding: 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+
+.quote-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quote-index {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.quote-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 2px solid var(--bg-3);
+  padding-left: 8px;
+}
+
+.quote-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+
+.quote-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px;
+  cursor: pointer;
+}
+
+.quote-remove:hover {
+  color: var(--danger);
+}
+
+.quote-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.quote-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.quote-send {
+  padding: 4px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 13px;
+  cursor: pointer;
+}

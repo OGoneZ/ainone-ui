@@ -20,6 +20,17 @@ vi.mock("../acp/session", () => ({
   openSession: vi.fn(),
 }));
 
+// logger 内部走 @tauri-apps/plugin-log（依赖 Tauri invoke），jsdom 无 Tauri 运行时 → mock 掉
+vi.mock("../lib/logger", () => ({
+  logger: {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: (opts: { count: number }) => {
     const items = Array.from({ length: opts.count }, (_, index) => ({
@@ -143,5 +154,38 @@ describe("ChatPanel 交互行为", () => {
     expect(copyBtn).toBeInTheDocument();
     await user.click(copyBtn);
     // 点击后剪贴板含正文（mock clipboard）
+  });
+
+  it("F-8-2 批注：选中文本 → 批注卡 → 发送 → user 气泡含引用组装（AC-P8-6）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "第一段需要追问的原文" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    // mock 选区：getSelection 返回一段文字
+    const selText = "需要追问";
+    const sel = { isCollapsed: false, toString: () => selText };
+    (window as any).getSelection = () => sel;
+
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    // agent 回复渲染后，选中触发 onQuote → 批注卡出现
+    const mdText = await screen.findByText(/第一段需要追问的原文/);
+    expect(mdText).toBeInTheDocument();
+    mdText.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // 批注卡出现，填疑问
+    const qInput = await screen.findByLabelText("批注疑问 1");
+    await user.type(qInput, "为什么这样？");
+
+    // 发送批注 → user 气泡含组装文本
+    await user.click(screen.getByRole("button", { name: "发送批注" }));
+    expect(
+      await screen.findByText(/\[引用 1\] 需要追问[\s\S]*疑问：为什么这样？/),
+    ).toBeInTheDocument();
   });
 });

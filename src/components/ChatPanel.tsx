@@ -17,6 +17,7 @@ import { logRead, logAppend } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
+import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
@@ -37,6 +38,7 @@ import {
   ArrowRightIcon,
   SendIcon,
   StopIcon,
+  CloseIcon,
 } from "./ui/icons";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -89,6 +91,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const [input, setInput] = useState("");
   const [starting, setStarting] = useState(false);
+  // F-8-2 批注：已收集的多段批注（原文 + 疑问）
+  const [quotes, setQuotes] = useState<Quote[]>([]);
   // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
   const [historyDegraded, setHistoryDegraded] = useState(false);
   // slash 补全：高亮项下标，-1 = 无（未展开或已收起）
@@ -209,6 +213,31 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   function sendSuggestion(text: string) {
     appendUser(tabKey, text);
     if (busy) {
+      pendingTextRef.current = text;
+      return;
+    }
+    void runPrompt(text);
+  }
+
+  // —— F-8-2 批注引用：选中 → 批注卡 → 统一发送 ——
+  function addQuote(text: string) {
+    setQuotes((qs) => [...qs, { text, question: "" }]);
+  }
+  function setQuoteQuestion(idx: number, question: string) {
+    setQuotes((qs) => qs.map((q, i) => (i === idx ? { ...q, question } : q)));
+  }
+  function removeQuote(idx: number) {
+    setQuotes((qs) => qs.filter((_, i) => i !== idx));
+  }
+  function sendQuotes() {
+    if (quotes.length === 0) return;
+    const text = composeQuotedPrompt(quotes);
+    setQuotes([]);
+    logger.info("chat", "annotate-send", { quoteCount: quotes.length });
+    appendUser(tabKey, text);
+    // 与 steering 兼容：运行中发送 → 打断当前 turn 后新发起（复用打断队列）
+    if (busy) {
+      void stop();
       pendingTextRef.current = text;
       return;
     }
@@ -338,7 +367,13 @@ function pickSlash(w: CommandWord) {
                   transform: `translateY(${vi.start}px)`,
                 }}
               >
-                <MessageLine msg={m} adapter={adapter} busy={busy} isLast={vi.index === messages.length - 1} />
+                <MessageLine
+                  msg={m}
+                  adapter={adapter}
+                  busy={busy}
+                  isLast={vi.index === messages.length - 1}
+                  onQuote={addQuote}
+                />
               </div>
             );
           })}
@@ -365,6 +400,33 @@ function pickSlash(w: CommandWord) {
         <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
         <span>正在和 {adapter.name} 对话</span>
       </div>
+
+      {/* F-8-2 批注卡列表：多段批注 + 统一发送 */}
+      {quotes.length > 0 && (
+        <div className="quote-panel">
+          {quotes.map((q, i) => (
+            <div key={i} className="quote-card">
+              <span className="quote-index">引用 {i + 1}</span>
+              <div className="quote-text" title={q.text}>{q.text}</div>
+              <input
+                aria-label={`批注疑问 ${i + 1}`}
+                className="quote-input"
+                placeholder="填写疑问或评论…"
+                value={q.question}
+                onChange={(e) => setQuoteQuestion(i, e.target.value)}
+              />
+              <button type="button" className="quote-remove" aria-label={`移除引用 ${i + 1}`} onClick={() => removeQuote(i)}>
+                <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+              </button>
+            </div>
+          ))}
+          <div className="quote-actions">
+            <span className="quote-hint">已选 {quotes.length} 处</span>
+            <button type="button" className="quote-send" onClick={sendQuotes}>发送批注</button>
+          </div>
+        </div>
+      )}
+
       <form
         className="row"
         onSubmit={(e) => {
@@ -490,11 +552,13 @@ function MessageLine({
   adapter,
   busy,
   isLast,
+  onQuote,
 }: {
   msg: ChatMsg;
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
+  onQuote?: (text: string) => void;
 }) {
   if (msg.role === "user") {
     return (
@@ -514,6 +578,7 @@ function MessageLine({
             key={i}
             block={b}
             live={busy && isLast && i === msg.blocks.length - 1 && b.kind === "thought" && b.ms === undefined}
+            onQuote={onQuote}
           />
         ))}
         {/* hover 浮现复制按钮（F-7-4 AC-P7-4-2） */}
@@ -541,11 +606,29 @@ function MessageLine({
   );
 }
 
-function BlockView({ block, live }: { block: BlockMsg; live: boolean }) {
+function BlockView({
+  block,
+  live,
+  onQuote,
+}: {
+  block: BlockMsg;
+  live: boolean;
+  onQuote?: (text: string) => void;
+}) {
   switch (block.kind) {
     case "text":
       return (
-        <div className="md">
+        <div
+          className="md"
+          onMouseUp={() => {
+            // F-8-2（用法1）：选中 assistant 正文文字 → 生成批注卡入口
+            const sel = window.getSelection();
+            if (!sel || sel.isCollapsed || !onQuote) return;
+            // 仅当选区落在本文本块内（非全选整页/跨多块首段）才触发
+            const text = sel.toString().trim();
+            if (text) onQuote(text);
+          }}
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}
