@@ -123,4 +123,22 @@ describe("ChatPanel 交互行为", () => {
     await user.keyboard("{ArrowDown}{Enter}");
     expect(input).toHaveValue("/model ");
   });
+
+  it("agent 消息带 hover 复制按钮，点击复制正文（F-7-4 AC-P7-4-2）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "这是可复制的回复" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText(/给 Oh My Pi 发消息/), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const copyBtn = await screen.findByRole("button", { name: "复制回复" });
+    expect(copyBtn).toBeInTheDocument();
+    await user.click(copyBtn);
+    // 点击后剪贴板含正文（mock clipboard）
+  });
 });

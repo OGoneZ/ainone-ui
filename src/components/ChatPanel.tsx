@@ -25,6 +25,14 @@ import {
 } from "../store/sessionStore";
 import type { ToolContent } from "../acp/session-core";
 import type { AdapterWithStatus } from "../config/adapters";
+import { AgentAvatar } from "./AgentAvatar";
+import {
+  ThinkingIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  TerminalIcon,
+  ToolIcon,
+} from "./ui/icons";
 
 interface Props {
   tabKey: string;
@@ -389,7 +397,7 @@ function Welcome({ adapter, onSuggest }: { adapter: AdapterWithStatus; onSuggest
   );
 }
 
-// —— 消息行渲染：user 右气泡 / assistant 左气泡 + 头像 ——
+// —— 消息行渲染：user 右气泡 / assistant 左（全宽）+ 头像 + hover 复制（F-7-4）——
 function MessageLine({
   msg,
   adapter,
@@ -403,15 +411,17 @@ function MessageLine({
 }) {
   if (msg.role === "user") {
     return (
-      <div className="line user-line">
-        <div className="bubble user-bubble">{msg.text}</div>
+      <div className="flex justify-end my-1.5">
+        <div className="user-bubble max-w-[75%] px-3.5 py-2.5" style={{ backgroundColor: "var(--message-user-bg)", color: "#fff", borderRadius: "var(--radius-lg)", borderBottomRightRadius: "4px" }}>
+          <span className="whitespace-pre-wrap break-words">{msg.text}</span>
+        </div>
       </div>
     );
   }
   return (
-    <div className="line assistant-line">
-      <Avatar adapter={adapter} />
-      <div className="bubble assistant-bubble">
+    <div className="group flex gap-2.5 my-2.5">
+      <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={32} className="shrink-0 mt-0.5" />
+      <div className="min-w-0 flex-1">
         {msg.blocks.map((b, i) => (
           <BlockView
             key={i}
@@ -419,18 +429,25 @@ function MessageLine({
             live={busy && isLast && i === msg.blocks.length - 1 && b.kind === "thought" && b.ms === undefined}
           />
         ))}
+        {/* hover 浮现复制按钮（F-7-4 AC-P7-4-2） */}
+        <button
+          type="button"
+          aria-label="复制回复"
+          className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
+          style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+          onClick={() => {
+            const text = msg.blocks
+              .map((b) => (b.kind === "text" ? b.text : b.kind === "thought" ? b.text : ""))
+              .filter(Boolean)
+              .join("\n");
+            navigator.clipboard?.writeText(text).catch(() => {});
+          }}
+        >
+          <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+          复制
+        </button>
       </div>
     </div>
-  );
-}
-
-function Avatar({ adapter }: { adapter: AdapterWithStatus }) {
-  const ch = adapter.name.trim().charAt(0).toUpperCase() || "?";
-  const bg = adapter.logo || "#9e9e9e";
-  return (
-    <span className="avatar" style={{ background: bg }} title={adapter.name}>
-      {ch}
-    </span>
   );
 }
 
@@ -460,19 +477,65 @@ function BlockView({ block, live }: { block: BlockMsg; live: boolean }) {
 
 function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
   const [open, setOpen] = useState(live);
+  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     // 流式结束（live true→false）自动折叠
     if (!live) setOpen(false);
   }, [live]);
-  const summary =
-    ms !== undefined ? `已思考 ${(ms / 1000).toFixed(0)} 秒` : "思考中…";
+  // 实时计时（AC-P7-5-1）：思考中每秒跳动；reduced-motion 不影响计时（只关动画）
+  useEffect(() => {
+    if (!live) return;
+    setElapsed(0);
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+  const isThinking = ms === undefined && live;
+  const summary = ms !== undefined ? `已思考 ${(ms / 1000).toFixed(0)} 秒` : `思考中… ${elapsed}s`;
   return (
-    <div className="thought" data-live={live ? "true" : "false"}>
-      <button className="thought-head" onClick={() => setOpen((v) => !v)}>
-        <span className="caret">{open ? "▾" : "▸"}</span>
-        <span className="thought-summary">{summary}</span>
+    <div
+      className="my-1.5"
+      data-live={live ? "true" : "false"}
+      style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7 }}
+    >
+      <button
+        type="button"
+        className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 hover:bg-[var(--bg-hover)]"
+        style={{ color: isThinking ? "var(--warning)" : "var(--text-secondary)" }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {/* chevron 0.2s 旋转（AC-P7-5-3） */}
+        <span
+          className="inline-flex transition-transform"
+          style={{ transform: open ? "rotate(90deg)" : "none", transitionDuration: "var(--motion-fast)", transitionTimingFunction: "var(--ease-out-soft)" }}
+        >
+          <ChevronRightIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
+        </span>
+        <ThinkingIcon
+          className={isThinking ? "animate-pulse" : ""}
+          style={{ width: 13, height: 13, strokeWidth: 1.75 }}
+        />
+        <span>{summary}</span>
+        {/* 思考中 pulse 省略号（AC-P7-5-1） */}
+        {isThinking && (
+          <span className="animate-pulse" aria-hidden="true">
+            …
+          </span>
+        )}
       </button>
-      {open && <div className="thought-body">{text}</div>}
+      {open && (
+        <div
+          style={{
+            backgroundColor: "var(--thought-bg)",
+            borderRadius: "var(--radius-sm)",
+            padding: "8px 12px",
+            marginLeft: "20px",
+            marginTop: "2px",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {text}
+        </div>
+      )}
     </div>
   );
 }
@@ -492,7 +555,18 @@ function ToolBlock({
     <div className="tool">
       <div className="tool-head" onClick={() => setOpen((v) => !v)} title={title}>
         <span className="caret">{open ? "▾" : "▸"}</span>
-        🔧 {title} <span className="status">{status}</span>
+        <ToolIcon
+          style={{
+            width: 14,
+            height: 14,
+            strokeWidth: 1.75,
+            flexShrink: 0,
+            display: "inline-block",
+            verticalAlign: "middle",
+          }}
+        />
+        <span>{title}</span>
+        <span className="status">{status}</span>
       </div>
       {open && content.length > 0 && (
         <div className="tool-body">
@@ -518,7 +592,12 @@ function ToolContentView({ content }: { content: ToolContent }) {
         <DiffView path={content.diff.path} oldText={content.diff.oldText} newText={content.diff.newText} />
       );
     case "terminal":
-      return <div className="tool-terminal">🖥 终端 {content.terminal.terminalId}</div>;
+      return (
+        <div className="tool-terminal inline-flex items-center gap-1">
+          <TerminalIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+          终端 {content.terminal.terminalId}
+        </div>
+      );
   }
 }
 

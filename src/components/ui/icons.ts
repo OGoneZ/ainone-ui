@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleCheck,
+  Copy,
   FileDiff,
   FileText,
   Folder,
@@ -42,6 +43,7 @@ export const ToolIcon = Wrench; // 工具调用
 export const TerminalIcon = Terminal; // 终端输出
 export const FileTextIcon = FileText; // 文件
 export const DiffIcon = FileDiff; // diff 视图
+export const CopyIcon = Copy; // 复制
 export const WorkspaceIcon = Folder; // 工作区（收拢）
 export const WorkspaceOpenIcon = FolderOpen; // 工作区（展开）
 export const SessionIcon = MessageSquare; // 会话
