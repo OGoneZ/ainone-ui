@@ -191,7 +191,7 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
   };
 }
 
-function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgoing) => void) {
+export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgoing) => void) {
   switch (u.update.sessionUpdate) {
     case "agent_message_chunk":
       if (u.update.content.type === "text") {
@@ -225,7 +225,7 @@ function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgoing) =>
   }
 }
 
-function toCommandWord(c: acp.AvailableCommand): CommandWord {
+export function toCommandWord(c: acp.AvailableCommand): CommandWord {
   return {
     name: c.name,
     description: c.description,
@@ -233,7 +233,7 @@ function toCommandWord(c: acp.AvailableCommand): CommandWord {
   };
 }
 
-function toToolContent(content: acp.ToolCallContent[] | null | undefined): ToolContent[] {
+export function toToolContent(content: acp.ToolCallContent[] | null | undefined): ToolContent[] {
   if (!content) return [];
   const out: ToolContent[] = [];
   for (const c of content) {
