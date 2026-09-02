@@ -20,8 +20,8 @@ export type ChatMsg =
 export interface LogStore {
   /** 读回当前日志全量文本（可能为空串） */
   readAll(): Promise<string>;
-  /** 追加一行（不含换行符；调用方负责保证单行） */
-  appendLine(line: string): Promise<void>;
+  /** 追加多行（每行已序列化、不含换行符；一次性落盘） */
+  appendLines(lines: string[]): Promise<void>;
 }
 
 const ROLES = new Set(["user", "assistant", "thought", "tool"]);
@@ -65,9 +65,7 @@ export function parseLog(raw: string): ChatMsg[] {
     .filter((m): m is ChatMsg => m !== null);
 }
 
-/** 追加一批消息（每条一行） */
-export async function appendMessages(store: LogStore, msgs: ChatMsg[]): Promise<void> {
-  for (const m of msgs) {
-    await store.appendLine(serializeMessage(m));
-  }
+/** 序列化一批消息（保留顺序，每条一行文件行） */
+export function serializeMessages(msgs: ChatMsg[]): string[] {
+  return msgs.map(serializeMessage);
 }

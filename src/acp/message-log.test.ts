@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   serializeMessage,
+  serializeMessages,
   parseLine,
   parseLog,
-  appendMessages,
   type ChatMsg,
   type LogStore,
 } from "./message-log";
 
-/** 内存版 LogStore：验证 JSONL 追加写的行级语义 */
+/** 内存版 LogStore：验证 JSONL 批量追加写的行级语义 */
 function memStore(): { store: LogStore; lines: string[] } {
   const lines: string[] = [];
   return {
@@ -17,8 +17,8 @@ function memStore(): { store: LogStore; lines: string[] } {
       async readAll() {
         return lines.join("\n");
       },
-      async appendLine(line: string) {
-        lines.push(line);
+      async appendLines(newLines: string[]) {
+        lines.push(...newLines);
       },
     },
   };
@@ -53,13 +53,14 @@ describe("消息日志序列化 / 解析", () => {
     expect(parseLine(line)).toEqual(msg);
   });
 
-  it("appendMessages 每条一行，readAll 拼回可 parseLog 无损还原", async () => {
+  it("serializeMessages 保留顺序，appendLines + parseLog 无损还原", async () => {
     const msgs: ChatMsg[] = [
       { role: "user", text: "记住密码 banana-77" },
       { role: "assistant", text: "已记住。" },
+      { role: "tool", toolCallId: "t1", title: "read", status: "completed", content: [] },
     ];
-    await appendMessages(store, msgs);
-    expect(lines).toHaveLength(2);
+    await store.appendLines(serializeMessages(msgs));
+    expect(lines).toHaveLength(3);
     expect(parseLog(lines.join("\n"))).toEqual(msgs);
   });
 

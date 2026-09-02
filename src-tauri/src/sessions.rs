@@ -65,3 +65,44 @@ pub fn sessions_remove(app: tauri::AppHandle, session_id: String) -> Result<(), 
     list.retain(|e| e.session_id != session_id);
     save_all(&app, &list)
 }
+
+// —— 本地消息日志（plan-v2 F-4-3）——
+// 每会话一份 JSONL 存于 appDataDir/sessions/<sessionId>.jsonl，按序记录全部消息。
+// 本地日志是「单一真源」：恢复会话时读日志回填 UI（agent 上下文另由 session/load 恢复）。
+// 追加写由 Rust 命令承担，与 fd_read/fd_write 同层（见 lib.rs 注释）。
+
+fn log_path(app: &tauri::AppHandle, session_id: &str) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("解析数据目录失败: {e}"))?;
+    let sub = dir.join("sessions");
+    std::fs::create_dir_all(&sub).map_err(|e| format!("创建日志目录失败: {e}"))?;
+    Ok(sub.join(format!("{session_id}.jsonl")))
+}
+
+/// 读回某会话的日志全量文本；文件不存在返回空串。
+#[tauri::command]
+pub fn log_read(app: tauri::AppHandle, session_id: String) -> Result<String, String> {
+    let path = log_path(&app, &session_id)?;
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    std::fs::read_to_string(&path).map_err(|e| format!("读取会话日志失败: {e}"))
+}
+
+/// 追加多行（每行已序列化、不含换行符）到某会话日志末尾。
+#[tauri::command]
+pub fn log_append(app: tauri::AppHandle, session_id: String, lines: Vec<String>) -> Result<(), String> {
+    use std::io::Write;
+    let path = log_path(&app, &session_id)?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("打开会话日志失败: {e}"))?;
+    for line in lines {
+        writeln!(file, "{}", line).map_err(|e| format!("追加会话日志失败: {e}"))?;
+    }
+    Ok(())
+}

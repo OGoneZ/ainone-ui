@@ -135,6 +135,8 @@ pub fn run() {
             sessions::sessions_list,
             sessions::sessions_upsert,
             sessions::sessions_remove,
+            sessions::log_read,
+            sessions::log_append,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
