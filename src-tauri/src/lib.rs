@@ -11,6 +11,7 @@
 mod adapters;
 mod agent;
 mod sessions;
+mod workspaces;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::ipc::Channel;
@@ -116,6 +117,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             agent::init_state(app);
             Ok(())
@@ -137,6 +139,9 @@ pub fn run() {
             sessions::sessions_remove,
             sessions::log_read,
             sessions::log_append,
+            workspaces::workspaces_list,
+            workspaces::workspaces_upsert,
+            workspaces::workspaces_remove,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
