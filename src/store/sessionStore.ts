@@ -4,14 +4,18 @@
 // 运行时记录，使「非活跃 Tab 的运行状态」也能被侧栏/状态指示读取（P6 铺垫），
 // 同时让切换 Tab 不丢失消息（消息常驻 store，另有 JSONL 日志兜底持久化）。
 //
+// 消息模型（与 message-log.ts 一致，plan-v2 F-4-1）：
+//   - user 消息 = 独立气泡（右对齐）
+//   - assistant 消息 = 一个 turn，内部 blocks 顺序渲染（左对齐 + harness 头像）
+//   - 流式增量通过 appendUser / updateLastAssistant 落到某个又简洁又正确的消息
+//
 // 两个独立字段：
 //   - runtime: 按 tabKey 的会话运行时（不复用 sessionId，因并行 Tab 可复用同一会话）
-//   - commands: 按 adapterId 的 slash 命令缓存（F-4-7），来自 ACP available_commands_update，
-//     用 persist 持久化到 localStorage，供新会话空态时先用缓存
+//   - commands: 按 adapterId 的 slash 命令缓存（F-4-7），persist 到 localStorage
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ChatMsg } from "../acp/message-log";
+import type { ChatMsg, BlockMsg } from "../acp/message-log";
 
 export interface CommandWord {
   name: string;
@@ -40,8 +44,12 @@ interface SessionStore {
   drop: (key: string) => void;
   /** 绑定会话 id（session/new 或 load 后） */
   bindSession: (key: string, sessionId: string) => void;
-  /** 函数式更新消息列表 */
-  updateMessages: (key: string, fn: (m: ChatMsg[]) => ChatMsg[]) => void;
+  /** 整体覆盖消息列表（用于 readLog 回填） */
+  setMessages: (key: string, messages: ChatMsg[]) => void;
+  /** 追加一条 user 消息（新气泡） */
+  appendUser: (key: string, text: string) => void;
+  /** 对最后一个 assistant turn 的 blocks 做函数式更新；无则在末尾新起一个 assistant */
+  updateLastAssistant: (key: string, fn: (blocks: BlockMsg[]) => BlockMsg[]) => void;
   /** 更新 busy/pending/prompted 等标量 */
   patch: (key: string, p: Partial<Omit<RuntimeState, "messages">>) => void;
   /** 覆盖某 adapter 的命令缓存（available_commands_update 到达时） */
@@ -87,11 +95,43 @@ export const useSessionStore = create<SessionStore>()(
           return { runtime: { ...s.runtime, [key]: { ...cur, sessionId } } };
         }),
 
-      updateMessages: (key, fn) =>
+      setMessages: (key, messages) =>
         set((s) => {
           const cur = s.runtime[key];
           if (!cur) return {};
-          return { runtime: { ...s.runtime, [key]: { ...cur, messages: fn(cur.messages) } } };
+          return { runtime: { ...s.runtime, [key]: { ...cur, messages } } };
+        }),
+
+      appendUser: (key, text) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          return {
+            runtime: {
+              ...s.runtime,
+              [key]: { ...cur, messages: [...cur.messages, { role: "user", text }] },
+            },
+          };
+        }),
+
+      updateLastAssistant: (key, fn) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          const msgs = cur.messages;
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === "assistant") {
+            const next: ChatMsg[] = msgs.slice(0, -1);
+            next.push({ role: "assistant", blocks: fn(last.blocks) });
+            return { runtime: { ...s.runtime, [key]: { ...cur, messages: next } } };
+          }
+          // 无 assistant turn（如流式刚开始）→ 新起一个
+          return {
+            runtime: {
+              ...s.runtime,
+              [key]: { ...cur, messages: [...msgs, { role: "assistant", blocks: fn([]) }] },
+            },
+          };
         }),
 
       patch: (key, p) =>
