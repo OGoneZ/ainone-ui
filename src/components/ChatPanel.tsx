@@ -520,7 +520,13 @@ function BlockView({ block, live }: { block: BlockMsg; live: boolean }) {
     case "text":
       return (
         <div className="md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
+            components={{
+              pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+            }}
+          >
             {block.text}
           </ReactMarkdown>
         </div>
@@ -537,6 +543,28 @@ function BlockView({ block, live }: { block: BlockMsg; live: boolean }) {
         />
       );
   }
+}
+
+/** 代码块包装：hover 右上角浮现复制按钮（F-7-10 AC-P7-10-2） */
+function CodeBlock({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  return (
+    <div className="code-block-wrap" ref={ref}>
+      <pre>{children}</pre>
+      <button
+        type="button"
+        aria-label="复制代码"
+        className="code-copy"
+        onClick={() => {
+          const code = ref.current?.querySelector("code")?.textContent ?? "";
+          navigator.clipboard?.writeText(code).catch(() => {});
+        }}
+      >
+        <CopyIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+        复制
+      </button>
+    </div>
+  );
 }
 
 function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
