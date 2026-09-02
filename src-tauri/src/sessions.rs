@@ -36,12 +36,16 @@ fn load_all(app: &tauri::AppHandle) -> Result<Vec<SessionEntry>, String> {
         return Ok(Vec::new());
     }
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取会话索引失败: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("会话索引解析失败: {e}"))
+    serde_json::from_str(&raw).map_err(|e| {
+        log::warn!("[sessions] 索引 JSON 损坏: {e}");
+        format!("会话索引解析失败: {e}")
+    })
 }
 
 fn save_all(app: &tauri::AppHandle, entries: &[SessionEntry]) -> Result<(), String> {
     let json = serde_json::to_string_pretty(entries).map_err(|e| format!("序列化会话索引失败: {e}"))?;
-    std::fs::write(sessions_path(app)?, json).map_err(|e| format!("写入会话索引失败: {e}"))
+    std::fs::write(sessions_path(app)?, json)
+        .map_err(|e| format!("写入会话索引失败: {e}"))
 }
 
 /// F-5-4 迁移匹配（纯函数）：按 cwd 规范化给会话找所属工作区 id。

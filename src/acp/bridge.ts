@@ -8,6 +8,7 @@
 //   - 不做 JSONL 行切分——交给 SDK 内置 LineBuffer（只按 LF 切行，正是 DEC-5 语义）
 
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { logger } from "../lib/logger";
 
 export interface HarnessProcess {
   agentId: number;
@@ -68,6 +69,7 @@ export async function spawnHarness(
         break;
       case "error":
         // 进程级错误：中断 stdout 流并标记结束
+        logger.error("bridge", `agent:${agentId} 进程错误`, msg.payload);
         try {
           stdoutCtrl.error(new Error(msg.payload));
         } catch {
@@ -75,6 +77,7 @@ export async function spawnHarness(
         }
         break;
       case "terminated":
+        logger.info("bridge", `agent:${agentId} 进程退出 code=${msg.payload.code}`);
         try {
           stdoutCtrl.close();
         } catch {
@@ -96,6 +99,7 @@ export async function spawnHarness(
     cwd,
     onEvent: channel,
   });
+  logger.info("bridge", "spawn 成功", { agentId, program, args, cwd });
 
   // stdin：写字节 → agent_stdin_write
   const stdin = new WritableStream<Uint8Array>({

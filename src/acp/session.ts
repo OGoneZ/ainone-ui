@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { spawnHarness } from "./bridge";
 import { createAcpSession, type AcpSession, type CommandWord, type PermissionDecision } from "./session-core";
+import { logger } from "../lib/logger";
 import type { Adapter } from "../config/adapters";
 
 export type { AcpSession, PermissionDecision, Outgoing } from "./session-core";
@@ -22,6 +23,12 @@ export async function openSession(
   const cwd = await invoke<string>("abs_path", {
     path: cwdOverride && cwdOverride.length > 0 ? cwdOverride : adapter.cwd,
   }).catch(() => cwdOverride || adapter.cwd);
+  logger.info("session", "openSession", {
+    adapterId: adapter.id,
+    program: adapter.program,
+    cwd,
+    resumeSessionId: resumeSessionId ?? null,
+  });
   const proc = await spawnHarness(adapter.program, adapter.args, cwd);
 
   return createAcpSession({

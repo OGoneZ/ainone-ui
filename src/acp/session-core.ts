@@ -132,6 +132,7 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false },
     clientInfo: { name: "ainone-ui", version: "0.1.0" },
   });
+  console.info("[acp] initialize 完成，protocolVersion=", acp.PROTOCOL_VERSION);
 
   if (resumeSessionId) {
     // load：回放历史 update（纯消费不展示），response resolve 后回放结束
@@ -142,12 +143,14 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     });
     boundSessionId = resumeSessionId;
     drainQueue();
+    console.info("[acp] session/load 完成 sessionId=", resumeSessionId);
   } else {
     const resp = await connection.agent.request<acp.NewSessionResponse>(
       acp.methods.agent.session.new,
       { cwd, mcpServers: [] },
     );
     boundSessionId = resp.sessionId;
+    console.info("[acp] session/new 完成 sessionId=", resp.sessionId);
   }
 
   const sessionId = boundSessionId;
@@ -155,6 +158,7 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
   return {
     sessionId,
     async prompt(text, onOutgoing) {
+      console.info("[acp] session/prompt 开始 sessionId=", sessionId);
       const promptPromise = connection.agent.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [{ type: "text", text }],
@@ -168,12 +172,15 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
       // 排空残余 update（usage_update 等），避免串到下一轮
       drainQueue();
       const resp = await promptPromise;
+      console.info("[acp] session/prompt 结束 stopReason=", resp.stopReason);
       onOutgoing({ type: "turn_stop", stopReason: resp.stopReason });
     },
     cancel() {
+      console.info("[acp] session/cancel sessionId=", sessionId);
       return connection.agent.notify(acp.methods.agent.session.cancel, { sessionId });
     },
     async dispose() {
+      console.info("[acp] dispose sessionId=", sessionId);
       try {
         connection.close();
       } catch {

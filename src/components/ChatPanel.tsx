@@ -18,6 +18,7 @@ import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
 import { welcomeGreeting, suggestionsFor } from "../store/welcome";
+import { logger } from "../lib/logger";
 import {
   useSessionStore,
   type ChatMsg,
@@ -192,6 +193,7 @@ function pickSlash(w: CommandWord) {
         // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）
         useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
       } catch (err) {
+        logger.error("chat", "prompt 失败", { tabKey, adapter: adapter.id, error: String(err) });
         const next: TurnAccumulator = {
           ...turnRef.current,
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
