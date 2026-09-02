@@ -1433,3 +1433,78 @@ button:hover:not(:disabled) {
   outline-offset: -2px;
   border-radius: var(--radius-sm);
 }
+
+/* ======================= P9 · F-9-3 命令队列 ======================= */
+.queue-panel {
+  margin: 4px 2px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+
+.queue-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.queue-summary {
+  font-weight: 500;
+}
+
+.queue-list {
+  margin: 0;
+  padding: 0 10px 8px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+
+.queue-move {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.queue-move:hover {
+  color: var(--primary);
+}
+
+.queue-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.queue-remove:hover {
+  color: var(--danger);
+}

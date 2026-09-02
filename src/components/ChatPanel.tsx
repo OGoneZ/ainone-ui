@@ -14,6 +14,8 @@ import rehypeHighlight from "rehype-highlight";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
+import { CommandQueuePanel } from "./CommandQueuePanel";
+import { useQueueStore } from "../store/queueStore";
 import { logRead, logAppend, logTruncate } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
@@ -283,6 +285,22 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     await runPrompt(full);
   }
 
+  // F-9-3 命令队列：追加指令（运行中/空闲均可，容量满 toaster 提示不静默丢弃）
+  function enqueueCommand(text: string): boolean {
+    const ok = useQueueStore.getState().enqueue(tabKey, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text });
+    if (ok) {
+      logger.info("queue", "enqueue", {
+        id: "new",
+        len: useQueueStore.getState().queues[tabKey]?.length ?? 0,
+        total: useQueueStore.getState().queues[tabKey]?.length ?? 0,
+      });
+    } else {
+      logger.warn("queue", "full", { cap: 10 });
+      toast.warning("命令队列已满（10 条），请先消费或删除");
+    }
+    return ok;
+  }
+
   // —— F-8-3 文件引用：按钮选择 / 拖拽 同一条「待发送附件」路径 ——
   async function pickFiles() {
     const picked = await open({ multiple: true, directory: false });
@@ -483,7 +501,16 @@ function pickSlash(w: CommandWord) {
         // steering 排队续跑
         const queued = pendingTextRef.current;
         pendingTextRef.current = null;
-        if (queued) void runPrompt(queued);
+        if (queued) {
+          void runPrompt(queued);
+        } else {
+          // F-9-3 命令队列：turn 结束后自动按序消费下一条（AC-P9-9）
+          const head = useQueueStore.getState().dequeue(tabKey);
+          if (head) {
+            logger.info("queue", "consume", { id: head.id });
+            void runPrompt(head.text);
+          }
+        }
       }
     })();
     runRef.current = { promise: p };
@@ -778,6 +805,9 @@ function pickSlash(w: CommandWord) {
         </div>
       )}
 
+      {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
+      <CommandQueuePanel tabKey={tabKey} />
+
       <form
         className="row"
         onSubmit={(e) => {
@@ -878,6 +908,24 @@ function pickSlash(w: CommandWord) {
           }}
         >
           <StopIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+        </button>
+        {/* F-9-3 命令队列：排队追加按钮（区别于立即发送） */}
+        <button
+          type="button"
+          disabled={!input.trim() || starting}
+          aria-label="排队发送"
+          title="加入命令队列"
+          className="inline-flex h-9 px-2.5 shrink-0 items-center justify-center rounded-full text-xs"
+          style={{ backgroundColor: "var(--bg-2)", color: "var(--text-secondary)", transitionDuration: "var(--motion-default)" }}
+          onClick={() => {
+            const t = input.trim();
+            if (t) {
+              enqueueCommand(t);
+              setInput("");
+            }
+          }}
+        >
+          排队
         </button>
       </form>
     </div>
