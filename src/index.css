@@ -1,0 +1,200 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * 让 Tailwind 的 `dark:` 变体跟随本仓库的 data-theme 属性（而非默认的
+ * prefers-color-scheme / class 策略）。这样 shadcn 组件里的 `dark:` 类
+ * 在深色主题下才能生效，与 :root[data-theme=dark] 的变量换值对齐。
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ============================================================================
+ * ainone-ui 设计令牌层（P7 · F-7-2）—— 单一真源
+ *
+ * 纪律：组件层禁止出现颜色/时长/缓动/阴影字面量，一律 var(--*) 或 Tailwind
+ * 语义类。七组令牌来源与数值见 docs/plan-p7-ui.md §F-7-2（DeepChat/AionUi 实证）。
+ *
+ * 主题机制：沿用 data-theme 属性（existing App 的 light/dark 切换），
+ * 双主题各一套令牌值。@theme 内声明 Tailwind 命名空间的变量 → 生成语义类；
+ * 同时把规格书点名的语义变量作为裸 CSS 变量输出，供 var(--*) 直引。
+ * ========================================================================== */
+
+@theme {
+  /* —— 动效档位（DeepChat 实证数值）—— */
+  --motion-fast: 140ms;
+  --motion-default: 220ms;
+  --motion-slow: 320ms;
+  --duration-fast: 140ms;
+  --duration-default: 220ms;
+  --duration-slow: 320ms;
+
+  /* —— 缓动曲线 —— */
+  --ease-out-express: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* —— 表面层级（灰阶语义化命名，明暗值见下方 :root）—— */
+  --color-bg-base: var(--bg-base);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-bg-hover: var(--bg-hover);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-disabled: var(--text-disabled);
+
+  /* —— 语义色 —— */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-message-user-bg: var(--message-user-bg);
+  --color-thought-bg: var(--thought-bg);
+
+  /* —— shadcn/ui 语义色板（把默认色板映射到本令牌层，值统一 var(--*)）——
+   * 只定义一套语义类，深色通过 data-theme 换变量值实现，
+   * 所以 shadcn 模板里的 `dark:` 变体在本仓库被忽略（无需暗色 class 策略）。 */
+  --color-background: var(--bg-1);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--bg-1);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-1);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--bg-2);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted: var(--bg-2);
+  --color-muted-foreground: var(--text-secondary);
+  --color-accent: var(--bg-hover);
+  --color-accent-foreground: var(--text-primary);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--primary-foreground);
+  --color-border: var(--bg-3);
+  --color-input: var(--bg-3);
+  --color-ring: var(--primary);
+
+  /* —— 模糊档位 —— */
+  --blur-soft: 8px;
+  --blur-panel: 16px;
+
+  /* —— 阴影档位 —— */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+  /* —— 圆角阶梯 —— */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+}
+
+/* ======================= 明暗主题变量值 ======================= */
+
+:root {
+  /* 表面层级 */
+  --bg-base: #f6f6f6;
+  --bg-1: #ffffff; /* 悬浮层 / 面板 */
+  --bg-2: #f1f3f5; /* 输入框 / 行内代码底 */
+  --bg-3: #d9dce1; /* 边框 */
+  --bg-hover: #eceef1;
+
+  /* 文字 */
+  --text-primary: #0f0f0f;
+  --text-secondary: #6b7280;
+  --text-disabled: #9ca3af;
+
+  /* 语义色 */
+  --primary: #396cd8;
+  --primary-foreground: #ffffff;
+  --success: #2e7d32;
+  --warning: #e08e0b;
+  --danger: #c62828;
+  --message-user-bg: #396cd8;
+  --thought-bg: #f1f3f5;
+
+  /* z 轴阶梯（DeepChat） */
+  --z-sticky: 10;
+  --z-float: 20;
+  --z-popover: 50;
+  --z-modal: 100;
+  --z-toast: 1000;
+}
+
+:root[data-theme="dark"] {
+  --bg-base: #1a1a1a;
+  --bg-1: #242424;
+  --bg-2: #2e2e2e;
+  --bg-3: #3a3a3a;
+  --bg-hover: #2a2d31;
+
+  --text-primary: #f6f6f6;
+  --text-secondary: #a3a9b4;
+  --text-disabled: #6b7280;
+
+  --primary: #7ba4f0;
+  --primary-foreground: #0b1220;
+  --success: #6fbf73;
+  --warning: #e0a547;
+  --danger: #ef5350;
+  --message-user-bg: #396cd8;
+  --thought-bg: #2a2d31;
+}
+
+/* ======================= 基础复位与全局 ======================= */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--text-primary);
+  background-color: var(--bg-base);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+/*
+ * —— 可访问性 / reduced-motion 全局短路（F-7-11）——
+ * 系统开启「减弱动态效果」→ 所有动画瞬切，功能不损失。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* —— 全局细滚动条（F-7-12）—— */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* —— 键盘聚焦环（F-7-11）：2px 品牌色 —— */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
