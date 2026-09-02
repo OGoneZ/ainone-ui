@@ -9,6 +9,17 @@ import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } fr
 import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
+import { AgentAvatar } from "./components/AgentAvatar";
+import {
+  WorkspaceIcon,
+  WorkspaceOpenIcon,
+  WorkingIcon,
+  AwaitingIcon,
+  DoneIcon,
+  CloseIcon,
+  PlusIcon,
+  SettingsIcon,
+} from "./components/ui/icons";
 import { resolveHistoryOpen, type Tab } from "./store/tabs";
 import { groupSessions } from "./store/workspaceGroup";
 import { useSessionStore } from "./store/sessionStore";
@@ -22,17 +33,37 @@ interface ContextMenu {
   workspaceId: string | null; // null = 未归组（仅有新建会话）
 }
 
-function statusLabel(st: SessionStatus): string {
+/** 侧栏会话行 leading 槽 22px 状态机（F-7-7 AC-P7-7-1/2） */
+function StatusLeading({ st }: { st: SessionStatus }) {
+  const base = "flex h-[22px] w-[22px] shrink-0 items-center justify-center";
   switch (st) {
     case "working":
-      return "工作中";
+      return (
+        <span className={base} title="工作中">
+          <WorkingIcon className="animate-spin" style={{ width: 14, height: 14, strokeWidth: 1.75, color: "var(--primary)" }} />
+        </span>
+      );
     case "awaiting_input":
-      return "等待输入";
+      return (
+        <span className={base} title="等待输入">
+          <AwaitingIcon className="wiggle" style={{ width: 16, height: 16, strokeWidth: 1.75, color: "var(--warning)" }} />
+        </span>
+      );
     case "done":
-      return "已完成";
     case "idle":
-      return "空闲";
+    default:
+      return (
+        <span className={base} title={st === "idle" ? "空闲" : "已完成"}>
+          <DoneIcon style={{ width: 14, height: 14, strokeWidth: 1.75, color: st === "idle" ? "var(--text-disabled)" : "var(--text-secondary)" }} />
+        </span>
+      );
   }
+}
+
+/** 取路径尾段（工作区 cwd 尾缀，F-7-7） */
+function tailPath(cwd: string): string {
+  const parts = cwd.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? cwd;
 }
 
 function App() {
@@ -155,13 +186,18 @@ function App() {
     return statusBySession.get(sessionId) ?? "done";
   }
 
+  // 活跃会话高亮（F-7-7）：当前 Tab 若已绑定 sessionId，则侧栏对应行加品牌色竖条
+  const activeSessionId = activeTab?.sessionId;
+
   return (
     <main className="container">
-      <h1>ainone-ui · Agent in One</h1>
-
       <div className="toolbar">
-        <button onClick={() => setNewSession({ open: true })}>＋ 新建会话</button>
-        <button className="settings-btn" onClick={() => setSettingsOpen(true)}>
+        <button className="inline-flex items-center gap-1.5" onClick={() => setNewSession({ open: true })}>
+          <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+          新建会话
+        </button>
+        <button className="settings-btn inline-flex items-center gap-1.5" onClick={() => setSettingsOpen(true)}>
+          <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           设置
         </button>
         <label className="theme-select">
@@ -178,77 +214,102 @@ function App() {
         <aside className="sidebar">
           <div className="sidebar-head">
             <h3>工作区</h3>
-            <button className="add-ws" title="新建工作区" onClick={() => setNewSession({ open: true })}>
-              ＋
+            <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
+              <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
             </button>
           </div>
-          {groups.map((g) => (
-            <div key={g.workspace?.id ?? "__ungrouped__"} className="ws-group">
-              <div
-                className="ws-head"
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setCtxMenu({ x: e.clientX, y: e.clientY, workspaceId: g.workspace?.id ?? null });
-                }}
-              >
-                <span className="ws-icon">{g.workspace ? "📁" : "📂"}</span>
-                {renaming && renaming.id === (g.workspace?.id ?? "__ungrouped__") ? (
-                  <input
-                    autoFocus
-                    className="ws-rename"
-                    defaultValue={renaming.name}
-                    onBlur={(e) => {
-                      const id = renaming.id;
-                      if (id !== "__ungrouped__") renameWorkspace(id, e.target.value);
-                      setRenaming(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    }}
+          {groups.map((g) => {
+            const wsKey = g.workspace?.id ?? "__ungrouped__";
+            const hasWorkspace = Boolean(g.workspace);
+            const GroupIcon = hasWorkspace ? WorkspaceOpenIcon : WorkspaceIcon;
+            return (
+              <div key={wsKey} className="ws-group">
+                <div
+                  className="ws-head"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, workspaceId: g.workspace?.id ?? null });
+                  }}
+                >
+                  <GroupIcon
+                    className="ws-icon shrink-0"
+                    style={{ width: 14, height: 14, strokeWidth: 1.75, color: "var(--text-secondary)" }}
                   />
-                ) : (
-                  <span className="ws-name" title={g.workspace?.cwd}>
-                    {g.workspace?.name ?? "未归组"}
-                  </span>
-                )}
-                <span className="ws-count">{g.sessions.length}</span>
+                  {renaming && renaming.id === wsKey ? (
+                    <input
+                      autoFocus
+                      className="ws-rename"
+                      defaultValue={renaming.name}
+                      onBlur={(e) => {
+                        const id = renaming.id;
+                        if (id !== "__ungrouped__") renameWorkspace(id, e.target.value);
+                        setRenaming(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="ws-name" title={g.workspace?.cwd}>
+                        {g.workspace?.name ?? "未归组"}
+                      </span>
+                      {hasWorkspace && g.workspace!.cwd && tailPath(g.workspace!.cwd) !== g.workspace!.name && (
+                        <span className="ws-cwd">{tailPath(g.workspace!.cwd)}</span>
+                      )}
+                    </>
+                  )}
+                  <span className="ws-count">{g.sessions.length}</span>
+                </div>
+                <div className="ws-sessions">
+                  {g.sessions.map((h) => {
+                    const st = statusOf(h.session_id);
+                    const active = h.session_id === activeSessionId;
+                    return (
+                      <div
+                        key={h.session_id}
+                        className={`history-item status-${st} ${active ? "history-active" : ""}`}
+                      >
+                        <StatusLeading st={st} />
+                        <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
+                          {h.title}
+                        </button>
+                        <button
+                          className="history-del"
+                          aria-label="删除会话"
+                          onClick={() => deleteHistory(h.session_id)}
+                        >
+                          <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {g.sessions.length === 0 && <div className="hint ws-empty">（空）</div>}
+                </div>
               </div>
-              <div className="ws-sessions">
-                {g.sessions.map((h) => {
-                  const st = statusOf(h.session_id);
-                  return (
-                    <div key={h.session_id} className={`history-item status-${st}`}>
-                      <span className={`status-dot dot-${st}`} title={statusLabel(st)} />
-                      <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
-                        {h.title}
-                      </button>
-                      <button className="history-del" onClick={() => deleteHistory(h.session_id)}>
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-                {g.sessions.length === 0 && <div className="hint ws-empty">（空）</div>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {groups.length === 0 && <div className="hint">暂无工作区，点击 ＋ 新建会话并选择目录</div>}
         </aside>
 
         <section className="tabs-area">
           <div className="tabs-bar">
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                className={t.key === activeKey ? "tab active" : "tab"}
-                onClick={() => setActiveKey(t.key)}
-              >
-                {t.title}
-                <span className="tab-close" onClick={(e) => { e.stopPropagation(); closeTab(t.key); }}>
-                  ×
-                </span>
-              </button>
-            ))}
+            {tabs.map((t) => {
+              const tAdapter = adapters.find((a) => a.id === t.adapterId);
+              return (
+                <button
+                  key={t.key}
+                  className={t.key === activeKey ? "tab active" : "tab"}
+                  onClick={() => setActiveKey(t.key)}
+                >
+                  {tAdapter && <AgentAvatar adapterId={tAdapter.id} name={tAdapter.name} brandColor={tAdapter.logo} size={14} className="shrink-0" />}
+                  {t.title}
+                  <span className="tab-close" role="button" aria-label="关闭标签页" onClick={(e) => { e.stopPropagation(); closeTab(t.key); }}>
+                    <CloseIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <div className="tab-content">
             {activeAdapter ? (
@@ -261,7 +322,7 @@ function App() {
                 onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text, activeTab!.workspaceId, activeTab!.cwd)}
               />
             ) : (
-              <div className="hint empty">点击「＋ 新建会话」开始，或从左侧工作区恢复</div>
+              <div className="hint empty">点击「新建会话」开始，或从左侧工作区恢复</div>
             )}
           </div>
         </section>

@@ -22,3 +22,9 @@ export function suggestionsFor(adapter: AdapterWithStatus): string[] {
   ];
   return [`和 ${adapter.name} 一起开始吧：`, ...base];
 }
+
+/** F-7-6 打字机 placeholder 文案：取差异化建议的第一条实质项 */
+export function typewriterHint(adapter: AdapterWithStatus): string {
+  const all = suggestionsFor(adapter);
+  return all.find((s) => !s.startsWith("和 ")) ?? all[0];
+}

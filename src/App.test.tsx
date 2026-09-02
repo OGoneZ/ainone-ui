@@ -63,7 +63,7 @@ describe("App 编排（工作区分组）", () => {
     render(<App />);
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "＋ 新建会话" }));
+    await user.click(await screen.findByRole("button", { name: "新建会话" }));
 
     // 弹层出现
     const modal = await screen.findByRole("heading", { name: "新建会话" });

@@ -47,6 +47,8 @@ const adapter: AdapterWithStatus = {
   available: true,
 };
 
+const input = () => screen.getByLabelText("消息输入");
+
 /** 造一个受控 AcpSession：prompt 时手动触发 onOutgoing 事件流 */
 function fakeSession(events: Array<{ type: string; [k: string]: any }>): AcpSession {
   return {
@@ -79,7 +81,7 @@ describe("ChatPanel 交互行为", () => {
     render(<ChatPanel tabKey="k1" adapter={adapter} />);
 
     const user = userEvent.setup();
-    await user.type(screen.getByPlaceholderText(/给 Oh My Pi 发消息/), "你好");
+    await user.type(input(), "你好");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     // 用户气泡（左/右侧由 CSS 决定，这里断言内容 + 气泡容器存在）
@@ -98,7 +100,7 @@ describe("ChatPanel 交互行为", () => {
     );
     render(<ChatPanel tabKey="k1" adapter={adapter} />);
     const user = userEvent.setup();
-    await user.type(screen.getByPlaceholderText(/给 Oh My Pi 发消息/), "x");
+    await user.type(input(), "x");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     // turn 结束后 thought 封口 → summary「已思考 N 秒」（N 可为 0）
@@ -113,15 +115,15 @@ describe("ChatPanel 交互行为", () => {
     ]);
     render(<ChatPanel tabKey="k1" adapter={adapter} />);
 
-    const input = screen.getByPlaceholderText(/给 Oh My Pi 发消息/);
+    const inputEl = input();
     const user = userEvent.setup();
-    await user.type(input, "/");
+    await user.type(inputEl, "/");
 
     expect(await screen.findByText("/model")).toBeInTheDocument();
     expect(screen.getByText("/fast")).toBeInTheDocument();
 
     await user.keyboard("{ArrowDown}{Enter}");
-    expect(input).toHaveValue("/model ");
+    expect(inputEl).toHaveValue("/model ");
   });
 
   it("agent 消息带 hover 复制按钮，点击复制正文（F-7-4 AC-P7-4-2）", async () => {
@@ -133,7 +135,7 @@ describe("ChatPanel 交互行为", () => {
     );
     render(<ChatPanel tabKey="k1" adapter={adapter} />);
     const user = userEvent.setup();
-    await user.type(screen.getByPlaceholderText(/给 Oh My Pi 发消息/), "hi");
+    await user.type(input(), "hi");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     const copyBtn = await screen.findByRole("button", { name: "复制回复" });

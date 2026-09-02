@@ -17,7 +17,7 @@ import { logRead, logAppend } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
-import { welcomeGreeting, suggestionsFor } from "../store/welcome";
+import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import {
   useSessionStore,
   type ChatMsg,
@@ -32,6 +32,9 @@ import {
   CopyIcon,
   TerminalIcon,
   ToolIcon,
+  ArrowRightIcon,
+  SendIcon,
+  StopIcon,
 } from "./ui/icons";
 
 interface Props {
@@ -41,6 +44,25 @@ interface Props {
   /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
   cwd?: string;
   onFirstPrompt?: (text: string, sessionId: string) => void;
+}
+
+// F-7-6 打字机 placeholder：80ms/字循环打出；prefers-reduced-motion 直接显全文（AC-P7-6-1/6）
+function useTypewriter(full: string): string {
+  const [n, setN] = useState(0);
+  const reduced =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  useEffect(() => {
+    if (reduced) {
+      setN(full.length);
+      return;
+    }
+    setN(0);
+    const t = setInterval(() => setN((i) => (i >= full.length ? 0 : i + 1)), 80);
+    return () => clearInterval(t);
+  }, [full, reduced]);
+  if (reduced) return full;
+  return full.slice(0, n);
 }
 
 export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt }: Props) {
@@ -67,6 +89,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // slash 补全：高亮项下标，-1 = 无（未展开或已收起）
   const [slashIdx, setSlashIdx] = useState(-1);
   const slashRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文
+  const typeText = useTypewriter(typewriterHint(adapter));
 
   // slash 候选（F-4-7）：输入以 / 开头才计算
   const slashOpen = isSlashInput(input);
@@ -302,7 +327,10 @@ function pickSlash(w: CommandWord) {
         )}
       </div>
 
-      <div className="harness-badge">正在和 {adapter.name} 对话</div>
+      <div className="harness-badge inline-flex items-center gap-2">
+        <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
+        <span>正在和 {adapter.name} 对话</span>
+      </div>
       <form
         className="row"
         onSubmit={(e) => {
@@ -331,6 +359,7 @@ function pickSlash(w: CommandWord) {
           )}
           <textarea
             ref={slashRef}
+            aria-label="消息输入"
             value={input}
             onChange={(e) => {
               setInput(e.currentTarget.value);
@@ -364,16 +393,35 @@ function pickSlash(w: CommandWord) {
                 submit();
               }
             }}
-            placeholder={busy ? "运行中，输入将打断当前 turn…" : `给 ${adapter.name} 发消息…`}
+            placeholder={busy ? "运行中，输入将打断当前 turn…" : typeText}
             disabled={starting}
             rows={1}
           />
         </div>
-        <button type="submit" disabled={starting}>
-          {starting ? "启动中…" : busy ? "打断并发送" : "发送"}
+        <button
+          type="submit"
+          disabled={starting}
+          aria-label="发送"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: "var(--primary)", color: "var(--primary-foreground)", transitionDuration: "var(--motion-default)" }}
+        >
+          <SendIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
         </button>
-        <button type="button" onClick={stop} disabled={!busy}>
-          停止
+        <button
+          type="button"
+          onClick={stop}
+          disabled={!busy}
+          aria-label="停止"
+          className={`stop-btn inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+            busy ? "run-pulse" : ""
+          }`}
+          style={{
+            backgroundColor: "var(--bg-2)",
+            color: busy ? "var(--danger)" : "var(--text-secondary)",
+            transitionDuration: "var(--motion-default)",
+          }}
+        >
+          <StopIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
         </button>
       </form>
     </div>
@@ -388,8 +436,13 @@ function Welcome({ adapter, onSuggest }: { adapter: AdapterWithStatus; onSuggest
       <h2>{greeting}！我可以帮你做什么？</h2>
       <div className="suggestions">
         {suggestions.map((s) => (
-          <button key={s} className="suggestion" onClick={() => onSuggest(s)}>
-            {s}
+          <button key={s} className="suggestion group inline-flex items-center gap-1" onClick={() => onSuggest(s)}>
+            <span>{s}</span>
+            {/* F-7-6 AC-P7-6-3：hover 箭头从左滑入 */}
+            <ArrowRightIcon
+              className="opacity-0 -translate-x-1 transition-all group-hover:opacity-100 group-hover:translate-x-0"
+              style={{ width: 14, height: 14, strokeWidth: 1.75, transitionDuration: "var(--motion-fast)" }}
+            />
           </button>
         ))}
       </div>

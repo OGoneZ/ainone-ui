@@ -198,3 +198,70 @@ body {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
+
+/* —— 运行中停止按钮呼吸脉冲环（F-7-6 AC-P7-6-5）—— */
+@keyframes run-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--danger);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(198, 40, 40, 0.15);
+  }
+}
+
+.run-pulse {
+  animation: run-pulse 1.4s ease-in-out infinite;
+}
+
+/* —— awaiting_input bell wiggle（F-7-7 AC-P7-7-2）：3s 周期仅前 20% 摇一下 —— */
+@keyframes wiggle {
+  0%,
+  20% {
+    transform: rotate(0);
+  }
+  4%,
+  12% {
+    transform: rotate(-14deg);
+  }
+  8% {
+    transform: rotate(14deg);
+  }
+  20%,
+  100% {
+    transform: rotate(0);
+  }
+}
+
+.wiggle {
+  animation: wiggle 3s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+/* —— 侧栏视觉（F-7-7）—— */
+
+/* 活跃会话：左侧 2px 品牌色竖条（AC-P7-7 高亮） */
+.history-item.history-active {
+  border-left: 2px solid var(--primary);
+  background: var(--bg-1);
+}
+
+/* 工作区 cwd 尾缀：11px 次级色省略 */
+.ws-cwd {
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+
+/* 会话行删除按钮 hover 浮现（AC-P7-7-5） */
+.history-del {
+  opacity: 0;
+  transition: opacity var(--motion-fast);
+}
+.history-item:hover .history-del,
+.history-del:focus-visible {
+  opacity: 1;
+}

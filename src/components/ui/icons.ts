@@ -9,6 +9,7 @@
 // 注：lucide 已把 CheckCircle2 更名为 CircleCheck，此处按语义导出，映射表仍成立。
 
 import {
+  ArrowRight,
   ArrowUp,
   BellRing,
   Bot,
@@ -54,6 +55,7 @@ export const UserIcon = User; // 用户
 export const SettingsIcon = Settings; // 设置
 export const SendIcon = ArrowUp; // 发送
 export const StopIcon = Square; // 停止
+export const ArrowRightIcon = ArrowRight; // 建议 prompt hover 箭头
 
 // 通用符号
 export const ChevronDownIcon = ChevronDown;
