@@ -29,10 +29,12 @@ interface Props {
   tabKey: string;
   adapter: AdapterWithStatus;
   resumeSessionId?: string;
+  /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
+  cwd?: string;
   onFirstPrompt?: (text: string, sessionId: string) => void;
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt }: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -119,6 +121,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: P
         },
         resumeSessionId,
         (words: CommandWord[]) => setCommands(adapter.id, words),
+        cwd,
       );
       sessionRef.current = s;
       bindSession(tabKey, s.sessionId);

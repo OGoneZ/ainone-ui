@@ -1,23 +1,36 @@
-// ainone-ui 主界面：多 Tab 并行会话编排。
+// ainone-ui 主界面：多 Tab 并行会话编排 + 左侧工作区分组侧栏（P5）。
 // 每个 Tab = 一个 adapter + 一个独立会话（独立子进程），Tab 关闭时清理子进程。
-// 左侧会话历史侧栏 + 右侧当前 Tab 聊天面板。
+// 侧栏按工作区归集会话；工作区右键：新建会话 / 重命名 / 移除。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listAdapters, type AdapterWithStatus } from "./config/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./config/sessions";
+import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./config/workspaces";
 import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
+import { NewSessionModal } from "./components/NewSessionModal";
 import { resolveHistoryOpen, type Tab } from "./store/tabs";
+import { groupSessions } from "./store/workspaceGroup";
 import "./App.css";
 
-// Tab 类型定义抽到 store/tabs.ts（F-4-4 可单测）
+// 工作区右键菜单状态
+interface ContextMenu {
+  x: number;
+  y: number;
+  workspaceId: string | null; // null = 未归组（仅有新建会话）
+}
 
 function App() {
   const [adapters, setAdapters] = useState<AdapterWithStatus[]>([]);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeKey, setActiveKey] = useState<string>("");
   const [history, setHistory] = useState<SessionEntry[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 新建会话弹层：open + 预填工作区（右键新建时传入）
+  const [newSession, setNewSession] = useState<{ open: boolean; workspaceId?: string | null }>({ open: false });
+  const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   // 主题：light / dark / auto（默认 auto 跟随系统）
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   const nextKey = useRef(1);
@@ -37,17 +50,21 @@ function App() {
   function reloadHistory() {
     sessionsList().then(setHistory);
   }
+  function reloadWorkspaces() {
+    workspacesList().then(setWorkspaces);
+  }
   useEffect(() => {
     reloadAdapters();
     reloadHistory();
+    reloadWorkspaces();
   }, []);
 
   const activeTab = tabs.find((t) => t.key === activeKey);
   const activeAdapter = activeTab ? adapters.find((a) => a.id === activeTab.adapterId) : undefined;
 
-  function newTab(adapterId: string) {
+  function newTab(adapterId: string, workspaceId?: string | null, cwd?: string) {
     const key = `tab-${nextKey.current++}`;
-    setTabs((ts) => [...ts, { key, adapterId, title: "新会话" }]);
+    setTabs((ts) => [...ts, { key, adapterId, title: "新会话", workspaceId: workspaceId ?? null, cwd }]);
     setActiveKey(key);
   }
 
@@ -69,13 +86,13 @@ function App() {
     // 子进程清理在 ChatPanel 卸载时由 session.dispose 兜底（见 ChatPanel 的 useEffect 清理）
   }
 
-  // 首条消息 → 写会话索引
-  function handleFirstPrompt(sessionId: string, adapterId: string, text: string, workspaceId?: string | null) {
+  // 首条消息 → 写会话索引（带上工作区归属与运行目录）
+  function handleFirstPrompt(sessionId: string, adapterId: string, text: string, workspaceId?: string | null, cwd?: string) {
     sessionsUpsert({
       session_id: sessionId,
       adapter_id: adapterId,
       title: text.slice(0, 40) || "未命名会话",
-      cwd: "",
+      cwd: cwd ?? "",
       workspace_id: workspaceId ?? null,
       mtime_ms: Date.now(),
     }).then(reloadHistory);
@@ -85,23 +102,32 @@ function App() {
     sessionsRemove(id).then(reloadHistory);
   }
 
+  function confirmNewSession(adapterId: string, workspaceId: string | null, cwd?: string) {
+    newTab(adapterId, workspaceId, cwd);
+  }
+
+  function renameWorkspace(id: string, name: string) {
+    const w = workspaces.find((x) => x.id === id);
+    if (!w || !name.trim()) return;
+    workspacesUpsert({ ...w, name: name.trim() }).then(reloadWorkspaces);
+  }
+
+  function removeWorkspace(id: string) {
+    workspacesRemove(id).then(() => {
+      reloadWorkspaces();
+      reloadHistory(); // 其下会话已移入未归组，刷新
+    });
+  }
+
+  // 分组：侧栏渲染用
+  const groups = useMemo(() => groupSessions(workspaces, history), [workspaces, history]);
+
   return (
     <main className="container">
       <h1>ainone-ui · Agent in One</h1>
 
       <div className="toolbar">
-        <label>
-          harness：
-          <select value="" onChange={(e) => e.target.value && newTab(e.target.value)}>
-            <option value="">＋ 新建会话（选 harness）</option>
-            {adapters.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.available ? "" : "（未安装）"}
-              </option>
-            ))}
-          </select>
-        </label>
+        <button onClick={() => setNewSession({ open: true })}>＋ 新建会话</button>
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}>
           设置
         </button>
@@ -117,18 +143,59 @@ function App() {
 
       <div className="workspace">
         <aside className="sidebar">
-          <h3>会话历史</h3>
-          {history.map((h) => (
-            <div key={h.session_id} className="history-item">
-              <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
-                {h.title}
-              </button>
-              <button className="history-del" onClick={() => deleteHistory(h.session_id)}>
-                ×
-              </button>
+          <div className="sidebar-head">
+            <h3>工作区</h3>
+            <button className="add-ws" title="新建工作区" onClick={() => setNewSession({ open: true })}>
+              ＋
+            </button>
+          </div>
+          {groups.map((g) => (
+            <div key={g.workspace?.id ?? "__ungrouped__"} className="ws-group">
+              <div
+                className="ws-head"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtxMenu({ x: e.clientX, y: e.clientY, workspaceId: g.workspace?.id ?? null });
+                }}
+              >
+                <span className="ws-icon">{g.workspace ? "📁" : "📂"}</span>
+                {renaming && renaming.id === (g.workspace?.id ?? "__ungrouped__") ? (
+                  <input
+                    autoFocus
+                    className="ws-rename"
+                    defaultValue={renaming.name}
+                    onBlur={(e) => {
+                      const id = renaming.id;
+                      if (id !== "__ungrouped__") renameWorkspace(id, e.target.value);
+                      setRenaming(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    }}
+                  />
+                ) : (
+                  <span className="ws-name" title={g.workspace?.cwd}>
+                    {g.workspace?.name ?? "未归组"}
+                  </span>
+                )}
+                <span className="ws-count">{g.sessions.length}</span>
+              </div>
+              <div className="ws-sessions">
+                {g.sessions.map((h) => (
+                  <div key={h.session_id} className="history-item">
+                    <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
+                      {h.title}
+                    </button>
+                    <button className="history-del" onClick={() => deleteHistory(h.session_id)}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {g.sessions.length === 0 && <div className="hint ws-empty">（空）</div>}
+              </div>
             </div>
           ))}
-          {history.length === 0 && <div className="hint">暂无历史会话</div>}
+          {groups.length === 0 && <div className="hint">暂无工作区，点击 ＋ 新建会话并选择目录</div>}
         </aside>
 
         <section className="tabs-area">
@@ -153,10 +220,11 @@ function App() {
                 tabKey={activeTab!.key}
                 adapter={activeAdapter}
                 resumeSessionId={activeTab!.sessionId}
-                onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text)}
+                cwd={activeTab!.cwd}
+                onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text, activeTab!.workspaceId, activeTab!.cwd)}
               />
             ) : (
-              <div className="hint empty">选择左上角 harness 新建会话，或从左侧历史恢复</div>
+              <div className="hint empty">点击「＋ 新建会话」开始，或从左侧工作区恢复</div>
             )}
           </div>
         </section>
@@ -167,6 +235,47 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         onSaved={reloadAdapters}
       />
+
+      <NewSessionModal
+        open={newSession.open}
+        adapters={adapters}
+        workspaces={workspaces}
+        presetWorkspaceId={newSession.workspaceId}
+        onClose={() => setNewSession({ open: false })}
+        onConfirm={confirmNewSession}
+      />
+
+      {ctxMenu && (
+        <div className="ctx-backdrop" onClick={() => setCtxMenu(null)}>
+          <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+            <button onClick={() => { setCtxMenu(null); setNewSession({ open: true, workspaceId: ctxMenu.workspaceId }); }}>
+              新建会话
+            </button>
+            {ctxMenu.workspaceId && (
+              <>
+                <button
+                  onClick={() => {
+                    const w = workspaces.find((x) => x.id === ctxMenu.workspaceId);
+                    if (w && ctxMenu.workspaceId) setRenaming({ id: ctxMenu.workspaceId, name: w.name });
+                    setCtxMenu(null);
+                  }}
+                >
+                  重命名
+                </button>
+                <button
+                  className="ctx-danger"
+                  onClick={() => {
+                    removeWorkspace(ctxMenu.workspaceId!);
+                    setCtxMenu(null);
+                  }}
+                >
+                  移除工作区
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }

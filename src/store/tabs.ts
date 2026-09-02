@@ -8,6 +8,10 @@ export interface Tab {
   adapterId: string;
   sessionId?: string; // 恢复时带，新建时 undefined
   title: string;
+  /** 会话运行目录（工作区 cwd）——新建选工作区/恢复时确定 */
+  cwd?: string;
+  /** 所属工作区 id；null/undefined = 未归组 */
+  workspaceId?: string | null;
 }
 
 /** 找到已打开某 sessionId 的 Tab；不存在或 sessionId 为空返回 undefined */
@@ -19,7 +23,7 @@ export function findTabBySession(tabs: Tab[], sessionId: string | undefined): Ta
 /** 点击历史会话的分派：返回要激活的 key 与新 Tab（若需要新开） */
 export function resolveHistoryOpen(
   tabs: Tab[],
-  entry: { session_id: string; adapter_id: string; title: string },
+  entry: { session_id: string; adapter_id: string; title: string; cwd?: string; workspace_id: string | null },
   nextKey: string,
 ): { activateKey: string; newTab: Tab | null } {
   const existing = findTabBySession(tabs, entry.session_id);
@@ -31,6 +35,8 @@ export function resolveHistoryOpen(
       adapterId: entry.adapter_id,
       sessionId: entry.session_id,
       title: entry.title,
+      cwd: entry.cwd && entry.cwd.length > 0 ? entry.cwd : undefined,
+      workspaceId: entry.workspace_id ?? null,
     },
   };
 }

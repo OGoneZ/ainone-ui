@@ -75,13 +75,142 @@ h1 {
 }
 
 .sidebar {
-  width: 200px;
+  width: 240px;
   flex-shrink: 0;
   overflow-y: auto;
   border: 1px solid #ddd;
   border-radius: 8px;
   padding: 10px;
   background: #fff;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.add-ws {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.1em;
+  color: #396cd8;
+}
+
+.add-ws:hover {
+  color: #1d4ed8;
+}
+
+/* 工作区分组 */
+.ws-group {
+  margin-bottom: 10px;
+}
+
+.ws-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 0.88em;
+  cursor: context-menu;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.ws-head:hover {
+  background: #f0f0f0;
+}
+
+.ws-icon {
+  font-size: 0.9em;
+}
+
+.ws-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-count {
+  color: #999;
+  font-size: 0.8em;
+}
+
+.ws-rename {
+  flex: 1;
+  font-size: 0.9em;
+  padding: 2px 4px;
+  border: 1px solid #396cd8;
+  border-radius: 4px;
+}
+
+.ws-sessions {
+  padding-left: 14px;
+}
+
+.ws-empty {
+  margin: 0 0 4px;
+}
+
+/* 右键菜单 */
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.ctx-menu {
+  position: fixed;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+}
+
+.ctx-menu button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.ctx-menu button:hover {
+  background: #f0f0f0;
+}
+
+.ctx-menu .ctx-danger {
+  color: #c62828;
+}
+
+/* 新建会话弹层 */
+.ns-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9em;
+}
+
+.ns-label select {
+  font-family: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: inherit;
+}
+
+.ns-new-ws {
+  align-self: flex-start;
 }
 
 .sidebar h3 {
@@ -565,6 +694,25 @@ button:hover:not(:disabled) {
 
   .slash-desc {
     color: #aaa;
+  }
+
+  .ws-head:hover {
+    background: #2a2d31;
+  }
+
+  .ctx-menu {
+    background: #1f1f1f;
+    border-color: #3a3a3a;
+  }
+
+  .ctx-menu button:hover {
+    background: #2a2d31;
+  }
+
+  .ns-label select {
+    background: #1f1f1f;
+    color: #f6f6f6;
+    border-color: #3a3a3a;
   }
 
 

@@ -102,5 +102,7 @@ pub fn workspaces_upsert(app: tauri::AppHandle, workspace: Workspace) -> Result<
 pub fn workspaces_remove(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let mut list = load_all(&app)?;
     list.retain(|w| w.id != id);
-    save_all(&app, &list)
+    save_all(&app, &list)?;
+    // F-5-3：移除工作区 → 其下会话移入「未归组」（数据不丢）
+    crate::sessions::clear_workspace_id(&app, &id)
 }

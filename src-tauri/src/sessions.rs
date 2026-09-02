@@ -90,6 +90,22 @@ pub fn sessions_remove(app: tauri::AppHandle, session_id: String) -> Result<(), 
     save_all(&app, &list)
 }
 
+/// 移除工作区时调用（F-5-3）：把该工作区下会话的 workspace_id 清空（移入未归组，数据不丢）。
+pub(crate) fn clear_workspace_id(app: &tauri::AppHandle, workspace_id: &str) -> Result<(), String> {
+    let mut list = load_all(app)?;
+    let mut changed = false;
+    for e in list.iter_mut() {
+        if e.workspace_id.as_deref() == Some(workspace_id) {
+            e.workspace_id = None;
+            changed = true;
+        }
+    }
+    if changed {
+        save_all(app, &list)?;
+    }
+    Ok(())
+}
+
 // —— 本地消息日志（plan-v2 F-4-3）——
 // 每会话一份 JSONL 存于 appDataDir/sessions/<sessionId>.jsonl，按序记录全部消息。
 // 本地日志是「单一真源」：恢复会话时读日志回填 UI（agent 上下文另由 session/load 恢复）。

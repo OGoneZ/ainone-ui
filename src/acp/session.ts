@@ -16,8 +16,12 @@ export async function openSession(
   onPermission: PermissionDecision,
   resumeSessionId?: string,
   onCommands?: (words: CommandWord[]) => void,
+  cwdOverride?: string,
 ): Promise<AcpSession> {
-  const cwd = await invoke<string>("abs_path", { path: adapter.cwd }).catch(() => adapter.cwd);
+  // F-5-2：新建会话选工作区时，会话在工作区目录跑（覆盖 adapter 默认 cwd）
+  const cwd = await invoke<string>("abs_path", {
+    path: cwdOverride && cwdOverride.length > 0 ? cwdOverride : adapter.cwd,
+  }).catch(() => cwdOverride || adapter.cwd);
   const proc = await spawnHarness(adapter.program, adapter.args, cwd);
 
   return createAcpSession({
