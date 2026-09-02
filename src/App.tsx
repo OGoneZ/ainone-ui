@@ -1,153 +1,91 @@
+// ainone-ui 主界面：多 Tab 并行会话编排。
+// 每个 Tab = 一个 adapter + 一个独立会话（独立子进程），Tab 关闭时清理子进程。
+// 左侧会话历史侧栏 + 右侧当前 Tab 聊天面板。
+
 import { useEffect, useRef, useState } from "react";
-import { openSession, type AcpSession } from "./acp/session";
 import { listAdapters, type AdapterWithStatus } from "./config/adapters";
+import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./config/sessions";
+import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import "./App.css";
 
-type ChatMsg =
-  | { role: "user"; text: string }
-  | { role: "assistant"; text: string }
-  | { role: "tool"; title: string; status: string };
-
-/** 把最后一条 assistant 消息置为指定文本；若末尾不是 assistant 则追加一条 */
-function upsertAssistant(messages: ChatMsg[], text: string): ChatMsg[] {
-  if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-    const copy = [...messages];
-    copy[copy.length - 1] = { role: "assistant", text };
-    return copy;
-  }
-  return [...messages, { role: "assistant", text }];
+interface Tab {
+  key: string; // 唯一键（并行 Tab 复用同一会话时也需区分）
+  adapterId: string;
+  sessionId?: string; // 恢复时带，新建时 undefined
+  title: string;
 }
 
 function App() {
   const [adapters, setAdapters] = useState<AdapterWithStatus[]>([]);
-  const [adapterId, setAdapterId] = useState<string>("");
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<string | null>(null);
+  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [activeKey, setActiveKey] = useState<string>("");
+  const [history, setHistory] = useState<SessionEntry[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const sessionRef = useRef<AcpSession | null>(null);
-  const toolMap = useRef(new Map<string, ChatMsg>());
-  // 权限决策的 resolve（存在 window 上，供弹窗按钮回调）
-  const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
+  const nextKey = useRef(1);
 
-  // 加载适配器列表
   function reloadAdapters() {
-    listAdapters().then((list) => {
-      setAdapters(list);
-      setAdapterId((cur) => (list.some((a) => a.id === cur) ? cur : list[0]?.id ?? ""));
-    });
+    listAdapters().then(setAdapters);
+  }
+  function reloadHistory() {
+    sessionsList().then(setHistory);
   }
   useEffect(() => {
     reloadAdapters();
+    reloadHistory();
   }, []);
 
-  const currentAdapter = adapters.find((a) => a.id === adapterId);
+  const activeTab = tabs.find((t) => t.key === activeKey);
+  const activeAdapter = activeTab ? adapters.find((a) => a.id === activeTab.adapterId) : undefined;
 
-  async function ensureSession() {
-    if (sessionRef.current) return sessionRef.current;
-    if (!currentAdapter) throw new Error("未选择 harness");
-    const s = await openSession(currentAdapter, async (params) => {
-      setPending(params.toolCall.title ?? "（无标题工具调用）");
-      const decision = await new Promise<"allow" | "reject">((resolve) => {
-        permResolver.current = resolve;
-      });
-      setPending(null);
-      const target = params.options.find((o) =>
-        decision === "allow" ? o.kind === "allow_once" : o.kind === "reject_once",
-      );
-      return {
-        outcome: {
-          outcome: "selected",
-          optionId: target?.optionId ?? params.options[0].optionId,
-        },
-      };
+  function newTab(adapterId: string) {
+    const key = `tab-${nextKey.current++}`;
+    setTabs((ts) => [...ts, { key, adapterId, title: "新会话" }]);
+    setActiveKey(key);
+  }
+
+  function openFromHistory(entry: SessionEntry) {
+    const key = `tab-${nextKey.current++}`;
+    setTabs((ts) => [
+      ...ts,
+      { key, adapterId: entry.adapter_id, sessionId: entry.session_id, title: entry.title },
+    ]);
+    setActiveKey(key);
+  }
+
+  function closeTab(key: string) {
+    setTabs((ts) => {
+      const rest = ts.filter((t) => t.key !== key);
+      if (activeKey === key && rest.length > 0) setActiveKey(rest[rest.length - 1].key);
+      return rest;
     });
-    sessionRef.current = s;
-    return s;
+    // 子进程清理在 ChatPanel 卸载时由 session.dispose 兜底（见 ChatPanel 的 useEffect 清理）
   }
 
-  async function submit() {
-    const text = input.trim();
-    if (!text || busy) return;
-    setInput("");
-    setBusy(true);
-    setMessages((m) => [...m, { role: "user", text }]);
-    try {
-      const session = await ensureSession();
-      let trailing = "";
-      await session.prompt(text, (e) => {
-        switch (e.type) {
-          case "agent_text":
-            trailing += e.text;
-            setMessages((m) => upsertAssistant(m, trailing));
-            break;
-          case "tool_call":
-            trailing = "";
-            const t: ChatMsg = {
-              role: "tool",
-              title: e.title,
-              status: e.status ?? "pending",
-            };
-            toolMap.current.set(e.toolCallId, t);
-            setMessages((m) => [...m, t]);
-            break;
-          case "tool_update": {
-            const prev = toolMap.current.get(e.toolCallId);
-            if (prev && prev.role === "tool") {
-              prev.status = e.status ?? prev.status;
-              setMessages((m) => [...m]);
-            }
-            break;
-          }
-          case "turn_stop":
-            trailing = "";
-            break;
-          default:
-            break;
-        }
-      });
-    } catch (err) {
-      setMessages((m) => [...m, { role: "assistant", text: `⚠️ ${String(err)}` }]);
-    } finally {
-      setBusy(false);
-    }
+  // 首条消息 → 写会话索引
+  function handleFirstPrompt(sessionId: string, adapterId: string, text: string) {
+    sessionsUpsert({
+      session_id: sessionId,
+      adapter_id: adapterId,
+      title: text.slice(0, 40) || "未命名会话",
+      cwd: "",
+      mtime_ms: Date.now(),
+    }).then(reloadHistory);
   }
 
-  async function stop() {
-    if (!busy) return;
-    try {
-      await sessionRef.current?.cancel();
-    } catch {
-      /* ignore */
-    }
-  }
-
-  /** 切换 harness：销毁旧子进程并清空会话 */
-  async function switchAdapter(id: string) {
-    if (id === adapterId) return;
-    setAdapterId(id);
-    setMessages([]);
-    toolMap.current.clear();
-    if (sessionRef.current) {
-      await sessionRef.current.dispose().catch(() => {});
-      sessionRef.current = null;
-    }
-  }
-
-  function onPerm(d: "allow" | "reject") {
-    permResolver.current?.(d);
-    permResolver.current = null;
+  function deleteHistory(id: string) {
+    sessionsRemove(id).then(reloadHistory);
   }
 
   return (
     <main className="container">
       <h1>ainone-ui · Agent in One</h1>
+
       <div className="toolbar">
         <label>
           harness：
-          <select value={adapterId} onChange={(e) => switchAdapter(e.target.value)}>
+          <select value="" onChange={(e) => e.target.value && newTab(e.target.value)}>
+            <option value="">＋ 新建会话（选 harness）</option>
             {adapters.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -156,63 +94,56 @@ function App() {
             ))}
           </select>
         </label>
-        {currentAdapter && (
-          <span className="hint">
-            {currentAdapter.program} {currentAdapter.args.join(" ")}
-          </span>
-        )}
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}>
           设置
         </button>
       </div>
 
-      <div className="chat">
-        {messages.map((m, i) =>
-          m.role === "user" ? (
-            <div key={i} className="user">
-              <b>你：</b>
-              {m.text}
+      <div className="workspace">
+        <aside className="sidebar">
+          <h3>会话历史</h3>
+          {history.map((h) => (
+            <div key={h.session_id} className="history-item">
+              <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
+                {h.title}
+              </button>
+              <button className="history-del" onClick={() => deleteHistory(h.session_id)}>
+                ×
+              </button>
             </div>
-          ) : m.role === "assistant" ? (
-            <div key={i} className="assistant">
-              <b>agent：</b>
-              {m.text}
-            </div>
-          ) : (
-            <div key={i} className="tool" title={m.title}>
-              🔧 {m.title} <span className="status">{m.status}</span>
-            </div>
-          ),
-        )}
-        {pending && (
-          <div className="perm">
-            需要批准执行：<code>{pending}</code>
-            <button onClick={() => onPerm("allow")}>允许</button>
-            <button onClick={() => onPerm("reject")}>拒绝</button>
-          </div>
-        )}
-      </div>
+          ))}
+          {history.length === 0 && <div className="hint">暂无历史会话</div>}
+        </aside>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.currentTarget.value)}
-          placeholder="给 agent 发消息…"
-          disabled={busy}
-        />
-        <button type="submit" disabled={busy || !currentAdapter}>
-          {busy ? "运行中…" : "发送"}
-        </button>
-        <button type="button" onClick={stop} disabled={!busy}>
-          停止
-        </button>
-      </form>
+        <section className="tabs-area">
+          <div className="tabs-bar">
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                className={t.key === activeKey ? "tab active" : "tab"}
+                onClick={() => setActiveKey(t.key)}
+              >
+                {t.title}
+                <span className="tab-close" onClick={(e) => { e.stopPropagation(); closeTab(t.key); }}>
+                  ×
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="tab-content">
+            {activeAdapter ? (
+              <ChatPanel
+                key={activeTab!.key}
+                adapter={activeAdapter}
+                resumeSessionId={activeTab!.sessionId}
+                onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text)}
+              />
+            ) : (
+              <div className="hint empty">选择左上角 harness 新建会话，或从左侧历史恢复</div>
+            )}
+          </div>
+        </section>
+      </div>
 
       <SettingsModal
         open={settingsOpen}

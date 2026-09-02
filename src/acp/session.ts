@@ -1,158 +1,33 @@
-// ACP 客户端会话层：封装官方 @agentclientprotocol/sdk，向 React 暴露最小接口。
+// ACP 会话层（Tauri 绑定）：把 session-core 的纯协议逻辑接到 Tauri 传输/IPC。
 //
-// 职责边界（见 plan.md DEC-7）：
-//   - 协议状态机、JSONL 切行、请求 id 关联 → 全部交给 SDK
-//   - 这里只做三件业务粘合：
-//       1) 把 harness 进程的字节流接到 SDK（bridge.spawnHarness）
-//       2) 把 SDK 的 fs/* 回调接到 Rust（invoke fd_read / fd_write）
-//       3) 把 SDK 的权限请求转成「可等待用户决策」的异步约定
+// 协议逻辑在 session-core.ts（零 Tauri 依赖），这里只做两件绑定：
+//   1) streams —— spawnHarness 出字节流
+//   2) ipc     —— fs 回调走 invoke fd_read/fd_write，kill 走 agent_kill
 
-import * as acp from "@agentclientprotocol/sdk";
 import { invoke } from "@tauri-apps/api/core";
 import { spawnHarness } from "./bridge";
+import { createAcpSession, type AcpSession, type PermissionDecision } from "./session-core";
 import type { Adapter } from "../config/adapters";
 
-export type Outgoing =
-  | { type: "agent_text"; text: string; messageId?: string | null }
-  | { type: "agent_thought"; text: string }
-  | { type: "tool_call"; toolCallId: string; title: string; status?: string | null }
-  | { type: "tool_update"; toolCallId: string; status?: string | null }
-  | { type: "turn_stop"; stopReason: string }
-  | { type: "error"; message: string };
+export type { AcpSession, PermissionDecision, Outgoing } from "./session-core";
 
-/** 权限请求被挂起时，交给 UI 决策；resolve 掉 SDK 就继续 */
-export type PermissionDecision = (
-  params: acp.RequestPermissionRequest,
-) => Promise<acp.RequestPermissionResponse>;
-
-export interface AcpSession {
-  /** 会话语义下的唯一 id（来自 session/new），可用于后续恢复 */
-  sessionId: string;
-  /** 发送一条用户消息，逐事件回调 onOutgoing（含流式文本与工具状态） */
-  prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
-  /** 取消当前正在运行的 prompt turn（session/cancel 通知） */
-  cancel(): Promise<void>;
-  /** 终止会话：关连接 + 杀子进程 */
-  dispose(): Promise<void>;
-}
-
-/**
- * 拉起一个 harness 会话。
- * @param adapter 适配器配置
- * @param onPermission UI 侧权限决策回调（阻塞式）
- */
 export async function openSession(
   adapter: Adapter,
   onPermission: PermissionDecision,
+  resumeSessionId?: string,
 ): Promise<AcpSession> {
-  // 解析为绝对路径（ACP 要求 cwd 必须绝对）；adapter.cwd 默认 "." 时落到当前工作目录
-  const cwd = await invoke<string>("abs_path", { path: adapter.cwd }).catch(
-    () => adapter.cwd,
-  );
+  const cwd = await invoke<string>("abs_path", { path: adapter.cwd }).catch(() => adapter.cwd);
   const proc = await spawnHarness(adapter.program, adapter.args, cwd);
 
-  const app = acp
-    .client({ name: "ainone-ui" })
-    .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
-      onPermission(ctx.params),
-    )
-    .onRequest(acp.methods.client.fs.readTextFile, async (ctx) => {
-      const content = await invoke<string>("fd_read", { path: ctx.params.path });
-      return { content };
-    })
-    .onRequest(acp.methods.client.fs.writeTextFile, async (ctx) => {
-      await invoke("fd_write", { path: ctx.params.path, content: ctx.params.content });
-      return {};
-    });
-
-  const stream = acp.ndJsonStream(proc.stdin, proc.stdout);
-
-  const connection = app.connect(stream);
-
-  // stderr 只进日志，不进协议
-  void (async () => {
-    const reader = proc.stderr.getReader();
-    const dec = new TextDecoder();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) console.warn("[harness stderr]", dec.decode(value));
-    }
-  })();
-
-  const initResult = await connection.agent.request(acp.methods.agent.initialize, {
-    protocolVersion: acp.PROTOCOL_VERSION,
-    clientCapabilities: {
-      fs: { readTextFile: true, writeTextFile: true },
-      terminal: false,
+  return createAcpSession({
+    streams: { stdin: proc.stdin, stdout: proc.stdout, stderr: proc.stderr },
+    cwd,
+    onPermission,
+    resumeSessionId,
+    ipc: {
+      fsRead: (path) => invoke<string>("fd_read", { path }),
+      fsWrite: (path, content) => invoke("fd_write", { path, content }),
+      kill: () => invoke("agent_kill", { agentId: proc.agentId }),
     },
   });
-  console.log(`[acp] 已连接 ${initResult.agentInfo?.name ?? "agent"} protocol v${initResult.protocolVersion}`);
-
-  const session = await connection.agent.buildSession(cwd).start();
-
-  return {
-    sessionId: session.sessionId,
-    async prompt(text, onOutgoing) {
-      const promptResponse = session.prompt(text);
-      // 流式读取直到本轮结束
-      for (;;) {
-        const msg = await session.nextUpdate();
-        if (msg.kind === "stop") {
-          onOutgoing({ type: "turn_stop", stopReason: msg.stopReason });
-          await promptResponse;
-          return;
-        }
-        const u = msg.update;
-        switch (u.sessionUpdate) {
-          case "agent_message_chunk":
-            if (u.content.type === "text") {
-              onOutgoing({
-                type: "agent_text",
-                text: u.content.text,
-                messageId: u.messageId,
-              });
-            }
-            break;
-          case "agent_thought_chunk":
-            if (u.content.type === "text") {
-              onOutgoing({ type: "agent_thought", text: u.content.text });
-            }
-            break;
-          case "tool_call":
-            onOutgoing({
-              type: "tool_call",
-              toolCallId: u.toolCallId,
-              title: u.title,
-              status: u.status ?? null,
-            });
-            break;
-          case "tool_call_update":
-            onOutgoing({
-              type: "tool_update",
-              toolCallId: u.toolCallId,
-              status: u.status ?? null,
-            });
-            break;
-          default:
-            // 其余 update 类型（plan/file_change/usage 等）P1 安全忽略
-            break;
-        }
-      }
-    },
-    cancel() {
-      // 通知 agent 终止当前 turn；agent 会以 StopReason::Cancelled 回 prompt
-      return connection.agent.notify(acp.methods.agent.session.cancel, {
-        sessionId: session.sessionId,
-      });
-    },
-    async dispose() {
-      try {
-        connection.close();
-      } catch {
-        /* ignore */
-      }
-      await invoke("agent_kill", { agentId: proc.agentId }).catch(() => {});
-    },
-  };
 }

@@ -10,6 +10,7 @@
 
 mod adapters;
 mod agent;
+mod sessions;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::ipc::Channel;
@@ -131,6 +132,9 @@ pub fn run() {
             agent_stdin_write,
             agent_kill,
             abs_path,
+            sessions::sessions_list,
+            sessions::sessions_upsert,
+            sessions::sessions_remove,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
