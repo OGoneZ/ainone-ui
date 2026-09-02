@@ -344,7 +344,7 @@ button:hover:not(:disabled) {
   border-color: #396cd8;
 }
 
-@media (prefers-color-scheme: dark) {
+:root[data-theme="dark"] {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
@@ -527,7 +527,7 @@ button:hover:not(:disabled) {
   user-select: none;
 }
 
-@media (prefers-color-scheme: dark) {
+:root[data-theme="dark"] {
   .md pre { background: #282c34; }
   .md code { color: #e6e6e6; }
   .md blockquote { border-left-color: #555; color: #999; }
@@ -538,4 +538,20 @@ button:hover:not(:disabled) {
   .diff-line.add { background: #1f3a29; color: #9fd6a9; }
   .diff-line.ctx { color: #aaa; }
   .diff-path { background: #292929; }
+}
+
+
+.theme-select {
+  font-size: 0.85em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.theme-select select {
+  font-family: inherit;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: inherit;
 }

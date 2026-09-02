@@ -22,7 +22,18 @@ function App() {
   const [activeKey, setActiveKey] = useState<string>("");
   const [history, setHistory] = useState<SessionEntry[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 主题：light / dark / auto（默认 auto 跟随系统）
+  const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   const nextKey = useRef(1);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const isDark =
+      theme === "dark" ||
+      (theme === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    root.setAttribute("data-theme", isDark ? "dark" : "light");
+    localStorage.setItem("ainone-theme", theme);
+  }, [theme]);
 
   function reloadAdapters() {
     listAdapters().then(setAdapters);
@@ -97,6 +108,14 @@ function App() {
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}>
           设置
         </button>
+        <label className="theme-select">
+          主题：
+          <select value={theme} onChange={(e) => setTheme(e.target.value)}>
+            <option value="auto">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
       </div>
 
       <div className="workspace">
