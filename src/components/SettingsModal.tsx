@@ -5,6 +5,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Adapter } from "../config/adapters";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface Props {
   open: boolean;
@@ -103,9 +104,11 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>harness 设置</h2>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-[720px]">
+        <DialogHeader>
+          <DialogTitle>harness 设置</DialogTitle>
+        </DialogHeader>
         {loading && <p>加载中…</p>}
         {error && <p className="modal-error">{error}</p>}
         <div className="adapter-list">
@@ -154,7 +157,7 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
           <button onClick={save}>保存</button>
           <button onClick={onClose}>关闭</button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

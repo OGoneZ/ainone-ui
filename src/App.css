@@ -318,20 +318,22 @@ h1 {
 }
 
 .tab {
-  padding: 6px 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px 6px 0 0;
-  background: #f5f5f5;
+  padding: 4px 14px;
+  border: 1px solid var(--bg-3);
+  border-radius: 999px; /* F-7-12：胶囊分段 */
+  background: transparent;
   cursor: pointer;
   font-size: 0.85em;
   display: flex;
   align-items: center;
   gap: 6px;
+  color: var(--text-secondary);
 }
 
 .tab.active {
-  background: #fff;
-  border-bottom-color: #fff;
+  background: var(--bg-1);
+  border-color: var(--bg-3);
+  color: var(--text-primary);
   font-weight: 600;
 }
 

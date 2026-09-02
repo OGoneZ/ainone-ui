@@ -9,6 +9,7 @@ import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } fr
 import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
+import { EmptyState } from "./components/EmptyState";
 import { AgentAvatar } from "./components/AgentAvatar";
 import {
   WorkspaceIcon,
@@ -20,18 +21,17 @@ import {
   PlusIcon,
   SettingsIcon,
 } from "./components/ui/icons";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from "./components/ui/context-menu";
 import { resolveHistoryOpen, type Tab } from "./store/tabs";
 import { groupSessions } from "./store/workspaceGroup";
 import { useSessionStore } from "./store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "./store/sessionStatus";
 import "./App.css";
-
-// 工作区右键菜单状态
-interface ContextMenu {
-  x: number;
-  y: number;
-  workspaceId: string | null; // null = 未归组（仅有新建会话）
-}
 
 /** 侧栏会话行 leading 槽 22px 状态机（F-7-7 AC-P7-7-1/2） */
 function StatusLeading({ st }: { st: SessionStatus }) {
@@ -75,7 +75,6 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 新建会话弹层：open + 预填工作区（右键新建时传入）
   const [newSession, setNewSession] = useState<{ open: boolean; workspaceId?: string | null }>({ open: false });
-  const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   // 主题：light / dark / auto（默认 auto 跟随系统）
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
@@ -224,43 +223,61 @@ function App() {
             const GroupIcon = hasWorkspace ? WorkspaceOpenIcon : WorkspaceIcon;
             return (
               <div key={wsKey} className="ws-group">
-                <div
-                  className="ws-head"
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setCtxMenu({ x: e.clientX, y: e.clientY, workspaceId: g.workspace?.id ?? null });
-                  }}
-                >
-                  <GroupIcon
-                    className="ws-icon shrink-0"
-                    style={{ width: 14, height: 14, strokeWidth: 1.75, color: "var(--text-secondary)" }}
-                  />
-                  {renaming && renaming.id === wsKey ? (
-                    <input
-                      autoFocus
-                      className="ws-rename"
-                      defaultValue={renaming.name}
-                      onBlur={(e) => {
-                        const id = renaming.id;
-                        if (id !== "__ungrouped__") renameWorkspace(id, e.target.value);
-                        setRenaming(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      }}
-                    />
-                  ) : (
-                    <>
-                      <span className="ws-name" title={g.workspace?.cwd}>
-                        {g.workspace?.name ?? "未归组"}
-                      </span>
-                      {hasWorkspace && g.workspace!.cwd && tailPath(g.workspace!.cwd) !== g.workspace!.name && (
-                        <span className="ws-cwd">{tailPath(g.workspace!.cwd)}</span>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <div className="ws-head">
+                      <GroupIcon
+                        className="ws-icon shrink-0"
+                        style={{ width: 14, height: 14, strokeWidth: 1.75, color: "var(--text-secondary)" }}
+                      />
+                      {renaming && renaming.id === wsKey ? (
+                        <input
+                          autoFocus
+                          className="ws-rename"
+                          defaultValue={renaming.name}
+                          onBlur={(e) => {
+                            const id = renaming.id;
+                            if (id !== "__ungrouped__") renameWorkspace(id, e.target.value);
+                            setRenaming(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                        />
+                      ) : (
+                        <>
+                          <span className="ws-name" title={g.workspace?.cwd}>
+                            {g.workspace?.name ?? "未归组"}
+                          </span>
+                          {hasWorkspace && g.workspace!.cwd && tailPath(g.workspace!.cwd) !== g.workspace!.name && (
+                            <span className="ws-cwd">{tailPath(g.workspace!.cwd)}</span>
+                          )}
+                        </>
                       )}
-                    </>
-                  )}
-                  <span className="ws-count">{g.sessions.length}</span>
-                </div>
+                      <span className="ws-count">{g.sessions.length}</span>
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => setNewSession({ open: true, workspaceId: g.workspace?.id ?? null })}>
+                      新建会话
+                    </ContextMenuItem>
+                    {hasWorkspace && (
+                      <>
+                        <ContextMenuItem
+                          onSelect={() => {
+                            const w = workspaces.find((x) => x.id === g.workspace!.id);
+                            if (w) setRenaming({ id: g.workspace!.id, name: w.name });
+                          }}
+                        >
+                          重命名
+                        </ContextMenuItem>
+                        <ContextMenuItem variant="destructive" onSelect={() => removeWorkspace(g.workspace!.id)}>
+                          移除工作区
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
                 <div className="ws-sessions">
                   {g.sessions.map((h) => {
                     const st = statusOf(h.session_id);
@@ -289,7 +306,15 @@ function App() {
               </div>
             );
           })}
-          {groups.length === 0 && <div className="hint">暂无工作区，点击 ＋ 新建会话并选择目录</div>}
+          {groups.length === 0 && (
+              <EmptyState
+                icon={WorkspaceIcon}
+                title="暂无工作区"
+                description="点击新建会话并选择目录开始"
+                actionLabel="新建会话"
+                onAction={() => setNewSession({ open: true })}
+              />
+            )}
         </aside>
 
         <section className="tabs-area">
@@ -322,7 +347,12 @@ function App() {
                 onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text, activeTab!.workspaceId, activeTab!.cwd)}
               />
             ) : (
-              <div className="hint empty">点击「新建会话」开始，或从左侧工作区恢复</div>
+              <EmptyState
+                title="开始新的对话"
+                description="点击新建会话开始，或从左侧工作区恢复历史"
+                actionLabel="新建会话"
+                onAction={() => setNewSession({ open: true })}
+              />
             )}
           </div>
         </section>
@@ -343,38 +373,6 @@ function App() {
         onConfirm={confirmNewSession}
         onWorkspaceCreated={reloadWorkspaces}
       />
-
-      {ctxMenu && (
-        <div className="ctx-backdrop" onClick={() => setCtxMenu(null)}>
-          <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
-            <button onClick={() => { setCtxMenu(null); setNewSession({ open: true, workspaceId: ctxMenu.workspaceId }); }}>
-              新建会话
-            </button>
-            {ctxMenu.workspaceId && (
-              <>
-                <button
-                  onClick={() => {
-                    const w = workspaces.find((x) => x.id === ctxMenu.workspaceId);
-                    if (w && ctxMenu.workspaceId) setRenaming({ id: ctxMenu.workspaceId, name: w.name });
-                    setCtxMenu(null);
-                  }}
-                >
-                  重命名
-                </button>
-                <button
-                  className="ctx-danger"
-                  onClick={() => {
-                    removeWorkspace(ctxMenu.workspaceId!);
-                    setCtxMenu(null);
-                  }}
-                >
-                  移除工作区
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </main>
   );
 }

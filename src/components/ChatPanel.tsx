@@ -36,6 +36,8 @@ import {
   SendIcon,
   StopIcon,
 } from "./ui/icons";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import { Button } from "./ui/button";
 
 interface Props {
   tabKey: string;
@@ -319,11 +321,20 @@ function pickSlash(w: CommandWord) {
           })}
         </div>
         {pending && (
-          <div className="perm">
-            需要批准执行：<code>{pending}</code>
-            <button onClick={() => onPerm("allow")}>允许</button>
-            <button onClick={() => onPerm("reject")}>拒绝</button>
-          </div>
+          <Dialog open onOpenChange={() => {}}>
+            <DialogContent className="max-w-md" showCloseButton={false}>
+              <DialogHeader>
+                <DialogTitle>需要批准执行</DialogTitle>
+              </DialogHeader>
+              <p className="perm-code">
+                <code>{pending}</code>
+              </p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => onPerm("reject")}>拒绝</Button>
+                <Button onClick={() => onPerm("allow")}>允许</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
       </div>
 
@@ -607,7 +618,9 @@ function ToolBlock({
   return (
     <div className="tool">
       <div className="tool-head" onClick={() => setOpen((v) => !v)} title={title}>
-        <span className="caret">{open ? "▾" : "▸"}</span>
+        <span className="caret inline-flex transition-transform" style={{ transform: open ? "rotate(90deg)" : "none", transitionDuration: "var(--motion-fast)" }}>
+          <ChevronRightIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+        </span>
         <ToolIcon
           style={{
             width: 14,

@@ -1,10 +1,12 @@
-// 新建会话弹层（F-5-2）：先选 harness + 工作区（或未归组 / 新建工作区）。
+// 新建会话弹层（F-5-2 + F-7-8）：先选 harness + 工作区（或未归组 / 新建工作区）。
 // 右键工作区「新建会话」时 presetWorkspaceId 预填，跳过工作区选择。
+// P7 外壳迁到 shadcn Dialog（受控 + Esc + 遮罩 + 进出场动画）。
 
 import { useEffect, useState } from "react";
 import type { AdapterWithStatus } from "../config/adapters";
 import { workspacesUpsert, pickDirectory, type Workspace } from "../config/workspaces";
 import { normPath } from "../store/normPath";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface Props {
   open: boolean;
@@ -68,14 +70,14 @@ export function NewSessionModal({
     }
   }
 
-  if (!open) return null;
-
   const selected = localWs.find((w) => w.id === workspaceId) ?? null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>新建会话</h2>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>新建会话</DialogTitle>
+        </DialogHeader>
 
         <label className="ns-label">
           harness
@@ -119,7 +121,7 @@ export function NewSessionModal({
           </button>
           <button onClick={onClose}>取消</button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
