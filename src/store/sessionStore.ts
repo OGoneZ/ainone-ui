@@ -17,6 +17,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ChatMsg, BlockMsg } from "../acp/message-log";
 
+export type { ChatMsg, BlockMsg };
+
 export interface CommandWord {
   name: string;
   description: string;

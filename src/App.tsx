@@ -56,6 +56,12 @@ function App() {
   }
 
   function openFromHistory(entry: SessionEntry) {
+    // F-4-4 去重：同 sessionId 已有打开 Tab → 激活既有 Tab，不新开（避免多子进程分叉）
+    const existing = tabs.find((t) => t.sessionId === entry.session_id);
+    if (existing) {
+      setActiveKey(existing.key);
+      return;
+    }
     const key = `tab-${nextKey.current++}`;
     setTabs((ts) => [
       ...ts,
@@ -153,6 +159,7 @@ function App() {
             {activeAdapter ? (
               <ChatPanel
                 key={activeTab!.key}
+                tabKey={activeTab!.key}
                 adapter={activeAdapter}
                 resumeSessionId={activeTab!.sessionId}
                 onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text)}

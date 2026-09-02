@@ -1,59 +1,86 @@
-// 单会话聊天面板：独立的 AcpSession、消息列表、权限弹窗。
-// 由 App 作为多 Tab 编排的单元。每个 ChatPanel 绑定一个 adapter 与一个会话。
+// 单会话聊天面板：独立的 AcpSession 进程 + 全局 store 里的运行时。
+// 由 App 作为多 Tab 编排的单元（tabKey 唯一）。消息状态不在本组件内，
+// 而在 zustand store（F-4-8），切换 Tab 不丢失消息；另有 JSONL 日志兜底持久化（F-4-3）。
 //
-// P3 渲染升级：
-//   - assistant 文本走 react-markdown（GFM + 代码高亮）
-//   - thinking 块折叠显示
-//   - 工具调用的 Diff 内容渲染为 diff 视图
+// P4 渲染升级（F-4-1/F-4-2）：
+//   - 用户消息右侧气泡；agent 消息左侧气泡 + 品牌色首字母头像
+//   - 一轮 agent 回复内部 blocks 顺序渲染：text / thought / tool
+//   - thinking 流式中浅色小字展开，结束后自动折叠为「已思考 N 秒」，可点击展开
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
+import { logRead, logAppend } from "../config/sessions";
+import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
+import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
+import {
+  useSessionStore,
+  type ChatMsg,
+  type CommandWord,
+} from "../store/sessionStore";
 import type { ToolContent } from "../acp/session-core";
 import type { AdapterWithStatus } from "../config/adapters";
 
-type ChatMsg =
-  | { role: "user"; text: string }
-  | { role: "assistant"; text: string }
-  | { role: "thought"; text: string }
-  | { role: "tool"; toolCallId: string; title: string; status: string; content: ToolContent[] };
-
-function upsertLast(messages: ChatMsg[], next: ChatMsg): ChatMsg[] {
-  if (messages.length > 0 && messages[messages.length - 1].role === next.role) {
-    const copy = [...messages];
-    copy[copy.length - 1] = next;
-    return copy;
-  }
-  return [...messages, next];
-}
-
 interface Props {
+  tabKey: string;
   adapter: AdapterWithStatus;
   resumeSessionId?: string;
   onFirstPrompt?: (text: string, sessionId: string) => void;
 }
 
-export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, onFirstPrompt }: Props) {
+  const rt = useSessionStore((s) => s.runtime[tabKey]);
+  const messages = rt?.messages ?? [];
+  const busy = rt?.busy ?? false;
+
+  const ensure = useSessionStore((s) => s.ensure);
+  const drop = useSessionStore((s) => s.drop);
+  const appendUser = useSessionStore((s) => s.appendUser);
+  const setMessages = useSessionStore((s) => s.setMessages);
+  const bindSession = useSessionStore((s) => s.bindSession);
+  const patch = useSessionStore((s) => s.patch);
+  const setCommands = useSessionStore((s) => s.setCommands);
+
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [showThoughts, setShowThoughts] = useState(false);
+  // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
+  const [historyDegraded, setHistoryDegraded] = useState(false);
+
   const sessionRef = useRef<AcpSession | null>(null);
-  const toolMap = useRef(new Map<string, ChatMsg>());
   const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
-  const promptedOnce = useRef(false);
+  // 恢复会话时已写过索引，续聊不应重写标题 → 标记为“已 prompt”
+  const promptedOnce = useRef(Boolean(resumeSessionId));
   // steering：运行中打断时，待发消息暂存于此，当前 turn 结束后自动续跑
   const pendingTextRef = useRef<string | null>(null);
+  // 当前 turn 的 blocks 累加器（流式事件 → 块结构，见 acp/turn.ts）
+  const turnRef = useRef(newTurn());
+  // 已落盘的消息条数（JSONL 日志增量追加的游标）
+  const persistedRef = useRef(0);
 
+  // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
+    ensure(tabKey, adapter.id);
+    if (resumeSessionId) {
+      logRead(resumeSessionId)
+        .then((raw) => {
+          const msgs = parseLog(raw);
+          if (msgs.length > 0) {
+            setMessages(tabKey, msgs);
+            persistedRef.current = msgs.length;
+          } else {
+            setHistoryDegraded(true);
+          }
+        })
+        .catch(() => setHistoryDegraded(true));
+    }
     return () => {
       sessionRef.current?.dispose().catch(() => {});
+      drop(tabKey);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function ensureSession() {
@@ -63,11 +90,11 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
       const s = await openSession(
         adapter,
         async (params) => {
-          setPending(params.toolCall.title ?? "（无标题工具调用）");
+          patch(tabKey, { pending: params.toolCall.title ?? "（无标题工具调用）" });
           const decision = await new Promise<"allow" | "reject">((resolve) => {
             permResolver.current = resolve;
           });
-          setPending(null);
+          patch(tabKey, { pending: null });
           const target = params.options.find((o) =>
             decision === "allow" ? o.kind === "allow_once" : o.kind === "reject_once",
           );
@@ -79,8 +106,10 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
           };
         },
         resumeSessionId,
+        (words: CommandWord[]) => setCommands(adapter.id, words),
       );
       sessionRef.current = s;
+      bindSession(tabKey, s.sessionId);
       return s;
     } finally {
       setStarting(false);
@@ -91,7 +120,7 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
     const text = input.trim();
     if (!text) return;
     setInput("");
-    setMessages((m) => [...m, { role: "user", text }]);
+    appendUser(tabKey, text);
 
     // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
     if (busy) {
@@ -105,7 +134,8 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
   const runRef = useRef<{ promise: Promise<void> } | null>(null);
 
   async function runPrompt(text: string) {
-    setBusy(true);
+    patch(tabKey, { busy: true });
+    turnRef.current = newTurn();
     const p = (async () => {
       try {
         const session = await ensureSession();
@@ -113,62 +143,47 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
           promptedOnce.current = true;
           onFirstPrompt?.(text, session.sessionId);
         }
-        let trailing = "";
-        let thought = "";
         await session.prompt(text, (e) => {
-          switch (e.type) {
-            case "agent_text":
-              trailing += e.text;
-              setMessages((m) => upsertLast(m, { role: "assistant", text: trailing }));
-              break;
-            case "agent_thought":
-              thought += e.text;
-              setMessages((m) => upsertLast(m, { role: "thought", text: thought }));
-              break;
-            case "tool_call":
-              trailing = "";
-              thought = "";
-              const t: ChatMsg = {
-                role: "tool",
-                toolCallId: e.toolCallId,
-                title: e.title,
-                status: e.status ?? "pending",
-                content: e.content,
-              };
-              toolMap.current.set(e.toolCallId, t);
-              setMessages((m) => [...m, t]);
-              break;
-            case "tool_update": {
-              const prev = toolMap.current.get(e.toolCallId);
-              if (prev && prev.role === "tool") {
-                prev.status = e.status ?? prev.status;
-                if (e.content.length > 0) prev.content = e.content;
-                setMessages((m) => [...m]);
-              }
-              break;
-            }
-            case "turn_stop":
-              trailing = "";
-              thought = "";
-              break;
-            default:
-              break;
+          if (e.type === "available_commands") {
+            setCommands(adapter.id, e.commands);
+            return;
           }
+          const next = applyEvent(turnRef.current, e, Date.now);
+          turnRef.current = next;
+          useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
         });
+        // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）
+        useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
       } catch (err) {
-        setMessages((m) => [...m, { role: "assistant", text: `⚠️ ${String(err)}` }]);
+        const next: TurnAccumulator = {
+          ...turnRef.current,
+          blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
+        };
+        useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
       } finally {
-        setBusy(false);
+        patch(tabKey, { busy: false });
         runRef.current = null;
+        // 落盘增量（turn 结束一次性追加，避免流式期间高频 IO）
+        persistNew();
         // steering 排队续跑
         const queued = pendingTextRef.current;
         pendingTextRef.current = null;
-        if (queued) {
-          void runPrompt(queued);
-        }
+        if (queued) void runPrompt(queued);
       }
     })();
     runRef.current = { promise: p };
+  }
+
+  // —— 落盘：turn 结束一次性追加增量 ——
+  function persistNew() {
+    const sid = sessionRef.current?.sessionId;
+    if (!sid) return;
+    const msgs = useSessionStore.getState().runtime[tabKey]?.messages ?? [];
+    const count = persistedRef.current;
+    if (msgs.length <= count) return;
+    const lines = serializeMessages(msgs.slice(count));
+    persistedRef.current = msgs.length;
+    logAppend(sid, lines).catch(() => {});
   }
 
   async function stop() {
@@ -185,24 +200,27 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
     permResolver.current = null;
   }
 
-  const thoughtCount = useMemo(
-    () => messages.filter((m) => m.role === "thought").length,
-    [messages],
-  );
+  const pending = rt?.pending ?? null;
 
-  // 长会话虚拟列表（AC-P3-5）：只渲染可见区消息
+  // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => chatScrollRef.current,
-    estimateSize: () => 80,
-    overscan: 10,
+    estimateSize: () => 120,
+    overscan: 8,
   });
+
+  const empty = messages.length === 0;
 
   return (
     <div className="panel">
       <div className="chat" ref={chatScrollRef}>
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
+        {empty && !historyDegraded && <Welcome onSuggest={(t) => setInput(t)} />}
+        {empty && historyDegraded && (
+          <div className="hint degraded">⚠️ 上下文已恢复，历史消息未找到</div>
+        )}
         <div
           style={{
             height: `${virtualizer.getTotalSize()}px`,
@@ -225,16 +243,11 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
                   transform: `translateY(${vi.start}px)`,
                 }}
               >
-                <MessageView msg={m} />
+                <MessageLine msg={m} adapter={adapter} busy={busy} isLast={vi.index === messages.length - 1} />
               </div>
             );
           })}
         </div>
-        {thoughtCount > 0 && (
-          <button className="thought-toggle" onClick={() => setShowThoughts((v) => !v)}>
-            {showThoughts ? "隐藏" : "显示"}思考过程（{thoughtCount}）
-          </button>
-        )}
         {pending && (
           <div className="perm">
             需要批准执行：<code>{pending}</code>
@@ -244,6 +257,7 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
         )}
       </div>
 
+      <div className="harness-badge">正在和 {adapter.name} 对话</div>
       <form
         className="row"
         onSubmit={(e) => {
@@ -251,13 +265,18 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
           submit();
         }}
       >
-        <input
+        <textarea
           value={input}
           onChange={(e) => setInput(e.currentTarget.value)}
-          placeholder={
-            busy ? "运行中，输入将打断当前 turn…" : `给 ${adapter.name} 发消息…`
-          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={busy ? "运行中，输入将打断当前 turn…" : `给 ${adapter.name} 发消息…`}
           disabled={starting}
+          rows={1}
         />
         <button type="submit" disabled={starting}>
           {starting ? "启动中…" : busy ? "打断并发送" : "发送"}
@@ -270,39 +289,134 @@ export function ChatPanel({ adapter, resumeSessionId, onFirstPrompt }: Props) {
   );
 }
 
-function MessageView({ msg: m }: { msg: ChatMsg }) {
-  return m.role === "user" ? (
-    <div className="user">
-      <b>你：</b>
-      <span className="md">{m.text}</span>
-    </div>
-  ) : m.role === "assistant" ? (
-    <div className="assistant">
-      <b>agent：</b>
-      <div className="md">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-          {m.text}
-        </ReactMarkdown>
+function Welcome({ onSuggest }: { onSuggest: (t: string) => void }) {
+  const suggestions = [
+    "帮我看看这个项目是做什么的",
+    "总结当前目录的结构",
+    "写一个 Hello World",
+  ];
+  return (
+    <div className="welcome">
+      <h2>你好！我可以帮你做什么？</h2>
+      <div className="suggestions">
+        {suggestions.map((s) => (
+          <button key={s} className="suggestion" onClick={() => onSuggest(s)}>
+            {s}
+          </button>
+        ))}
       </div>
     </div>
-  ) : m.role === "thought" ? (
-    <div className="thought">💭 {m.text}</div>
-  ) : (
-    <ToolBlock msg={m} />
   );
 }
 
-function ToolBlock({ msg }: { msg: Extract<ChatMsg, { role: "tool" }> }) {
+// —— 消息行渲染：user 右气泡 / assistant 左气泡 + 头像 ——
+function MessageLine({
+  msg,
+  adapter,
+  busy,
+  isLast,
+}: {
+  msg: ChatMsg;
+  adapter: AdapterWithStatus;
+  busy: boolean;
+  isLast: boolean;
+}) {
+  if (msg.role === "user") {
+    return (
+      <div className="line user-line">
+        <div className="bubble user-bubble">{msg.text}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="line assistant-line">
+      <Avatar adapter={adapter} />
+      <div className="bubble assistant-bubble">
+        {msg.blocks.map((b, i) => (
+          <BlockView
+            key={i}
+            block={b}
+            live={busy && isLast && i === msg.blocks.length - 1 && b.kind === "thought" && b.ms === undefined}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Avatar({ adapter }: { adapter: AdapterWithStatus }) {
+  const ch = adapter.name.trim().charAt(0).toUpperCase() || "?";
+  const bg = adapter.logo || "#9e9e9e";
+  return (
+    <span className="avatar" style={{ background: bg }} title={adapter.name}>
+      {ch}
+    </span>
+  );
+}
+
+function BlockView({ block, live }: { block: BlockMsg; live: boolean }) {
+  switch (block.kind) {
+    case "text":
+      return (
+        <div className="md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+            {block.text}
+          </ReactMarkdown>
+        </div>
+      );
+    case "thought":
+      return <ThoughtView text={block.text} ms={block.ms} live={live} />;
+    case "tool":
+      return (
+        <ToolBlock
+          toolCallId={block.toolCallId}
+          title={block.title}
+          status={block.status}
+          content={block.content}
+        />
+      );
+  }
+}
+
+function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    // 流式结束（live true→false）自动折叠
+    if (!live) setOpen(false);
+  }, [live]);
+  const summary =
+    ms !== undefined ? `已思考 ${(ms / 1000).toFixed(0)} 秒` : "思考中…";
+  return (
+    <div className="thought" data-live={live ? "true" : "false"}>
+      <button className="thought-head" onClick={() => setOpen((v) => !v)}>
+        <span className="caret">{open ? "▾" : "▸"}</span>
+        <span className="thought-summary">{summary}</span>
+      </button>
+      {open && <div className="thought-body">{text}</div>}
+    </div>
+  );
+}
+
+function ToolBlock({
+  title,
+  status,
+  content,
+}: {
+  toolCallId: string;
+  title: string;
+  status: string;
+  content: ToolContent[];
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="tool">
-      <div className="tool-head" onClick={() => setOpen((v) => !v)} title={msg.title}>
+      <div className="tool-head" onClick={() => setOpen((v) => !v)} title={title}>
         <span className="caret">{open ? "▾" : "▸"}</span>
-        🔧 {msg.title} <span className="status">{msg.status}</span>
+        🔧 {title} <span className="status">{status}</span>
       </div>
-      {open && msg.content.length > 0 && (
+      {open && content.length > 0 && (
         <div className="tool-body">
-          {msg.content.map((c, i) => (
+          {content.map((c, i) => (
             <ToolContentView key={i} content={c} />
           ))}
         </div>
@@ -320,14 +434,23 @@ function ToolContentView({ content }: { content: ToolContent }) {
         </pre>
       );
     case "diff":
-      return <DiffView path={content.diff.path} oldText={content.diff.oldText} newText={content.diff.newText} />;
+      return (
+        <DiffView path={content.diff.path} oldText={content.diff.oldText} newText={content.diff.newText} />
+      );
     case "terminal":
       return <div className="tool-terminal">🖥 终端 {content.terminal.terminalId}</div>;
   }
 }
 
-function DiffView({ path, oldText, newText }: { path: string; oldText?: string | null; newText: string }) {
-  // 简单的行级 diff：无第三方库，按行对照（unified 风格，P3 够用）
+function DiffView({
+  path,
+  oldText,
+  newText,
+}: {
+  path: string;
+  oldText?: string | null;
+  newText: string;
+}) {
   const oldLines = (oldText ?? "").split("\n");
   const newLines = newText.split("\n");
   const rows: { type: "del" | "add" | "ctx"; line: string }[] = [];
