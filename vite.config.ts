@@ -9,10 +9,15 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
-  // vitest：消息日志等纯逻辑单测（node 环境，不触 Tauri）
+  // vitest：纯逻辑单测（node）+ 组件交互测试（jsdom）
   test: {
-    environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+    globals: false,
+    setupFiles: ["src/test/setup.ts"],
+    environmentMatchGlobs: [
+      // 组件测试（.test.tsx）跑 jsdom；纯逻辑 .test.ts 保持 node（更快、无 DOM 干扰）
+      ["src/**/*.test.tsx", "jsdom"],
+    ],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
