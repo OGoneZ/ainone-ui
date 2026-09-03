@@ -340,7 +340,9 @@ function App() {
   const activeSessionId = activeTab?.sessionId;
 
   return (
-    <main className="container">
+    // 复用 Tailwind 工具类（原手写 .container 与 Tailwind 内置 container 工具类同名冲突，
+    // 被其 max-width/display 覆盖导致根布局塌陷、窗口放大内容不跟随——bug 根因）
+    <main className="flex h-full min-h-0 flex-col box-border p-4">
       <div className="toolbar">
         <button className="inline-flex items-center gap-1.5" onClick={() => setNewSession({ open: true })}>
           <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
