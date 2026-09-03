@@ -36,3 +36,14 @@ export function usagePercent(info: UsageInfo): number {
   if (info.size <= 0) return 0;
   return Math.min(100, Math.round((info.used / info.size) * 100));
 }
+
+/** F-12-6a 进度条三态着色（DEC-39）：<80% ok / 80-99% warn / >=100% danger */
+export type UsageTier = "ok" | "warn" | "danger";
+
+export function usageTier(info: UsageInfo): UsageTier {
+  if (info.size <= 0) return "ok";
+  const pct = (info.used / info.size) * 100;
+  if (pct >= 100) return "danger";
+  if (pct >= 80) return "warn";
+  return "ok";
+}

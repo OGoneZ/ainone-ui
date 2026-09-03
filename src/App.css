@@ -11,14 +11,12 @@
  * ========================================================================== */
 
 /* —— 应用壳 —— */
-/* F-11-8：壳级约束——.container 不滚，唯一纵向滚动区 = .chat（+ .sidebar/.rail-body 各自内滚） */
 .container {
   height: 100%;
   display: flex;
   flex-direction: column;
   padding: 16px;
   box-sizing: border-box;
-  overflow: hidden;
 }
 
 .hint {
@@ -1280,6 +1278,13 @@ button:hover:not(:disabled) {
 .filetree-ref:hover {
   color: var(--primary);
 }
+tree-row:hover .filetree-ref {
+  opacity: 1;
+}
+
+.filetree-ref:hover {
+  color: var(--primary);
+}
 
 /* ======================= P11 · F-11-7 右侧侧边栏（元数据 / 文件 双 tab） ======================= */
 .rightrail {
@@ -1398,4 +1403,311 @@ button:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ======================= P12 · F-12-5 diff 评论条带 ======================= */
+.diff-comments-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px;
+  font-size: 12px;
+}
+
+.diff-comments-toggle {
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out-soft),
+    transform var(--motion-fast) var(--ease-out-soft);
+}
+
+.diff-comments-toggle:hover {
+  background: var(--bg-3);
+}
+
+.diff-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-comment-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+
+.diff-comment-loc {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.diff-comment-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-comment-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.diff-comment-remove:hover {
+  color: var(--danger);
+}
+
+.diff-comments-send {
+  flex-shrink: 0;
+  border: none;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-out-express),
+    filter var(--motion-fast) var(--ease-out-soft);
+}
+
+.diff-comments-send:hover {
+  filter: brightness(1.08);
+}
+
+.diff-comments-send:active {
+  transform: scale(0.96);
+}
+
+/* 已评论 diff 行：左侧色条标记 */
+.diff-line[data-commented="true"] {
+  box-shadow: inset 2px 0 0 var(--warning);
+}
+
+.diff-comment-btn {
+  align-self: center;
+}
+
+/* ======================= P12 · F-12-6b 灵动微交互（DEC-40 五类） ======================= */
+/* ① 卡片 hover 抬升：消息气泡 / 侧栏会话行 / 面板卡 */
+.user-bubble,
+.agent-card-hover {
+  transition: transform var(--motion-fast) var(--ease-out-soft),
+    box-shadow var(--motion-fast) var(--ease-out-soft);
+}
+
+.user-bubble:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ② 按压回弹：全局按钮（含 shadcn Button 与原生 button） */
+button:not(:disabled):active {
+  transition-duration: var(--motion-fast);
+}
+
+/* ③ 面板/弹层入场：提问卡 / 快问悬浮窗 / slash 菜单 / 评论条带 */
+.activity-group,
+.quick-pop,
+.slash-menu,
+.diff-comments-bar {
+  animation: p12-pop-in var(--motion-default) var(--ease-out-soft);
+}
+
+@keyframes p12-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ④ 悬浮毛玻璃卡（渐进增强：实底兜底，支持时才叠加 blur + 半透明） */
+.quick-pop {
+  background: var(--bg-1);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .quick-pop {
+    background: color-mix(in srgb, var(--bg-1) 78%, transparent);
+    backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+    border: 1px solid color-mix(in srgb, var(--bg-3) 70%, transparent);
+  }
+}
+
+/* ⑤ reduced-motion 全局短路：新动画一并瞬时完成 */
+@media (prefers-reduced-motion: reduce) {
+  .activity-group,
+  .quick-pop,
+  .slash-menu,
+  .diff-comments-bar {
+    animation: none;
+  }
+
+  .user-bubble,
+  .agent-card-hover,
+  .diff-comments-send,
+  .diff-comments-toggle {
+    transition: none;
+  }
+
+  .user-bubble:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* F-12-1 编辑态横幅（输入框上方独立条带） */
+.edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 2px 0;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  animation: p12-pop-in var(--motion-default) var(--ease-out-soft);
+}
+
+.edit-banner button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.edit-banner button:hover {
+  background: var(--bg-hover, var(--bg-3));
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-banner {
+    animation: none;
+  }
+}
+
+/* F-12-6a 上下文用量进度条（三态着色经 --usage-color 注入） */
+.usage-bar {
+  display: inline-flex;
+  align-items: center;
+}
+
+.usage-bar [data-slot="progress"] {
+  background: var(--bg-3);
+}
+
+.usage-bar [data-slot="progress-indicator"] {
+  background: var(--usage-color, var(--primary));
+}
+
+/* ======================= F-12-2 提问卡（灵动悬浮卡） ======================= */
+.ask-card {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.ask-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-question-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ask-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--motion-fast) var(--ease-out-soft);
+}
+
+.ask-option:hover {
+  background: var(--bg-hover);
+}
+
+.ask-option:has(input:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  outline-offset: 1px;
+}
+
+.ask-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ask-other-input {
+  margin-left: 22px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+
+.ask-other-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.ask-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ask-answered {
+  align-self: flex-end;
+  font-size: 12px;
+  color: var(--success);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }

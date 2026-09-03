@@ -49,6 +49,11 @@ export type PermissionDecision = (
   params: acp.RequestPermissionRequest,
 ) => Promise<acp.RequestPermissionResponse>;
 
+/** F-12-2 结构化提问（Elicitation create 请求 → AskCard 渲染 → 返回 accept/decline） */
+export type ElicitationHandler = (
+  params: acp.CreateElicitationRequest,
+) => Promise<acp.CreateElicitationResponse>;
+
 export interface SessionIpc {
   fsRead(path: string): Promise<string>;
   fsWrite(path: string, content: string): Promise<void>;
@@ -80,6 +85,8 @@ export interface OpenOptions {
   streams: Streams;
   cwd: string;
   onPermission: PermissionDecision;
+  /** F-12-2 结构化提问（Elicitation form）：未提供时自动 decline（不悬挂 agent） */
+  onElicitation?: ElicitationHandler;
   ipc: SessionIpc;
   resumeSessionId?: string;
   /** 收到 available_commands_update 通知时回调（F-4-7 slash 补全数据源） */
@@ -88,6 +95,10 @@ export interface OpenOptions {
 
 export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
   const { streams, cwd, onPermission, ipc, resumeSessionId, onCommands } = opts;
+  // F-12-2：缺省 elicitation 处理 = decline（声明了 form 能力就必须有兜底响应）
+  const onElicitation: ElicitationHandler =
+    opts.onElicitation ??
+    (() => Promise.resolve({ action: "decline" } as acp.CreateElicitationResponse));
 
   // —— update 队列：onNotification 塞入，prompt 内消费 ——
   let boundSessionId = "";
@@ -113,6 +124,8 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
       onPermission(ctx.params),
     )
+    // F-12-2 结构化提问（Elicitation form 模式）：交给 onElicitation 渲染提问卡
+    .onRequest(acp.methods.client.elicitation.create, (ctx) => onElicitation(ctx.params))
     .onRequest(acp.methods.client.fs.readTextFile, async (ctx) => ({
       content: await ipc.fsRead(ctx.params.path),
     }))
@@ -146,7 +159,12 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
 
   await connection.agent.request(acp.methods.agent.initialize, {
     protocolVersion: acp.PROTOCOL_VERSION,
-    clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false },
+    clientCapabilities: {
+      fs: { readTextFile: true, writeTextFile: true },
+      terminal: false,
+      // F-12-2：声明 form 模式支持（结构化提问卡）
+      elicitation: { form: {} },
+    },
     clientInfo: { name: "ainone-ui", version: "0.1.0" },
   });
   console.info("[acp] initialize 完成，protocolVersion=", acp.PROTOCOL_VERSION);

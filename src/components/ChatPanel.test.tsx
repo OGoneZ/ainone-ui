@@ -126,7 +126,7 @@ describe("ChatPanel 交互行为", () => {
     expect(await screen.findByText(/你好，我是 Oh My Pi/)).toBeInTheDocument();
   });
 
-  it("流式 thinking：turn 结束折叠为「已思考 N 秒」", async () => {
+  it("流式 thinking：turn 结束折叠为「已思考 N 秒」（F-12-3 活动组内可见摘要）", async () => {
     mockOpen.mockResolvedValue(
       fakeSession([
         { type: "agent_thought", text: "让我想想" },
@@ -139,9 +139,11 @@ describe("ChatPanel 交互行为", () => {
     await user.type(input(), "x");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    // turn 结束后 thought 封口 → summary「已思考 N 秒」（N 可为 0）
-    expect(await screen.findByText(/已思考 \d+ 秒/)).toBeInTheDocument();
+    // F-12-3：已完成 thought 入活动组 → 折叠态摘要「思考 1 次」可见；展开组内「已思考 0 秒」
     expect(await screen.findByText(/回复正文/)).toBeInTheDocument();
+    expect(screen.getByText(/思考 1 次/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /思考 1 次/ }));
+    expect(await screen.findByText(/已思考 \d+ 秒/)).toBeInTheDocument();
   });
 
   it("slash 补全：输入 / 弹出列表，ArrowDown+Enter 选中回填", async () => {
