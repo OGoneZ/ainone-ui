@@ -78,6 +78,16 @@ function App() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   // F-11-2 全局 session 搜索弹层
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  // M12：系统明暗实时快照（auto 主题的 Toaster 也跟随）
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const on = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
   const nextKey = useRef(1);
   // F-10-3 flexlayout Model：布局 + tab 集合的单一真源（跨渲染稳定，重建会丢拖拽布局）
   const modelRef = useRef<Model | null>(null);
@@ -123,9 +133,28 @@ function App() {
   function addTabToModel(tab: Tab, location: DockLocation = DockLocation.CENTER, targetNodeId?: string) {
     const m = getModel();
     let to = targetNodeId ?? activeKey;
-    // 空布局（无任何 tab）时 target 无效 → 落到根 row，由 flexlayout 自动建 tabset
-    if (!to || !m.getNodeById(to)) {
-      to = m.getRootRow()?.getId() ?? "";
+    // VS Code 式多开（bug 修复）：
+    // flexlayout 的 applyAddTab 对 toNode 只接受 TabSetNode/BorderNode/RowNode/TabGroupNode
+    // （instanceof 检查不过就静默不执行）。旧实现传 activeKey（tab 节点 id）→ 第二个起全部静默失败，
+    // 表现为「tab 栏永远只有一个 session，侧栏点其他 session 无反应」。
+    // 正确锚点 = 激活 tab 的所在 tabset id；空布局（无 tabset）才落到根 row。
+    if (to) {
+      const node = m.getNodeById(to);
+      // 传进来的是 tab 节点 → 换成其父 tabset
+      if (node && node.getType() === "tab") {
+        const parent = node.getParent();
+        if (parent && parent.getType() === "tabset") {
+          to = parent.getId();
+        } else {
+          to = "";
+        }
+      } else if (!node) {
+        to = "";
+      }
+    }
+    if (!to) {
+      const activeTabset = m.getActiveTabset();
+      to = activeTabset?.getId() ?? m.getRootRow()?.getId() ?? "";
       location = DockLocation.CENTER;
     }
     m.doAction(Actions.addTab(tabToJson(tab), to, location, -1, true));
@@ -185,6 +214,7 @@ function App() {
         adapter={ad}
         resumeSessionId={t.sessionId}
         cwd={t.cwd}
+        active={t.key === activeKey}
         onFirstPrompt={(text, sid) => handleFirstPrompt(sid, t.adapterId, text, t.workspaceId, t.cwd)}
         onFork={(fromId, toId) => handleFork(fromId, toId, t.adapterId, t.workspaceId, t.cwd)}
         onForkNavigate={(toId) => handleForkNavigate(toId, t.adapterId, t.workspaceId, t.cwd)}
@@ -199,12 +229,20 @@ function App() {
   }
 
   useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const root = document.documentElement;
-    const isDark =
-      theme === "dark" ||
-      (theme === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    root.setAttribute("data-theme", isDark ? "dark" : "light");
+    const apply = () => {
+      const isDark = theme === "dark" || (theme === "auto" && mq.matches);
+      root.setAttribute("data-theme", isDark ? "dark" : "light");
+    };
+    apply();
     localStorage.setItem("ainone-theme", theme);
+    // M12：auto 模式下监听系统明暗变化实时切换（原实现只在 theme 变化时
+    // 求值一次 matchMedia，OS 切换后 data-theme 不更新）
+    if (theme === "auto") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    }
   }, [theme]);
 
   function reloadAdapters() {
@@ -223,16 +261,30 @@ function App() {
   }, []);
 
   // 首条消息 → 写会话索引（带上工作区归属与运行目录）
-  // 首条消息 → 写会话索引（带上工作区归属与运行目录）
   function handleFirstPrompt(sessionId: string, adapterId: string, text: string, workspaceId?: string | null, cwd?: string) {
+    const title = text.slice(0, 40) || "未命名会话";
     sessionsUpsert({
       session_id: sessionId,
       adapter_id: adapterId,
-      title: text.slice(0, 40) || "未命名会话",
+      title,
       cwd: cwd ?? "",
       workspace_id: workspaceId ?? null,
       mtime_ms: Date.now(),
     }).then(reloadHistory);
+    // M11：同步改名 flexlayout TabNode——reloadHistory 只刷侧栏，Tab 栏的
+    // name 是 addTab 时固化的，不回写会一直停留在「新会话」
+    renameTabBySessionId(sessionId, title);
+  }
+
+  /** M11：按 sessionId 找到对应 Tab 并改名 flexlayout TabNode（找不到则静默跳过） */
+  function renameTabBySessionId(sessionId: string, title: string) {
+    const m = getModel();
+    const tab = tabs.find((t) => t.sessionId === sessionId);
+    if (!tab) return;
+    const node = m.getNodeById(tab.key);
+    if (node && node.getType() === "tab") {
+      m.doAction(Actions.renameTab(tab.key, title));
+    }
   }
 
   function deleteHistory(id: string) {
@@ -262,14 +314,17 @@ function App() {
   // F-8-5 分叉：新 sessionId 落索引（标题标「从 XX 分叉」，与父会话同工作区/目录）
   function handleFork(fromSessionId: string, toSessionId: string, adapterId: string, workspaceId?: string | null, cwd?: string) {
     const parent = history.find((h) => h.session_id === fromSessionId);
+    const title = parent ? `从「${parent.title}」分叉` : "分叉会话";
     sessionsUpsert({
       session_id: toSessionId,
       adapter_id: adapterId,
-      title: parent ? `从「${parent.title}」分叉` : "分叉会话",
+      title,
       cwd: cwd ?? "",
       workspace_id: workspaceId ?? null,
       mtime_ms: Date.now(),
     }).then(reloadHistory);
+    // M11：新 Tab 由 handleForkNavigate 创建（title 固化「分叉会话」），改名对齐
+    renameTabBySessionId(toSessionId, title);
   }
 
   // F-11-5 分叉自动跳转：以新 sessionId 新开 Tab（同 adapter/workspace/cwd）并激活。
@@ -523,7 +578,7 @@ function App() {
 
       {/* 全局 toast（sonner，右下 3s）：错误 / 复制成功提示（F-7-8） */}
       <Toaster
-        theme={theme === "dark" || (theme === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light"}
+        theme={systemDark && theme === "auto" ? "dark" : theme === "dark" ? "dark" : "light"}
         position="bottom-right"
         duration={3000}
       />
