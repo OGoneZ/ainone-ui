@@ -28,3 +28,6 @@ src-tauri/target
 
 # TypeScript build info
 *.tsbuildinfo
+
+# agent 间握手标记文件（本地协议，不入库）
+ainone-refactor-handshake.json

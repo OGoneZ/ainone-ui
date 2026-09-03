@@ -90,6 +90,13 @@ export const useQueueStore = create<QueueStore>()(
           return { queues };
         }),
     }),
-    { name: "ainone-command-queue" },
+    {
+      name: "ainone-command-queue",
+      // H4：tabKey（tab-N）是内存递增、重启归零复用——持久化的队列会在下一个
+      // 应用生命周期挂到无关新会话上（首次 turn 结束自动发出）。持久化语义
+      // 无法安全表达「跨重启归属」，因此每次启动从空队列开始：只保留会话内
+      // 持久化（切 Tab 不丢），跨重启的队列本就该随会话断开而失效。
+      skipHydration: true,
+    },
   ),
 );

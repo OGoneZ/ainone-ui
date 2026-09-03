@@ -204,6 +204,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const promptedOnce = useRef(Boolean(resumeSessionId));
   // steering：运行中打断时，待发消息暂存于此，当前 turn 结束后自动续跑
   const pendingTextRef = useRef<string | null>(null);
+  // M1：当前 turn 的 stopReason（turn_stop 时写入；finally 中消费后清空）
+  const stopReasonRef = useRef<string | null>(null);
   // 当前 turn 的 blocks 累加器（流式事件 → 块结构，见 acp/turn.ts）
   const turnRef = useRef(newTurn());
   // 已落盘的消息条数（JSONL 日志增量追加的游标）
@@ -351,6 +353,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
       drop(tabKey);
+      // H4：tabKey 是内存递增（tab-N），重启后会被新 Tab 复用——关闭 Tab 必须清队列，
+      // 否则残留队列挂到无关新会话上首次 turn 结束自动发出
+      useQueueStore.getState().clear(tabKey);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -457,8 +462,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       useSessionStore.getState().setMessages(tabKey, truncated);
       persistedRef.current = truncated.length;
       const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+      // H7：同 doRewind——await 截断完成，避免与新消息 append 竞态
       if (sid) {
-        logTruncate(sid, truncated.length).catch(() => {});
+        try {
+          await logTruncate(sid, truncated.length);
+        } catch (e) {
+          logger.error("chat", "log-truncate 失败", { sid, keepLines: truncated.length, error: String(e) });
+          toast.error("日志截断失败，恢复会话时可能看到旧历史");
+        }
       }
       // 断开当前子进程，下次 prompt 重新 session/load 恢复（与回溯同链路，DEC-35）
       sessionRef.current?.dispose().catch(() => {});
@@ -482,9 +493,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     appendUser(tabKey, full);
 
     // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
+    // M2：先赋值再 stop——stop() 返回后 finally 可能立即消费 pendingTextRef，
+    // 后赋值会丢消息并让队列错误前进
     if (busy) {
-      await stop();
       pendingTextRef.current = full;
+      await stop();
       return;
     }
     await runPrompt(full);
@@ -494,11 +507,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   function enqueueCommand(text: string): boolean {
     const ok = useQueueStore.getState().enqueue(tabKey, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text });
     if (ok) {
-      logger.info("queue", "enqueue", {
-        id: "new",
-        len: useQueueStore.getState().queues[tabKey]?.length ?? 0,
-        total: useQueueStore.getState().queues[tabKey]?.length ?? 0,
-      });
+      // L10：日志语义修正——id=新条目 id，len=入队后长度，total=容量上限
+      const q = useQueueStore.getState().queues[tabKey] ?? [];
+      const item = q[q.length - 1];
+      logger.info("queue", "enqueue", { id: item?.id, len: q.length, total: 10 });
     } else {
       logger.warn("queue", "full", { cap: 10 });
       toast.warning("命令队列已满（10 条），请先消费或删除");
@@ -556,10 +568,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     setQuotes([]);
     logger.info("chat", "annotate-send", { quoteCount: quotes.length });
     appendUser(tabKey, text);
-    // 与 steering 兼容：运行中发送 → 打断当前 turn 后新发起（复用打断队列）
+    // 与 steering 兼容：运行中发送 → 打断当前 turn 后新发起（复用打断队列）。
+    // M2：先赋值再 stop（同 submit——stop 后 finally 可能立即消费 ref）
     if (busy) {
-      void stop();
       pendingTextRef.current = text;
+      void stop();
       return;
     }
     void runPrompt(text);
@@ -601,6 +614,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
   async function doRewind() {
     if (rewindTarget === null) return;
+    // H7：busy 保护——运行中回溯会 dispose 在跑的 turn，排队内容还会以全量上下文续跑
+    if (busy) {
+      toast.warning("当前 turn 运行中，请先停止或等待结束再回溯");
+      return;
+    }
     const target = rewindTarget;
     setRewindTarget(null);
     logger.warn("chat", "rewind", { toIndex: target, withFiles: false });
@@ -609,21 +627,38 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     useSessionStore.getState().setMessages(tabKey, truncated);
     persistedRef.current = truncated.length;
     const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+    // H7：先 await 截断完成再继续（原 fire-and-forget 有「先 append 后 truncate」
+    // 竞态——回溯后立即发消息时新消息可能被一并截掉）；失败明确提示不静默。
     if (sid) {
-      logTruncate(sid, truncated.length).catch(() => {});
+      try {
+        await logTruncate(sid, truncated.length);
+      } catch (e) {
+        logger.error("chat", "log-truncate 失败", { sid, keepLines: truncated.length, error: String(e) });
+        toast.error("日志截断失败，恢复会话时可能看到旧历史");
+      }
     }
     // 断开当前子进程，下次 prompt 时重新 session/load 恢复（不丢已截断历史）
     sessionRef.current?.dispose().catch(() => {});
     sessionRef.current = null;
-    toast.success(`已回溯到第 ${target} 条之前`);
+    toast.success(`已回溯到第 ${target + 1} 条消息之前`);
   }
 
   // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
   // P11 F-R7：useCallback 稳定引用，避免 memo 化的 MessageLine 因回调新引用而失效
   const onSelectText = useCallback((text: string, e?: React.MouseEvent) => {
     setQuickSel(text);
-    // 悬浮窗锚定到选区附近
-    setQuickAnchor({ x: e?.clientX ?? 120, y: e?.clientY ?? 80 });
+    // H6：悬浮窗是 absolute 定位（祖先 = .layout-host），clientX/Y 是视口坐标，
+    // 直接塞会恒定偏移侧栏+工具栏。换算为 .chat 内容区相对坐标。
+    const chat = chatScrollRef.current;
+    if (chat && e) {
+      const rect = chat.getBoundingClientRect();
+      setQuickAnchor({
+        x: Math.max(8, e.clientX - rect.left),
+        y: Math.max(8, e.clientY - rect.top),
+      });
+    } else {
+      setQuickAnchor({ x: 120, y: 80 });
+    }
     setQuickPop(null);
   }, []);
   async function runQuickAsk() {
@@ -686,6 +721,12 @@ function pickSlash(w: CommandWord) {
             setCommands(adapter.id, e.commands);
             return;
           }
+          if (e.type === "turn_stop") {
+            // M1：区分停止原因——用户取消（cancel）后不再自动消费队列下一条，
+            // 只允许 steering 续跑（用户主动输入的意图必须被尊重）
+            stopReasonRef.current = e.stopReason;
+            return;
+          }
           if (e.type === "usage") {
             // F-8-4：usage_update → 存 store（侧栏订阅）
             logger.debug("session", "usage", { used: e.used, size: e.size, cost: e.cost });
@@ -732,11 +773,18 @@ function pickSlash(w: CommandWord) {
         if (queued) {
           void runPrompt(queued);
         } else {
-          // F-9-3 命令队列：turn 结束后自动按序消费下一条（AC-P9-9）
-          const head = useQueueStore.getState().dequeue(tabKey);
+          // F-9-3 命令队列：turn 结束后自动按序消费下一条（AC-P9-9）。
+          // M1：用户主动停止（stopReason=cancelled/user）→ 不续发，队列保留。
+          const reason = stopReasonRef.current ?? "end_turn";
+          stopReasonRef.current = null;
+          const userCancelled = reason === "cancelled" || reason === "user";
+          const head = userCancelled ? null : useQueueStore.getState().dequeue(tabKey);
           if (head) {
             logger.info("queue", "consume", { id: head.id });
+            appendUser(tabKey, head.text);
             void runPrompt(head.text);
+          } else if (userCancelled) {
+            logger.info("queue", "hold-on-cancel", { reason });
           }
         }
       }
@@ -804,8 +852,8 @@ function pickSlash(w: CommandWord) {
     logger.info("chat", "diff-comment-send", { count: diffComments.length });
     appendUser(tabKey, text);
     if (busy) {
-      void stop();
       pendingTextRef.current = text;
+      void stop();
       return;
     }
     void runPrompt(text);
@@ -858,6 +906,11 @@ function pickSlash(w: CommandWord) {
       raf = requestAnimationFrame(() => {
         const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
         setAtBottom(dist <= 64);
+        // H6：选中悬浮窗锚定的是内容坐标，滚动后锚点失效 → 直接关闭（残留修复）
+        if (quickSelRef.current !== null) {
+          setQuickSel(null);
+          setQuickPop(null);
+        }
       });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -1473,7 +1526,7 @@ export const MessageLine = memo(function MessageLine({
             <BlockView
               key={i}
               block={item.block}
-              live={busy && isLast && i === renderItems.length - 1 && item.block.kind === "thought" && item.block.ms === undefined}
+              live={busy && isLast && i === renderItems.length - 1 && (item.block.kind === "thought" ? item.block.ms === undefined : item.block.kind === "text")}
               onSelect={onSelect}
               diffComments={diffComments}
               onAddDiffComment={onAddDiffComment}
@@ -1543,12 +1596,13 @@ export function MarkdownView({
     >
       {/* P11（DEC-21）：Streamdown 替代 ReactMarkdown——GFM/代码块(Shiki)/Mermaid/
           KaTeX/不完整块兜底/内部 memo 一体化；shikiTheme 双主题走 CSS 变量，
-          深色由 data-theme 驱动（@custom-variant dark 对齐）。live 时启用
-          不完整块解析，静态消息关闭以走 memo 快路径。 */}
+          深色由 data-theme 驱动（@custom-variant dark 对齐）。
+          H1 修复：parseIncompleteMarkdown 仅在 mode="streaming" 下生效（库实现），
+          live 块必须用 streaming 模式，静态消息保持 static（走 memo 快路径）。 */}
       {/* F-R5 图片 lightbox（DEC-24）：md 内 img 全部可点击放大（缩放/Esc 关闭） */}
       <PhotoProvider>
         <Streamdown
-          mode="static"
+          mode={live ? "streaming" : "static"}
           parseIncompleteMarkdown={live}
           plugins={{ code, mermaid, math }}
           shikiTheme={["github-light", "github-dark"]}
@@ -1778,7 +1832,7 @@ function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: bool
               含代码围栏/公式/列表）；小字号沿用外层 13px。不用 PhotoProvider
               （AC-R8-3：thinking 是过程性内容，批注选区明确降级不开放）。 */}
           <Streamdown
-            mode="static"
+            mode={live ? "streaming" : "static"}
             parseIncompleteMarkdown={live}
             plugins={{ code, math }}
             shikiTheme={["github-light", "github-dark"]}
