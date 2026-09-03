@@ -54,6 +54,8 @@ import type { ToolContent } from "../acp/session-core";
 import type { AdapterWithStatus } from "../config/adapters";
 import { AgentAvatar } from "./AgentAvatar";
 import {
+  CommentIcon,
+  EditIcon,
   ThinkingIcon,
   ChevronRightIcon,
   CopyIcon,
@@ -1323,7 +1325,8 @@ function MessageLine({
               style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
               onClick={onEdit}
             >
-              ✎ 编辑
+              <EditIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+              编辑
             </button>
           )}
           {onRewind && (
@@ -1798,7 +1801,8 @@ function DiffView({
                 }
               }}
             >
-              ✎ 评论
+              <CommentIcon style={{ width: 11, height: 11, strokeWidth: 1.75 }} />
+              评论
             </button>
           )}
         </div>
