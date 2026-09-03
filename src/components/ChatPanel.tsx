@@ -14,6 +14,9 @@ import { mermaid } from "@streamdown/mermaid";
 import { math } from "@streamdown/math";
 import { PhotoProvider, PhotoView } from "react-photo-view";
 import "react-photo-view/dist/react-photo-view.css";
+// ansi-to-react 是 CJS 单导出（exports.default），ESM interop 后需再取一层 default
+import AnsiPkg from "ansi-to-react";
+const Ansi = (AnsiPkg as unknown as { default?: typeof AnsiPkg }).default ?? AnsiPkg;
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
@@ -30,6 +33,7 @@ import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
 import { truncateToMessageIndex } from "../acp/rewind";
 import { searchMessages } from "../acp/search";
+import { prettyJson } from "../acp/toolFormat";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
@@ -1246,14 +1250,54 @@ function ToolBlock({
   );
 }
 
+/** P11 F-R6：工具 text 内容渲染——JSON pretty / ANSI 彩色 / 纯文本三分支，
+ *  超长输出默认折叠（AC-R6-1..4）。导出供测试。 */
+export const TOOL_TEXT_FOLD_LIMIT = 2000;
+
+export function ToolTextView({ text }: { text: string }) {
+  const pretty = useMemo(() => prettyJson(text), [text]);
+  const foldable = text.length > TOOL_TEXT_FOLD_LIMIT;
+  const [expanded, setExpanded] = useState(false);
+  // 折叠态截断渲染（ansi-to-react 对超长文本慢，先截断再渲染）
+  const shown = foldable && !expanded ? text.slice(0, TOOL_TEXT_FOLD_LIMIT) : text;
+  const body =
+    pretty !== null ? (
+      <pre className="tool-text">
+        <code>{pretty}</code>
+      </pre>
+    ) : (
+      <AnsiView text={shown} />
+    );
+  return (
+    <div className="tool-text-view">
+      {body}
+      {foldable && (
+        <button
+          type="button"
+          className="tool-text-fold"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "收起" : `展开全部（${text.length} 字符）`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** ANSI 转义渲染（DEC-23：ansi-to-react）；无 ANSI 码时原样文本 */
+function AnsiView({ text }: { text: string }) {
+  // ansi-to-react 仅在含转义序列时产生彩色 span，否则整段直出——这里直接交给它
+  return (
+    <pre className="tool-text">
+      <Ansi>{text}</Ansi>
+    </pre>
+  );
+}
+
 function ToolContentView({ content }: { content: ToolContent }) {
   switch (content.kind) {
     case "text":
-      return (
-        <pre className="tool-text">
-          <code>{content.text}</code>
-        </pre>
-      );
+      return <ToolTextView text={content.text} />;
     case "diff":
       return (
         <DiffView path={content.diff.path} oldText={content.diff.oldText} newText={content.diff.newText} />

@@ -345,3 +345,19 @@ body {
   max-width: 100%;
   border-radius: var(--radius);
 }
+
+/* —— F-R6 工具输出折叠按钮 —— */
+.tool-text-fold {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+}
+.tool-text-fold:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
