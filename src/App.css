@@ -1278,3 +1278,175 @@ button:hover:not(:disabled) {
 .filetree-ref:hover {
   color: var(--primary);
 }
+
+/* ======================= P12 · F-12-5 diff 评论条带 ======================= */
+.diff-comments-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px;
+  font-size: 12px;
+}
+
+.diff-comments-toggle {
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out-soft),
+    transform var(--motion-fast) var(--ease-out-soft);
+}
+
+.diff-comments-toggle:hover {
+  background: var(--bg-3);
+}
+
+.diff-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-comment-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+
+.diff-comment-loc {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.diff-comment-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-comment-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.diff-comment-remove:hover {
+  color: var(--danger);
+}
+
+.diff-comments-send {
+  flex-shrink: 0;
+  border: none;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-out-express),
+    filter var(--motion-fast) var(--ease-out-soft);
+}
+
+.diff-comments-send:hover {
+  filter: brightness(1.08);
+}
+
+.diff-comments-send:active {
+  transform: scale(0.96);
+}
+
+/* 已评论 diff 行：左侧色条标记 */
+.diff-line[data-commented="true"] {
+  box-shadow: inset 2px 0 0 var(--warning);
+}
+
+.diff-comment-btn {
+  align-self: center;
+}
+
+/* ======================= P12 · F-12-6b 灵动微交互（DEC-40 五类） ======================= */
+/* ① 卡片 hover 抬升：消息气泡 / 侧栏会话行 / 面板卡 */
+.user-bubble,
+.agent-card-hover {
+  transition: transform var(--motion-fast) var(--ease-out-soft),
+    box-shadow var(--motion-fast) var(--ease-out-soft);
+}
+
+.user-bubble:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ② 按压回弹：全局按钮（含 shadcn Button 与原生 button） */
+button:not(:disabled):active {
+  transition-duration: var(--motion-fast);
+}
+
+/* ③ 面板/弹层入场：提问卡 / 快问悬浮窗 / slash 菜单 / 评论条带 */
+.activity-group,
+.quick-pop,
+.slash-menu,
+.diff-comments-bar {
+  animation: p12-pop-in var(--motion-default) var(--ease-out-soft);
+}
+
+@keyframes p12-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ④ 悬浮毛玻璃卡（渐进增强：实底兜底，支持时才叠加 blur + 半透明） */
+.quick-pop {
+  background: var(--bg-1);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .quick-pop {
+    background: color-mix(in srgb, var(--bg-1) 78%, transparent);
+    backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+    border: 1px solid color-mix(in srgb, var(--bg-3) 70%, transparent);
+  }
+}
+
+/* ⑤ reduced-motion 全局短路：新动画一并瞬时完成 */
+@media (prefers-reduced-motion: reduce) {
+  .activity-group,
+  .quick-pop,
+  .slash-menu,
+  .diff-comments-bar {
+    animation: none;
+  }
+
+  .user-bubble,
+  .agent-card-hover,
+  .diff-comments-send,
+  .diff-comments-toggle {
+    transition: none;
+  }
+
+  .user-bubble:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
