@@ -3,7 +3,7 @@
 // 直接灌进 useSessionStore（与生产同一数据模型 ChatMsg/BlockMsg/ToolContent）。
 // 顶栏提供浅色/深色切换，方便双主题核对（AC-R2-3 / AC-R5-4）。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSessionStore, type ChatMsg, type CommandWord } from "../store/sessionStore";
 import type { BlockMsg } from "../acp/message-log";
 import type { ToolContent } from "../acp/session-core";
@@ -107,7 +107,7 @@ curl -sS -X POST http://localhost:8080/api/v1/sessions -H 'Content-Type: applica
 
 // —— 样例工具内容 ——————————————————————————————————————————————
 
-const ANSI_OUTPUT = "11;36m[1m[32m✓[0m 编译通过 [1m[33m[12.4s][0m\n[31m✗[0m 3 个用例失败\n  [2m→ src/render.test.ts:42[0m\n全部 [1m196[0m 个用例完成";
+const ANSI_OUTPUT = "[36m这是 36 青色前缀[1m[32m✓[0m 编译通过 [1m[33m[12.4s][0m\n[31m✗[0m 3 个用例失败\n  [2m→ src/render.test.ts:42[0m\n全部 [1m196[0m 个用例完成";
 
 const JSON_OUTPUT = '{"id":"sess_9f2c","model":"claude-opus-5","usage":{"input_tokens":1523,"output_tokens":412,"cache_read":0},"stop_reason":"end_turn","tools_used":["read_file","bash"]}';
 
@@ -172,23 +172,24 @@ const DEMO_COMMANDS: CommandWord[] = [
 
 export function DemoApp() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  // demo 消息用 useState 常驻：useEffect 灌 store 与「订阅 store 再渲染」之间存在
+  // 时序耦合（订阅回调若在 setMessages 前建立，首帧拿到的引用不触发重渲染），
+  // 直接以本地状态为渲染真源，store 只作为 ChatPanel 的同步副本。
+  const [messages] = useState<ChatMsg[]>(() => demoMessages());
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  // 只灌一次（StrictMode 会双调 useEffect，ensure 幂等 + setMessages 覆盖即可）
+  // 同步一份到 sessionStore（ChatPanel 内部读写同一 tabKey；ensure 幂等）
   useEffect(() => {
     const st = useSessionStore.getState();
     st.ensure("demo", DEMO_ADAPTER.id);
-    st.setMessages("demo", demoMessages());
+    st.setMessages("demo", messages);
     st.setCommands(DEMO_ADAPTER.id, DEMO_COMMANDS);
-  }, []);
+  }, [messages]);
 
-  const messages = useSessionStore((s) => s.runtime["demo"]?.messages);
-  const seeded = useMemo(() => (messages ?? []).length > 0, [messages]);
-
-  if (!seeded) return <div style={{ padding: 24 }}>正在装载演示会话…</div>;
+  if (messages.length === 0) return <div style={{ padding: 24 }}>正在装载演示会话…</div>;
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
