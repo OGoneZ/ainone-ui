@@ -1,0 +1,12 @@
+{
+  "adapter": "claude-code",
+  "program": "claude-agent-acp",
+  "bangEcho": {
+    "reply": "`hello-ainone`**Notice:** Stop says: Turn 35.83s · Session 35.83s"
+  },
+  "bangLs": {
+    "reply": "```\nprobe-dir/\nprobe-file.txt\n```**Notice:** Stop says: Turn 12.33s · Session 48.16s"
+  },
+  "executed": true,
+  "verdict": "分支 a：harness 解释 ! 前缀（客户端透传）"
+}

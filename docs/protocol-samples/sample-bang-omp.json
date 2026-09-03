@@ -1,0 +1,13 @@
+{
+  "adapter": "omp",
+  "program": "omp",
+  "bangEcho": {
+    "reply": "（omp 对 `!echo hello-ainone` 的回复不含执行输出；omp 是 pi 的发行版，其 ACP 通道把 `!` 前缀当普通文本处理）"
+  },
+  "bangLs": {
+    "reply": "（回复为普通文本描述，未执行命令；探针多次实测均无执行痕迹，判定为不解释）"
+  },
+  "executed": false,
+  "verdict": "分支 b：harness 不解释（客户端透传后 `!` 退化为普通文本）",
+  "note": "omp 判定基于多次探针运行：两轮 prompt 均 end_turn 但回复无 echo 回显/无目录条目，且 omp（=pi 发行版）行为与 pi-acp 一致"
+}

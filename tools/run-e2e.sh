@@ -40,6 +40,7 @@ run_probe "parallel-并行隔离"          "omp"      tools/spike/e2e-parallel-p
 run_probe "pi-会话"                   "pi"       tools/spike/e2e-pi-probe.ts
 run_probe "p8-fork-分叉"              "claude"   tools/spike/e2e-fork-probe.ts
 run_probe "p9-plan-计划栏"             "claude"   tools/spike/e2e-p9-plan-probe.ts
+run_probe "p11-bang-命令注入"          "claude"   tools/spike/e2e-p11-bang-probe.ts
 
 echo ""
 echo "e2e 结果：$pass 通过 / $skip 跳过 / $fail 失败"

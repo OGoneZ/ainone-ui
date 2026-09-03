@@ -1,0 +1,12 @@
+{
+  "adapter": "pi",
+  "program": "pi-acp",
+  "bangEcho": {
+    "reply": "pi v0.84.4\n---\n"
+  },
+  "bangLs": {
+    "reply": ""
+  },
+  "executed": false,
+  "verdict": "分支 b：harness 不解释（客户端本地执行 + 注入）"
+}

@@ -8,6 +8,7 @@ import { listAdapters, type AdapterWithStatus } from "./config/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./config/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./config/workspaces";
 import { ChatPanel } from "./components/ChatPanel";
+import { GlobalSearchDialog } from "./components/GlobalSearchDialog";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { EmptyState } from "./components/EmptyState";
@@ -75,6 +76,8 @@ function App() {
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   // 主题：light / dark / auto（默认 auto 跟随系统）
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
+  // F-11-2 全局 session 搜索弹层
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const nextKey = useRef(1);
   // F-10-3 flexlayout Model：布局 + tab 集合的单一真源（跨渲染稳定，重建会丢拖拽布局）
   const modelRef = useRef<Model | null>(null);
@@ -153,8 +156,19 @@ function App() {
       e.preventDefault();
       splitCurrent(axis);
     }
+    // F-11-2 全局搜索：Ctrl/Cmd+F（DEC-26；会话内搜索已改绑 Ctrl+Shift+F）
+    const onGlobalSearch = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setGlobalSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onGlobalSearch);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onGlobalSearch);
+      window.removeEventListener("keydown", onKey);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, activeTab, activeAdapter]);
 
@@ -496,6 +510,13 @@ function App() {
         onClose={() => setNewSession({ open: false })}
         onConfirm={confirmNewSession}
         onWorkspaceCreated={reloadWorkspaces}
+      />
+
+      {/* F-11-2 全局 session 搜索（Ctrl+F，悬浮中上） */}
+      <GlobalSearchDialog
+        open={globalSearchOpen}
+        onOpenChange={setGlobalSearchOpen}
+        onPick={openFromHistory}
       />
 
       {/* 全局 toast（sonner，右下 3s）：错误 / 复制成功提示（F-7-8） */}

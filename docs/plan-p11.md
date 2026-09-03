@@ -315,15 +315,22 @@ P11.2: F-11-5 分叉跳转（Rust log_copy）→ F-11-6 失焦关闭
 P11.3: F-11-8 布局固定（先立壳）→ F-11-7 右栏（壳稳后迁入）→ F-11-9 回跳气泡
 ```
 
-### F-11-4a spike 结论（实施时回填）
+### F-11-4a spike 结论（2026-09-03 实测回填）
 
 | harness | `!cmd` 是否被执行 | 证据（报文存档） |
 |---|---|---|
-| claude-agent-acp | 待测 | 待存档 |
-| omp | 待测 | 待存档 |
-| pi-acp | 待测 | 待存档 |
+| claude-agent-acp | **是**——`!echo hello-ainone` 回显执行输出，`!ls` 列出探针目录条目 | `docs/protocol-samples/sample-bang-claude-code.json` |
+| omp | **否**——两轮 prompt 均 end_turn，回复无执行痕迹（omp 为 pi 发行版，行为一致） | `docs/protocol-samples/sample-bang-omp.json` |
+| pi-acp | **否**——回复为普通文本，无执行痕迹 | `docs/protocol-samples/sample-bang-pi.json` |
 
-**裁决规则**（DEC-29）：任一 harness 执行 → 分支 a（透传）；均不执行 → 分支 b（客户端 `exec_in_cwd` 本地执行 + 输出注入 prompt）。
+**社区共识对照**（2026-09-03 调研）：
+- `!` bash mode 是 **Claude Code CLI 交互界面的本地特性**（CLI 拦截 `!` 前缀直接执行 shell，输出注入对话上下文），不是 ACP 协议语义。ACP 规范中 `session/prompt` 只传文本，无 bash-mode 通道。
+- claude-agent-acp 适配器桥接的是 Claude Agent SDK（stream-json），SDK 层仍保留 CLI 的部分本地命令语义（Zed issue #46350 可见 `<local-command-stdout>`/`<local-command-stderr>` 回流），所以经适配器的 `!` 在 claude-code 下「意外可用」——这是 **harness 侧实现细节，客户端可透传但不应依赖**。
+- Zed/JetBrains 等 ACP 客户端均**未**在客户端实现 `!` bash mode（客户端只透传 prompt）；社区共识是「bash mode 属于 harness，客户端不做」。
+
+**裁决**（DEC-29，分支 a 成立）：至少 claude-agent-acp 解释 `!` 前缀 → **客户端透传，不预执行、不本地 exec**。omp/pi 下 `!` 退化为普通文本属 harness 自身行为，客户端不做补丁（与「LLM 调用完全留在 harness」的架构约束一致）。
+
+**实施影响（F-11-4b 落地为分支 a 最小形态）**：客户端透传 `!` 文本，无确认气泡、无 exec_in_cwd；输入框行首 `!` 时 placeholder 提示「命令将交由 harness 解释（claude-code 支持）」。
 
 ---
 
