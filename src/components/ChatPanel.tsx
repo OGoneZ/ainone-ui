@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
+import { type AskAnswer, type AskQuestion } from "../acp/askCard";
 import { PlanBar } from "./PlanBar";
 import { CommandQueuePanel } from "./CommandQueuePanel";
 import { FileTree } from "./FileTree";
@@ -54,6 +55,7 @@ import {
 import type { ToolContent } from "../acp/session-core";
 import type { AdapterWithStatus } from "../config/adapters";
 import { AgentAvatar } from "./AgentAvatar";
+import { AskCard } from "./AskCard";
 import {
   CommentIcon,
   EditIcon,
@@ -233,6 +235,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
   // F-12-5 评论条带展开态
   const [diffCommentsOpen, setDiffCommentsOpen] = useState(false);
+  // F-12-2 提问卡：待回答状态 + resolver
+  const askResolver = useRef<((a: Record<string, AskAnswer> | null) => void) | null>(null);
   // F-12-1 Esc 判定用的最新值镜像（state 声明后同步）
   const editTargetRef = useRef<{ index: number; original: string } | null>(null);
   editTargetRef.current = editTarget;
@@ -357,6 +361,51 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         resumeSessionId,
         (words: CommandWord[]) => setCommands(adapter.id, words),
         cwd,
+        // F-12-2 结构化提问：把 Elicitation 请求转成 store 状态 → AskCard 渲染
+        async (params) => {
+          // URL 模式 / 自定义模式本客户端不支持 → decline（不悬挂 agent）
+          if (params.mode !== "form") {
+            logger.info("chat", "ask-unsupported-mode", { mode: String(params.mode) });
+            return { action: "decline" };
+          }
+          const schema = (params.requestedSchema ?? {}) as {
+            properties?: Record<string, Record<string, unknown>>;
+          };
+          const props = schema.properties ?? {};
+          const questions: AskQuestion[] = Object.entries(props).map(([key, raw]) => {
+            const p = raw as {
+              title?: string | null;
+              type?: string;
+              enum?: string[] | null;
+              oneOf?: Array<{ const: string; title?: string }> | null;
+              items?: { enum?: string[] } | null;
+            };
+            const title = p.title ?? key;
+            if (p.type === "array") {
+              return { question: title, options: p.items?.enum ?? [], multi: true };
+            }
+            if (p.type === "string") {
+              const options = p.oneOf
+                ? p.oneOf.map((o) => o.title ?? o.const)
+                : (p.enum ?? []);
+              return { question: title, options, multi: false };
+            }
+            // number/integer/boolean → 自由文本输入（单选 Other 兜底渲染）
+            return { question: title, options: [], multi: false };
+          });
+          logger.info("chat", "ask-open", { questions: questions.length });
+          patch(tabKey, { ask: { questions, mode: params.mode } });
+          const answers = await new Promise<Record<string, AskAnswer> | null>((resolve) => {
+            askResolver.current = resolve;
+          });
+          patch(tabKey, { ask: null });
+          if (answers === null) {
+            logger.info("chat", "ask-decline");
+            return { action: "decline" };
+          }
+          logger.info("chat", "ask-answer", { picked: Object.keys(answers).length });
+          return { action: "accept", content: answers };
+        },
       );
       sessionRef.current = s;
       bindSession(tabKey, s.sessionId);
@@ -1069,6 +1118,15 @@ function pickSlash(w: CommandWord) {
           });
         }}
       />
+
+      {/* F-12-2 结构化提问卡：agent 请求输入时插入消息区与输入框之间 */}
+      {rt?.ask && (
+        <AskCard
+          questions={rt.ask.questions}
+          onAnswer={(answers) => askResolver.current?.(answers)}
+          onDecline={() => askResolver.current?.(null)}
+        />
+      )}
 
       {/* F-12-1 编辑态横幅：发送后从该条重新对话（独立条带，位于输入框上方） */}
       {editTarget && (

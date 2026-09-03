@@ -16,6 +16,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ChatMsg, BlockMsg } from "../acp/message-log";
+import type { AskQuestion } from "../acp/askCard";
 
 export type { ChatMsg, BlockMsg };
 
@@ -40,6 +41,14 @@ export interface RuntimeState {
   meta: { apiType?: string; baseUrl?: string } | null;
   /** F-9-1 计划：当前 turn 的 plan 条目（全量替换，turn 结束清除） */
   plan: { content: string; status: string; priority?: string }[] | null;
+  /** F-12-2 结构化提问：当前等待回答的提问卡（null = 无） */
+  ask: AskState | null;
+}
+
+/** F-12-2 提问卡状态 */
+export interface AskState {
+  questions: AskQuestion[];
+  mode: string;
 }
 
 interface SessionStore {
@@ -92,6 +101,7 @@ export const useSessionStore = create<SessionStore>()(
                 usage: null,
                 meta: null,
                 plan: null,
+                ask: null,
               },
             },
           };

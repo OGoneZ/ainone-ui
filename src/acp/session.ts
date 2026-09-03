@@ -6,11 +6,17 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { spawnHarness } from "./bridge";
-import { createAcpSession, type AcpSession, type CommandWord, type PermissionDecision } from "./session-core";
+import {
+  createAcpSession,
+  type AcpSession,
+  type CommandWord,
+  type PermissionDecision,
+  type ElicitationHandler,
+} from "./session-core";
 import { logger } from "../lib/logger";
 import type { Adapter } from "../config/adapters";
 
-export type { AcpSession, PermissionDecision, Outgoing } from "./session-core";
+export type { AcpSession, PermissionDecision, ElicitationHandler, Outgoing } from "./session-core";
 
 export async function openSession(
   adapter: Adapter,
@@ -18,6 +24,7 @@ export async function openSession(
   resumeSessionId?: string,
   onCommands?: (words: CommandWord[]) => void,
   cwdOverride?: string,
+  onElicitation?: ElicitationHandler,
 ): Promise<AcpSession> {
   // F-5-2：新建会话选工作区时，会话在工作区目录跑（覆盖 adapter 默认 cwd）
   const cwd = await invoke<string>("abs_path", {
@@ -35,6 +42,7 @@ export async function openSession(
     streams: { stdin: proc.stdin, stdout: proc.stdout, stderr: proc.stderr },
     cwd,
     onPermission,
+    onElicitation,
     resumeSessionId,
     onCommands,
     ipc: {
