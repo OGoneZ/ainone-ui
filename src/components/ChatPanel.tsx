@@ -17,6 +17,7 @@ import { PlanBar } from "./PlanBar";
 import { CommandQueuePanel } from "./CommandQueuePanel";
 import { FileTree } from "./FileTree";
 import { VoiceInput } from "./VoiceInput";
+import { UsageBar } from "./UsageBar";
 import { useQueueStore } from "../store/queueStore";
 import { collectModifiedPaths } from "../acp/fileTree";
 import { logRead, logAppend, logTruncate, logCopy } from "../config/sessions";
@@ -954,6 +955,8 @@ function pickSlash(w: CommandWord) {
       <div className="harness-badge inline-flex items-center gap-2">
         <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
         <span>正在和 {adapter.name} 对话</span>
+        {/* F-12-6a 上下文用量进度条（无 usage 数据不渲染） */}
+        <UsageBar usage={rt?.usage ?? null} />
       </div>
 
       {/* F-9-1 计划栏（输入框上方最上层，DEC-19） */}

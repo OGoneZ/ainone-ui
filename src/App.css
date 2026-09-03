@@ -1488,3 +1488,17 @@ button:not(:disabled):active {
     animation: none;
   }
 }
+
+/* F-12-6a 上下文用量进度条（三态着色经 --usage-color 注入） */
+.usage-bar {
+  display: inline-flex;
+  align-items: center;
+}
+
+.usage-bar [data-slot="progress"] {
+  background: var(--bg-3);
+}
+
+.usage-bar [data-slot="progress-indicator"] {
+  background: var(--usage-color, var(--primary));
+}
