@@ -16,15 +16,3 @@ export function truncateToMessageIndex(messages: ChatMsg[], index: number): Chat
   if (index >= messages.length) return messages.slice();
   return messages.slice(0, index);
 }
-
-/** 找到第 N 条用户消息在消息列表中的下标（-1 = 不存在） */
-export function indexOfUserMessage(messages: ChatMsg[], target: number): number {
-  let seen = 0;
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === "user") {
-      if (seen === target) return i;
-      seen++;
-    }
-  }
-  return -1;
-}

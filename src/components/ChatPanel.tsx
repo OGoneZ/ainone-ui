@@ -217,6 +217,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const persistedRef = useRef(0);
   // F-8-1 空闲回收：最近一次交互时间戳（prompt 发起时刷新）+ 定时器句柄
   const lastActivityRef = useRef(0);
+  // L7：回收发生后置 true，ensureSession 重建成功时消费（reopen 埋点的判据）
+  const recycledRef = useRef(false);
   const recycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // F-8-7 快问：是否已配置快问模型（未配置则入口禁用）
   const [quickAskReady, setQuickAskReady] = useState(false);
@@ -354,7 +356,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       const isBusy = useSessionStore.getState().runtime[tabKey]?.busy ?? false;
       if (shouldRecycleSession(lastActivityRef.current, Date.now(), RECYCLE_THRESHOLD_MS, isBusy)) {
         sessionRef.current = null;
-        logger.info("session", "reopen after recycle", { sessionId: s.sessionId });
+        // L7：时点修正——这里是「执行回收」，reopen 发生在下一次 ensureSession；
+        // 原埋点把 recycle 记成 reopen，日志时间轴误导。
+        logger.info("session", "recycle", { sessionId: s.sessionId });
+        recycledRef.current = true;
         void s.recycle(lastActivityRef.current).catch(() => {});
       }
     }, 15_000);
@@ -375,6 +380,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   async function ensureSession() {
     if (sessionRef.current) return sessionRef.current;
+    // L7：hadSession = 回收/回溯后重建链路 → 这才是 reopen 时点
+    const hadSession = recycledRef.current;
     setStarting(true);
     try {
       const s = await openSession(
@@ -446,6 +453,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       );
       sessionRef.current = s;
       bindSession(tabKey, s.sessionId);
+      if (hadSession) {
+        recycledRef.current = false;
+        logger.info("session", "reopen after recycle", { sessionId: s.sessionId });
+      }
       // M9：resume 会话（promptedOnce 初值 true）永远不拉 providers → 侧栏
       // apiType/baseUrl 恒空。ensureSession 建链后补拉一次（幂等，失败静默）。
       if (resumeSessionId) {
@@ -976,30 +987,25 @@ function pickSlash(w: CommandWord) {
       el.removeEventListener("scroll", onScroll);
     };
   }, []);
+  // L2：回跳目标消息短暂高亮（与搜索命中高亮同型，1.2s 后退场）
+  const [lastPromptFlash, setLastPromptFlash] = useState(-1);
   function jumpToLastPrompt() {
     if (lastUserIdx < 0) return;
     logger.debug("chat", "last-prompt-jump", { index: lastUserIdx });
     virtualizer.scrollToIndex(lastUserIdx, { align: "start" });
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        virtualizer.scrollToIndex(lastUserIdx, { align: "start" });
+        setLastPromptFlash(lastUserIdx);
+        window.setTimeout(() => setLastPromptFlash(-1), 1200);
+      }),
+    );
   }
 
   const empty = messages.length === 0;
 
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
-      {/* F-11-9 上一条指令回跳气泡（悬浮于消息区顶部；贴底/无指令时隐藏） */}
-      {shouldShowLastPromptBubble(lastUserIdx >= 0, atBottom ? 0 : 9999) && (
-        <button
-          type="button"
-          className="last-prompt-bubble"
-          title={lastUserText}
-          data-testid="last-prompt-bubble"
-          onClick={jumpToLastPrompt}
-        >
-          <span className="last-prompt-label">你最后说的：</span>
-          <span className="last-prompt-text">{ellipsize(lastUserText)}</span>
-          ↑
-        </button>
-      )}
       {/* F-9-2 会话内搜索条 */}
       {searchOpen && (
         <div className="search-bar">
@@ -1036,6 +1042,21 @@ function pickSlash(w: CommandWord) {
         </div>
       )}
       <div className="chat" ref={chatScrollRef}>
+        {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
+            传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}
+        {shouldShowLastPromptBubble(lastUserIdx >= 0, atBottom ? 0 : 64) && (
+          <button
+            type="button"
+            className="last-prompt-bubble last-prompt-sticky"
+            title={lastUserText}
+            data-testid="last-prompt-bubble"
+            onClick={jumpToLastPrompt}
+          >
+            <span className="last-prompt-label">你最后说的：</span>
+            <span className="last-prompt-text">{ellipsize(lastUserText)}</span>
+            ↑
+          </button>
+        )}
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
         {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
         {empty && historyDegraded && (
@@ -1056,6 +1077,7 @@ function pickSlash(w: CommandWord) {
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
                 data-search-hit={vi.index === searchCurIndex ? "true" : "false"}
+                data-flash={vi.index === lastPromptFlash ? "true" : "false"}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -1090,7 +1112,7 @@ function pickSlash(w: CommandWord) {
               position: "absolute",
               top: quickAnchor.y,
               left: quickAnchor.x,
-              zIndex: 40,
+              zIndex: "var(--z-popover, 50)",
             }}
           >
             {!quickPop ? (
@@ -1442,7 +1464,13 @@ function pickSlash(w: CommandWord) {
                 submit();
               }
             }}
-            placeholder={busy ? "运行中，输入将打断当前 turn…" : typeText}
+            placeholder={
+              busy
+                ? "运行中，输入将打断当前 turn…"
+                : input.startsWith("!")
+                  ? "！命令将交由 harness 执行（claude-code 支持；omp/pi-acp 未验证）"
+                  : typeText
+            }
             disabled={starting}
             rows={1}
           />

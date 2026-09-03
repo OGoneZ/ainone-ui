@@ -1,7 +1,7 @@
 // truncateToMessageIndex 单测：N=0 / 中间 / 越界 / 负数（AC-P8-27）。
 
 import { describe, it, expect } from "vitest";
-import { truncateToMessageIndex, indexOfUserMessage } from "./rewind";
+import { truncateToMessageIndex } from "./rewind";
 import type { ChatMsg } from "./message-log";
 
 function msgs(n: number): ChatMsg[] {
@@ -28,23 +28,5 @@ describe("truncateToMessageIndex", () => {
 
   it("负数 → 空数组", () => {
     expect(truncateToMessageIndex(msgs(3), -1)).toEqual([]);
-  });
-});
-
-describe("indexOfUserMessage", () => {
-  const arr: ChatMsg[] = [
-    { role: "user", text: "a" },
-    { role: "assistant", blocks: [] },
-    { role: "user", text: "b" },
-    { role: "assistant", blocks: [] },
-  ];
-
-  it("命中第 N 条用户消息的实际下标", () => {
-    expect(indexOfUserMessage(arr, 0)).toBe(0);
-    expect(indexOfUserMessage(arr, 1)).toBe(2);
-  });
-
-  it("越界 → -1", () => {
-    expect(indexOfUserMessage(arr, 2)).toBe(-1);
   });
 });

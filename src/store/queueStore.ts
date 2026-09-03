@@ -70,6 +70,8 @@ export const useQueueStore = create<QueueStore>()(
           const from = arr.findIndex((i) => i.id === fromId);
           const to = arr.findIndex((i) => i.id === toId);
           if (from < 0 || to < 0 || from === to) return {};
+          // L9：统一为「拖到谁头上就落到谁的位置」（splice from → insert to）。
+          // 旧实现曾按方向分支（上移前插/下移后插）导致结果依赖拖动方向。
           const [moved] = arr.splice(from, 1);
           arr.splice(to, 0, moved);
           return { queues: { ...s.queues, [key]: arr } };

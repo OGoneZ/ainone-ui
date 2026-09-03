@@ -1,4 +1,4 @@
-// P11 渲染增强 · 视觉验收专用入口（只在 `pnpm dev:demo` 下生效，不进 tauri 构建链）。
+// P11 渲染增强 · 视觉验收专用入口（`pnpm dev` 后浏览器带 ?demo=1 参数生效）。
 //
 // 作用：浏览器直开 http://localhost:1420/?demo=1 时，不走 Tauri 后端与真实 harness，
 // 直接把一份「覆盖全部 P11 渲染特性」的假会话灌进 sessionStore，供肉眼验收：

@@ -397,7 +397,29 @@ body {
   --flexlayout-color-drag-rect-border: var(--primary);
   --flexlayout-color-drag-rect-background: color-mix(in srgb, var(--primary) 12%, transparent);
   --flexlayout-color-drag-rect: var(--text-primary);
-  --flexlayout-tab-button-radius: var(--radius-sm);
+  /* L8：补齐漏映射（dock 预览遮罩/边缘图标/溢出按钮/滚动指示等深色残留） */
+  --flexlayout-color-drag1: var(--primary);
+  --flexlayout-color-drag1-background: color-mix(in srgb, var(--primary) 12%, transparent);
+  --flexlayout-color-drag2: var(--success);
+  --flexlayout-color-drag2-background: color-mix(in srgb, var(--success) 12%, transparent);
+  --flexlayout-color-edge-icon: var(--text-secondary);
+  --flexlayout-color-overflow: var(--text-secondary);
+  --flexlayout-color-icon: var(--text-secondary);
+  --flexlayout-color-toolbar-button-hover: var(--bg-hover);
+  --flexlayout-color-mini-scroll-indicator: var(--bg-3);
+  --flexlayout-color-mini-scroll-indicator-hovered: var(--text-secondary);
+  --flexlayout-color-border-background: var(--bg-2);
+  --flexlayout-color-border-divider-line: var(--bg-3);
+  --flexlayout-color-border-tab-content: var(--bg-1);
+  --flexlayout-color-border-tab-selected: var(--text-primary);
+  --flexlayout-color-border-tab-selected-background: var(--bg-1);
+  --flexlayout-color-border-tab-unselected: var(--text-secondary);
+  --flexlayout-color-border-tab-unselected-background: transparent;
+  --flexlayout-color-tabset-divider-line: var(--bg-3);
+  --flexlayout-color-float-window-header-background: var(--bg-2);
+  --flexlayout-color-tabgroup-default: var(--bg-2);
+  --flexlayout-color-tabgroup-menu-palette: var(--bg-1);
+  --flexlayout-color-tabgroup-pill-text: var(--text-primary);
 }
 
 /* flexlayout 标签限宽 + 省略号（复用规格书 F-10-2 的 Chrome 式标签弹性约束，作用于同一层级） */

@@ -10,6 +10,8 @@
 //   - SDK 的 ActiveSession 只支持 session/new attach，load 无对应公开入口 → 统一自建队列
 
 import * as acp from "@agentclientprotocol/sdk";
+import { extractUsage } from "./metadata";
+import { extractPlan } from "./plan";
 
 export type DiffContent = { path: string; oldText?: string | null; newText: string };
 export type TerminalContent = { terminalId: string };
@@ -289,24 +291,12 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
       });
       break;
     case "usage_update":
-      // F-8-4 元数据侧栏：上下文占用 / token / 成本
-      onOutgoing({
-        type: "usage",
-        used: u.update.used,
-        size: u.update.size,
-        cost: u.update.cost?.amount ?? null,
-      });
+      // F-8-4 元数据侧栏：上下文占用 / token / 成本（L5：走 metadata.extractUsage 单一实现）
+      onOutgoing({ type: "usage", ...extractUsage(u.update) });
       break;
     case "plan":
-      // F-9-1 计划栏：plan block 全量替换（DEC-16）
-      onOutgoing({
-        type: "plan",
-        entries: (u.update.entries ?? []).map((e) => ({
-          content: e.content,
-          status: e.status,
-          priority: e.priority,
-        })),
-      });
+      // F-9-1 计划栏：plan block 全量替换（DEC-16；L5：走 plan.extractPlan 单一实现）
+      onOutgoing({ type: "plan", entries: extractPlan(u.update) });
       break;
     default:
       break;

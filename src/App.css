@@ -621,23 +621,12 @@ button:hover:not(:disabled) {
   margin: 0.4em 0;
 }
 
-.md pre {
-  background: var(--bg-2);
-  border-radius: var(--radius-sm);
-  padding: 10px;
-  overflow-x: auto;
-  font-size: 0.85em;
-}
 
-.md code {
+.md :not(pre) > code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
 }
 
-.md pre code {
-  background: transparent;
-  padding: 0;
-}
 
 .md ul,
 .md ol {
@@ -1430,6 +1419,24 @@ tree-row:hover .filetree-ref {
 .last-prompt-bubble:hover {
   border-color: var(--primary);
   color: var(--text-primary);
+}
+
+/* L2：sticky 于消息区顶部（原为 .panel 兄弟块，显隐推拉内容跳动）。
+ * .chat 是 flex column + overflow-y:auto，sticky top 生效于滚动容器。 */
+.last-prompt-bubble.last-prompt-sticky {
+  position: sticky;
+  top: 6px;
+  z-index: var(--z-sticky, 10);
+  margin: 0 auto 6px;
+  flex-shrink: 0;
+}
+
+/* L2：回跳目标消息短暂高亮（与搜索命中同型的退场动画） */
+.chat [data-flash="true"] {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+  transition: outline-color var(--motion-default) ease-out;
 }
 
 .last-prompt-label {
