@@ -1502,3 +1502,86 @@ button:not(:disabled):active {
 .usage-bar [data-slot="progress-indicator"] {
   background: var(--usage-color, var(--primary));
 }
+
+/* ======================= F-12-2 提问卡（灵动悬浮卡） ======================= */
+.ask-card {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.ask-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-question-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ask-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--motion-fast) var(--ease-out-soft);
+}
+
+.ask-option:hover {
+  background: var(--bg-hover);
+}
+
+.ask-option:has(input:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  outline-offset: 1px;
+}
+
+.ask-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ask-other-input {
+  margin-left: 22px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+
+.ask-other-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.ask-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ask-answered {
+  align-self: flex-end;
+  font-size: 12px;
+  color: var(--success);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
