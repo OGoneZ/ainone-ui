@@ -77,39 +77,30 @@ async function loadLocalSvg(adapterId: string): Promise<string | null> {
   return svg;
 }
 
-/** SVG 含 currentColor → 用 CSS mask 渲染跟随主题文字色（AionUi ThemedLogo 方案） */
-function usesCurrentColor(svg: string): boolean {
-  return svg.includes("currentColor");
-}
-
-function SvgLogo({ svg, size, themed }: { svg: string; size: number; themed: boolean }) {
-  if (themed) {
-    // CSS mask：单色 logo 跟随主题文字色
-    return (
-      <span
-        role="img"
-        aria-label="agent"
-        className="inline-block align-middle"
-        style={{
-          width: size,
-          height: size,
-          backgroundColor: "var(--text-primary)",
-          WebkitMask: `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") center/contain no-repeat`,
-          mask: `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") center/contain no-repeat`,
-        }}
-      />
-    );
-  }
-  // 内联 SVG：可随主题自行变色
+/** 内联渲染 logo：注入 width/height=100% 使图形缩放进外层 size 盒；
+ *  统一走内联（废弃 CSS mask），让「currentColor 随主题 + 固定品牌色」并存。 */
+function SvgLogo({ svg, size }: { svg: string; size: number }) {
+  const fitted = fitSvgToBox(svg);
   return (
     <span
       role="img"
       aria-label="agent"
-      className="inline-block align-middle"
-      style={{ width: size, height: size }}
-      dangerouslySetInnerHTML={{ __html: svg }}
+      className="inline-flex items-center justify-center overflow-hidden align-middle"
+      style={{ width: size, height: size, color: "var(--text-primary)" }}
+      dangerouslySetInnerHTML={{ __html: fitted }}
     />
   );
+}
+
+/** 给内联 SVG 注入 width/height=100%（若无），让图形缩放进外层尺寸盒 */
+function fitSvgToBox(svg: string): string {
+  if (!/<svg/i.test(svg)) return svg;
+  return svg.replace(/<svg([^>]*)>/i, (_m, attrs) => {
+    let a = attrs;
+    if (!/\bwidth\s*=/.test(a)) a += ' width="100%"';
+    if (!/\bheight\s*=/.test(a)) a += ' height="100%"';
+    return `<svg${a}>`;
+  });
 }
 
 export function AgentAvatar({
@@ -153,7 +144,7 @@ export function AgentAvatar({
   // 优先级 1：CDN SVG（内联，含 currentColor 则 theme 化）
   const svg = cdnSvg ?? localSvg;
   if (svg) {
-    return <SvgLogo svg={svg} size={size} themed={usesCurrentColor(svg)} />;
+    return <SvgLogo svg={svg} size={size} />;
   }
   // 本地仍在加载中（可能断网/无本地资产）→ 先 monogram，加载完成自然替换
   if (!localLoading && localSvg === null) {
