@@ -1065,6 +1065,21 @@ function pickSlash(w: CommandWord) {
         }}
       />
 
+      {/* F-12-1 编辑态横幅：发送后从该条重新对话（独立条带，位于输入框上方） */}
+      {editTarget && (
+        <div className="edit-banner" data-testid="edit-banner">
+          <span>正在编辑第 {editTarget.index + 1} 条消息，发送后将从此处重新对话</span>
+          <button
+            type="button"
+            aria-label="取消编辑"
+            onClick={cancelEdit}
+            style={{ transitionDuration: "var(--motion-fast)" }}
+          >
+            取消（Esc）
+          </button>
+        </div>
+      )}
+
       <form
         className="row"
         onSubmit={(e) => {

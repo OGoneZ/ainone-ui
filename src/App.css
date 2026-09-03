@@ -1450,3 +1450,41 @@ button:not(:disabled):active {
     box-shadow: none;
   }
 }
+
+/* F-12-1 编辑态横幅（输入框上方独立条带） */
+.edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 2px 0;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  animation: p12-pop-in var(--motion-default) var(--ease-out-soft);
+}
+
+.edit-banner button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.edit-banner button:hover {
+  background: var(--bg-hover, var(--bg-3));
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-banner {
+    animation: none;
+  }
+}
