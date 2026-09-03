@@ -279,3 +279,69 @@ body {
 
 /* Streamdown 块级元素与设计令牌对接（DEC-22）：只在 data-streamdown 属性上定制，
  * 不引入第二套主题系统；深色由 :root[data-theme=dark] 换令牌值天然生效。 */
+
+/* —— F-R5 排版补齐（AC-R5-1/2/4）—— */
+
+/* 代码块卡片：圆角 + 边框 + 横向滚动（AC-R2-4） */
+.md [data-streamdown="code-block"] {
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.md [data-streamdown="code-block"] pre {
+  overflow-x: auto;
+}
+
+/* 标题层级：收紧边距 + 顶部分隔观感（h1/h2） */
+.md [data-streamdown="heading-1"],
+.md [data-streamdown="heading-2"] {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--bg-3);
+  font-weight: 600;
+}
+
+/* 分隔线用令牌色 */
+.md [data-streamdown="horizontal-rule"] {
+  border-color: var(--bg-3);
+}
+
+/* 链接：品牌色 + 下划线 hover */
+.md [data-streamdown="link"] {
+  color: var(--primary);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.md [data-streamdown="link"]:hover {
+  border-bottom-color: var(--primary);
+}
+
+/* 表格容器：横向滚动 + 表头底色（AC-R5-2） */
+.md [data-streamdown="table-wrapper"] {
+  overflow-x: auto;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+}
+.md [data-streamdown="table-header"] {
+  background: var(--bg-2);
+}
+.md [data-streamdown="table"] th,
+.md [data-streamdown="table"] td {
+  border-color: var(--bg-3);
+  padding: 6px 10px;
+}
+
+/* 行内代码底色统一走令牌 */
+.md :not(pre) > code {
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+
+/* 图片：限宽 + 圆角（lightbox 见 MarkdownView 的 react-photo-view） */
+.md [data-streamdown="image"] img,
+.md img {
+  max-width: 100%;
+  border-radius: var(--radius);
+}

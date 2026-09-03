@@ -12,6 +12,8 @@ import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { mermaid } from "@streamdown/mermaid";
 import { math } from "@streamdown/math";
+import { PhotoProvider, PhotoView } from "react-photo-view";
+import "react-photo-view/dist/react-photo-view.css";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
@@ -1090,14 +1092,24 @@ export function MarkdownView({
           KaTeX/不完整块兜底/内部 memo 一体化；shikiTheme 双主题走 CSS 变量，
           深色由 data-theme 驱动（@custom-variant dark 对齐）。live 时启用
           不完整块解析，静态消息关闭以走 memo 快路径。 */}
-      <Streamdown
-        mode="static"
-        parseIncompleteMarkdown={live}
-        plugins={{ code, mermaid, math }}
-        shikiTheme={["github-light", "github-dark"]}
-      >
-        {text}
-      </Streamdown>
+      {/* F-R5 图片 lightbox（DEC-24）：md 内 img 全部可点击放大（缩放/Esc 关闭） */}
+      <PhotoProvider>
+        <Streamdown
+          mode="static"
+          parseIncompleteMarkdown={live}
+          plugins={{ code, mermaid, math }}
+          shikiTheme={["github-light", "github-dark"]}
+          components={{
+            img: ({ src, alt }) => (
+              <PhotoView src={typeof src === "string" ? src : undefined}>
+                <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} loading="lazy" />
+              </PhotoView>
+            ),
+          }}
+        >
+          {text}
+        </Streamdown>
+      </PhotoProvider>
     </div>
   );
 }

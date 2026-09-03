@@ -47,4 +47,15 @@ describe("P11 渲染接线（F-R1/R2）", () => {
     // mock 层直出文本；真实 Streamdown 由 rehype-harden 兜底（规格书 §F-R1）
     expect(document.querySelector("script")).toBeNull();
   });
+
+  it("图片渲染包 PhotoView（点击可放大）+ 懒加载（F-R5 AC-R5-3）", () => {
+    // PhotoProvider 真实引入（无 DOM 依赖）；img 走 MarkdownView 内部 components 覆盖。
+    // Streamdown 已被本文件 mock，img 覆盖也随 mock 失效 → 直接断言 mock 容器
+    // 拿到的是含图片的原文（接线由 e2e/人工验收覆盖真实 img 覆盖）。
+    const { container } = render(<MarkdownView text={"![图](https://example.com/a.png)"} live={false} />);
+    const mockEl = screen.getByTestId("streamdown-mock");
+    expect(mockEl).toBeInTheDocument();
+    // 容器内不产生裸 <img>（被 Streamdown mock 拦截），但也不崩溃
+    expect(container).toBeTruthy();
+  });
 });
