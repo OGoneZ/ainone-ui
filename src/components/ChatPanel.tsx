@@ -7,7 +7,7 @@
 //   - 一轮 agent 回复内部 blocks 顺序渲染：text / thought / tool
 //   - thinking 流式中浅色小字展开，结束后自动折叠为「已思考 N 秒」，可点击展开
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { mermaid } from "@streamdown/mermaid";
@@ -418,12 +418,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
-  function onSelectText(text: string, e?: React.MouseEvent) {
+  // P11 F-R7：useCallback 稳定引用，避免 memo 化的 MessageLine 因回调新引用而失效
+  const onSelectText = useCallback((text: string, e?: React.MouseEvent) => {
     setQuickSel(text);
     // 悬浮窗锚定到选区附近
     setQuickAnchor({ x: e?.clientX ?? 120, y: e?.clientY ?? 80 });
     setQuickPop(null);
-  }
+  }, []);
   async function runQuickAsk() {
     if (!quickSel) return;
     const text = quickSel;
@@ -983,7 +984,10 @@ function Welcome({ adapter, onSuggest }: { adapter: AdapterWithStatus; onSuggest
 }
 
 // —— 消息行渲染：user 右气泡 / assistant 左（全宽）+ 头像 + hover 复制（F-7-4）——
-function MessageLine({
+// P11 F-R7（AC-R7-1）：React.memo 包裹——流式新 chunk 只更新末条消息，
+// 历史消息 props 引用不变（store 保证非末条 block 引用稳定）→ 跳过重渲染，
+// 也就跳过 Streamdown 对长文本的全量重解析。导出供测试。
+export const MessageLine = memo(function MessageLine({
   msg,
   adapter,
   busy,
@@ -1069,7 +1073,7 @@ function MessageLine({
       </div>
     </div>
   );
-}
+});
 
 /** P11：assistant 正文 markdown 渲染（导出供测试与复用；批注选区监听在容器上） */
 export function MarkdownView({
