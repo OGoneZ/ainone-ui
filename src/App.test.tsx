@@ -16,6 +16,33 @@ vi.mock("@tanstack/react-virtual", () => ({
   },
 }));
 
+// flexlayout 的 Layout 组件在 jsdom 高度为 0 时不渲染 tab content（同理 react-virtual）。
+// 组件测试关心的是「tab 增删/去重/factory 渲染 ChatPanel」编排逻辑，不关心其 DOM 布局测量，
+// 故 mock 掉 Layout：保留真实 Model/Actions/DockLocation（addTabToModel 逻辑被测），
+// 只把 model 里所有 tab 平铺渲染出来。
+vi.mock("flexlayout-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("flexlayout-react")>();
+  const React = await import("react");
+  return {
+    ...actual,
+    Layout: ({ model, factory }: { model: any; factory: (n: any) => React.ReactNode }) => {
+      const [, force] = React.useReducer((x: number) => x + 1, 0);
+      React.useEffect(() => {
+        model?.addChangeListener(() => force());
+      }, [model]);
+      const tabs: any[] = [];
+      model?.visitNodes((n: any) => {
+        if (n.getType() === "tab") tabs.push(n);
+      });
+      return React.createElement(
+        "div",
+        { "data-testid": "flexlayout" },
+        tabs.map((n) => React.createElement("div", { key: n.getId() }, factory(n))),
+      );
+    },
+  };
+});
+
 const WS = [
   { id: "ws-dev", name: "dev", cwd: "/Users/me/dev", created_ms: 1 },
   { id: "ws-asr", name: "asr-server", cwd: "/Users/me/dev/asr-server", created_ms: 2 },

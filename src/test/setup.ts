@@ -21,3 +21,13 @@ if (typeof window !== "undefined" && !window.matchMedia) {
       dispatchEvent: () => false,
     }) as unknown as MediaQueryList;
 }
+
+// jsdom 缺 ResizeObserver（flexlayout LayoutInternal 挂载时 new ResizeObserver）。
+// 补一个无操作桩，让 P10 分屏布局在组件测试里能挂载。
+if (typeof window !== "undefined" && !(window as any).ResizeObserver) {
+  (window as any).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

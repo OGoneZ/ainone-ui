@@ -356,3 +356,52 @@ body {
 .code-block-wrap:hover .code-copy {
   opacity: 1;
 }
+
+/* ======================= flexlayout-react 主题映射（P10 F-10-3，DEC-22a）=======================
+ * flexlayout 的颜色走 --flexlayout-color-*（light.css/dark.css 的默认值在变量上）。
+ * 这里把 --flexlayout-color-* 指到本设计令牌层 var(--*)，深浅色随 data-theme 自动换值。
+ * 覆盖点在 .flexlayout__layout 上的变量声明（flexlayout 默认样式里同一选择器声明了这些变量，
+ * 我们的样式后加载即可覆盖）。 */
+.flexlayout__layout {
+  --flexlayout-color-text: var(--text-primary);
+  --flexlayout-color-background: var(--bg-base);
+  --flexlayout-color-base: var(--bg-1);
+  --flexlayout-color-1: var(--bg-1);
+  --flexlayout-color-2: var(--bg-2);
+  --flexlayout-color-3: var(--bg-3);
+  --flexlayout-color-4: var(--bg-hover);
+  --flexlayout-color-5: var(--text-secondary);
+  --flexlayout-color-6: var(--text-disabled);
+  --flexlayout-color-tab-selected: var(--text-primary);
+  --flexlayout-color-tab-selected-background: var(--bg-1);
+  --flexlayout-color-tab-unselected: var(--text-secondary);
+  --flexlayout-color-tab-unselected-background: transparent;
+  --flexlayout-color-tabset-background: var(--bg-base);
+  --flexlayout-color-tabset-background-selected: var(--bg-base);
+  --flexlayout-color-tabset-background-maximized: var(--bg-base);
+  --flexlayout-color-splitter: var(--bg-2);
+  --flexlayout-color-splitter-hover: var(--primary);
+  --flexlayout-color-splitter-drag: var(--primary);
+  --flexlayout-color-focus: var(--primary);
+  --flexlayout-color-popup-border: var(--bg-3);
+  --flexlayout-color-popup-selected: var(--text-primary);
+  --flexlayout-color-popup-selected-background: var(--bg-hover);
+  --flexlayout-color-popup-unselected: var(--text-secondary);
+  --flexlayout-color-popup-unselected-background: var(--bg-1);
+  --flexlayout-color-edge-marker: var(--bg-3);
+  --flexlayout-color-drag-rect-border: var(--primary);
+  --flexlayout-color-drag-rect-background: color-mix(in srgb, var(--primary) 12%, transparent);
+  --flexlayout-color-drag-rect: var(--text-primary);
+  --flexlayout-tab-button-radius: var(--radius-sm);
+}
+
+/* flexlayout 标签限宽 + 省略号（复用规格书 F-10-2 的 Chrome 式标签弹性约束，作用于同一层级） */
+.flexlayout__tab_button {
+  max-width: 200px;
+  min-width: 80px;
+}
+.flexlayout__tab_button_content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

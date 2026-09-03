@@ -210,54 +210,24 @@ select {
   color: var(--danger);
 }
 
-/* —— Tab 栏 —— */
+/* —— Tab 区（P10 迁移到 flexlayout，.tabs-area 仍是外层容器；旧 .tab/.tabs-bar 已废弃删除）—— */
 .tabs-area {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   min-width: 0;
+  gap: 8px;
 }
 
-.tabs-bar {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
-  overflow-x: auto;
-}
-
-.tab {
-  padding: 4px 14px;
-  border: 1px solid var(--bg-3);
-  border-radius: var(--radius-full);
-  background: transparent;
-  cursor: pointer;
-  font-size: 0.85em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-}
-
-.tab.active {
-  background: var(--bg-1);
-  border-color: var(--bg-3);
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.tab-close {
-  color: var(--text-secondary);
-}
-
-.tab-close:hover {
-  color: var(--danger);
-}
-
-.tab-content {
+/* flexlayout 宿主填充剩余空间（tab 栏 + 内容由 flexlayout 内部渲染） */
+.layout-host {
   flex: 1;
-  display: flex;
-  flex-direction: column;
+  min-width: 0;
   min-height: 0;
+  position: relative;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
 }
 
 .panel {
@@ -303,6 +273,25 @@ select {
   gap: 8px;
   margin-top: 12px;
   align-items: flex-end;
+  /* F-10-4 悬浮输入框：半透明 + 背景模糊 + 圆角 + 浮起阴影 */
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg-1) 82%, transparent);
+  backdrop-filter: blur(var(--blur-panel));
+  -webkit-backdrop-filter: blur(var(--blur-panel));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+
+/* 悬浮容器内的输入框融入半透明底（否则不透明方块盖住 blur） */
+.row textarea {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.row textarea:focus {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--bg-1) 60%, transparent);
 }
 
 /* —— 欢迎页 —— */

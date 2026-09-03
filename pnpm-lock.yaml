@@ -41,6 +41,9 @@ importers:
       cmdk:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      flexlayout-react:
+        specifier: ^0.10.8
+        version: 0.10.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       fuzzysort:
         specifier: ^4.0.2
         version: 4.0.2
@@ -1797,6 +1800,13 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  flexlayout-react@0.10.8:
+    resolution: {integrity: sha512-lL+NVIvReIMhsl2H78qm7GKVE1OGXSe03PtcE2MZ+s5b0irBF578hRCWcdnv+GLeFADyHofa63L0E4oVQe9kCA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
 
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
@@ -4151,6 +4161,11 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
+
+  flexlayout-react@0.10.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   fsevents@2.3.3:
     optional: true
