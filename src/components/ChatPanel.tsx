@@ -15,10 +15,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
 import { CommandQueuePanel } from "./CommandQueuePanel";
-import { FileTree } from "./FileTree";
 import { VoiceInput } from "./VoiceInput";
 import { useQueueStore } from "../store/queueStore";
-import { collectModifiedPaths } from "../acp/fileTree";
 import { logRead, logAppend, logTruncate, logCopy } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
@@ -34,6 +32,7 @@ import { filterExcluded } from "../acp/fileTree";
 import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
 import { truncateToMessageIndex } from "../acp/rewind";
+import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../acp/lastPrompt";
 import { searchMessages } from "../acp/search";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
@@ -281,6 +280,18 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       }
     };
     window.addEventListener("keydown", onKeyDown);
+    // F-11-7 RightRail 文件树「引用」→ 注入附件（CustomEvent，与 Rail 解耦）
+    const onRefFile = (e: Event) => {
+      const path = (e as CustomEvent<string>).detail;
+      if (typeof path !== "string") return;
+      logger.info("fs", "ref-file", { path });
+      setFiles((prev) => {
+        const seen = new Set(prev.map((f) => f.path));
+        if (seen.has(path)) return prev;
+        return [...prev, { path }];
+      });
+    };
+    window.addEventListener("ainone:ref-file", onRefFile);
     // F-11-6 快问悬浮窗点外关闭：document mousedown + outside 判定（Esc 走 onKeyDown）
     const onDocMouseDown = (e: MouseEvent) => {
       if (quickSelRef.current === null) return;
@@ -306,6 +317,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     return () => {
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("ainone:ref-file", onRefFile);
       document.removeEventListener("mousedown", onDocMouseDown);
       unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
@@ -679,13 +691,52 @@ function pickSlash(w: CommandWord) {
     overscan: 8,
   });
 
-  const empty = messages.length === 0;
+  // F-11-9 上一条指令回跳气泡
+  const lastUserIdx = useMemo(() => lastUserIndex(messages), [messages]);
+  const lastUserText = lastUserIdx >= 0 && messages[lastUserIdx].role === "user" ? messages[lastUserIdx].text : "";
+  const [atBottom, setAtBottom] = useState(true);
+  // 滚动监听（raf 节流）：距底 >64px 显示气泡
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+        setAtBottom(dist <= 64);
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+  function jumpToLastPrompt() {
+    if (lastUserIdx < 0) return;
+    logger.debug("chat", "last-prompt-jump", { index: lastUserIdx });
+    virtualizer.scrollToIndex(lastUserIdx, { align: "start" });
+  }
 
-  // F-9-4 最近改动的文件路径（diff 出现过的，供文件树「M」徽标）
-  const modifiedPaths = useMemo(() => collectModifiedPaths(messages), [messages]);
+  const empty = messages.length === 0;
 
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
+      {/* F-11-9 上一条指令回跳气泡（悬浮于消息区顶部；贴底/无指令时隐藏） */}
+      {shouldShowLastPromptBubble(lastUserIdx >= 0, atBottom ? 0 : 9999) && (
+        <button
+          type="button"
+          className="last-prompt-bubble"
+          title={lastUserText}
+          data-testid="last-prompt-bubble"
+          onClick={jumpToLastPrompt}
+        >
+          <span className="last-prompt-label">你最后说的：</span>
+          <span className="last-prompt-text">{ellipsize(lastUserText)}</span>
+          ↑
+        </button>
+      )}
       {/* F-9-2 会话内搜索条 */}
       {searchOpen && (
         <div className="search-bar">
@@ -915,19 +966,8 @@ function pickSlash(w: CommandWord) {
       {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
       <CommandQueuePanel tabKey={tabKey} />
 
-      {/* F-9-4 工作区文件树（当前会话 cwd） */}
-      <FileTree
-        cwd={cwd}
-        modifiedPaths={modifiedPaths}
-        onRefFile={(path) => {
-          logger.info("fs", "ref-file", { path });
-          setFiles((prev) => {
-            const seen = new Set(prev.map((f) => f.path));
-            if (seen.has(path)) return prev;
-            return [...prev, { path }];
-          });
-        }}
-      />
+      {/* F-11-7：文件树移入 RightRail；通过 CustomEvent 接收其「引用」动作注入附件 */}
+      {/*（监听挂载在下方 useEffect） */}
 
       <form
         className="row"

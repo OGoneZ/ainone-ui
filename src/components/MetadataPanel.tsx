@@ -19,11 +19,13 @@ interface Props {
   adapter: AdapterWithStatus;
   sessionId: string | null;
   cwd?: string;
+  /** F-11-7：作为 RightRail tab 内容嵌入（隐藏自身头部与折叠钮，由 Rail 统一管理） */
+  embedded?: boolean;
 }
 
 const STORAGE_KEY = "ainone-metadata-open";
 
-export function MetadataPanel({ tabKey, adapter, sessionId, cwd }: Props) {
+export function MetadataPanel({ tabKey, adapter, sessionId, cwd, embedded = false }: Props) {
   const usage = useSessionStore((s) => s.runtime[tabKey]?.usage ?? null);
   const meta = useSessionStore((s) => s.runtime[tabKey]?.meta ?? null);
 
@@ -34,6 +36,17 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd }: Props) {
 
   const pct = usage ? usagePercent(usage) : null;
   const model = extractModel(adapter.args);
+
+  // F-11-7：嵌入 RightRail → 直接渲染内容（Rail 负责开合，不再有自己的折叠态）
+  if (embedded) {
+    return (
+      <div className="meta-embedded">
+        <dl className="meta-list">
+          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} />
+        </dl>
+      </div>
+    );
+  }
 
   if (!open) {
     return (
@@ -64,6 +77,32 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd }: Props) {
       </div>
 
       <dl className="meta-list">
+        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} />
+      </dl>
+    </aside>
+  );
+}
+
+/** 元数据条目（独立渲染单元：独立/嵌入两形态共用） */
+function MetaItems({
+  usage,
+  meta,
+  pct,
+  model,
+  sessionId,
+  cwd,
+  adapterName,
+}: {
+  usage: { used: number; size: number; cost: number | null } | null;
+  meta: { apiType?: string; baseUrl?: string } | null;
+  pct: number | null;
+  model: string | null;
+  sessionId: string | null;
+  cwd?: string;
+  adapterName: string;
+}) {
+  return (
+    <>
         <div className="meta-item">
           <dt>上下文占用</dt>
           <dd>
@@ -110,7 +149,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd }: Props) {
         <div className="meta-item">
           <dt>harness / apiType</dt>
           <dd>
-            <span className="meta-mono">{adapter.name}</span>
+            <span className="meta-mono">{adapterName}</span>
             {meta?.apiType && <span className="meta-tag">{meta.apiType}</span>}
           </dd>
         </div>
@@ -124,7 +163,6 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd }: Props) {
           <dt>模型</dt>
           <dd className="meta-mono">{model ?? "（未配置 --model）"}</dd>
         </div>
-      </dl>
-    </aside>
+    </>
   );
 }

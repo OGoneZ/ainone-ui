@@ -11,7 +11,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { EmptyState } from "./components/EmptyState";
-import { MetadataPanel } from "./components/MetadataPanel";
+import { RightRail } from "./components/RightRail";
 import { AgentAvatar } from "./components/AgentAvatar";
 import {
   WorkspaceIcon,
@@ -307,6 +307,8 @@ function App() {
 
   // 会话状态（F-6-1）：非活跃 Tab 的 runtime 状态仍可读（zustand store）
   const runtime = useSessionStore((s) => s.runtime);
+  // F-11-7 右栏数据：当前活跃 Tab 的消息（文件树「M」徽标）
+  const activeMessages = (activeTab && runtime[activeTab.key]?.messages) || [];
   const statusBySession = useMemo(() => {
     const signals = collectSignals(tabs, runtime);
     const out = new Map<string, SessionStatus>();
@@ -467,13 +469,14 @@ function App() {
               onModelChange={handleAction}
             />
           </div>
-          {/* F-8-4 元数据侧栏：右侧可折叠第二侧栏 */}
+          {/* F-11-7 右侧侧边栏：元数据 / 文件 双 tab（替换原独立 MetadataPanel） */}
           {activeAdapter && activeTab && (
-            <MetadataPanel
+            <RightRail
               tabKey={activeTab.key}
               adapter={activeAdapter}
               sessionId={activeTab.sessionId ?? null}
               cwd={activeTab.cwd}
+              messages={activeMessages}
             />
           )}
         </section>
