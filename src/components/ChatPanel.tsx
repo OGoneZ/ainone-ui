@@ -1203,10 +1203,19 @@ function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: bool
             padding: "8px 12px",
             marginLeft: "20px",
             marginTop: "2px",
-            whiteSpace: "pre-wrap",
           }}
         >
-          {text}
+          {/* P11 F-R8（DEC-25）：thinking 展开体走 markdown 渲染（thinking 同样可能
+              含代码围栏/公式/列表）；小字号沿用外层 13px。不用 PhotoProvider
+              （AC-R8-3：thinking 是过程性内容，批注选区明确降级不开放）。 */}
+          <Streamdown
+            mode="static"
+            parseIncompleteMarkdown={live}
+            plugins={{ code, math }}
+            shikiTheme={["github-light", "github-dark"]}
+          >
+            {text}
+          </Streamdown>
         </div>
       )}
     </div>
