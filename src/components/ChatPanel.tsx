@@ -23,6 +23,14 @@ import { logRead, logAppend, logTruncate } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
+import {
+  detectAtToken,
+  flattenWorkspaceFiles,
+  filterAtFiles,
+  applyAtToken,
+} from "../acp/atFile";
+import { workspaceListDir } from "../config/fslist";
+import { filterExcluded } from "../acp/fileTree";
 import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
 import { truncateToMessageIndex } from "../acp/rewind";
@@ -111,19 +119,67 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [quotes, setQuotes] = useState<Quote[]>([]);
   // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
   const [historyDegraded, setHistoryDegraded] = useState(false);
-  // slash 补全：高亮项下标，-1 = 无（未展开或已收起）
+  // slash 补全：高亮项下标；菜单展开时默认 0（F-11-1：直接 Enter 即选中首项）
   const [slashIdx, setSlashIdx] = useState(-1);
   const slashRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // F-11-3 @ 文件联想：null = 未展开；展开时为 token 信息
+  const [atMenu, setAtMenu] = useState<{ query: string; start: number; end: number } | null>(null);
+  const [atIdx, setAtIdx] = useState(0);
+  // @ 数据源：cwd 目录懒加载缓存（与 FileTree 共用 workspaceListDir，形状：路径→子项）
+  const [atTree, setAtTree] = useState<Record<string, Array<{ name: string; is_dir: boolean }>>>({});
+  const atMenuRef = useRef<HTMLDivElement | null>(null);
+  const slashMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const workspaceCwd = cwd && cwd.length > 0 ? cwd : adapter.cwd;
 
   // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文
   const typeText = useTypewriter(typewriterHint(adapter));
 
-  // slash 候选（F-4-7）：输入以 / 开头才计算
+  // slash 候选（F-4-7 / F-11-1 模糊匹配）：输入以 / 开头才计算
   const slashOpen = isSlashInput(input);
   const slashMatches = useMemo(
     () => (slashOpen ? filterCommands(commands, input) : []),
     [commands, input, slashOpen],
   );
+  // F-11-1：菜单展开时默认高亮第 0 项（直接 Enter 即选中）
+  const slashHighlight = slashIdx >= 0 && slashIdx < slashMatches.length ? slashIdx : 0;
+
+  // @ 候选（F-11-3）：菜单展开才计算（扁平化 + fuzzy 过滤）
+  const atMatches = useMemo(() => {
+    if (!atMenu) return [];
+    const files = flattenWorkspaceFiles(workspaceCwd, atTree);
+    return filterAtFiles(files, atMenu.query);
+  }, [atMenu, atTree, workspaceCwd]);
+  const atHighlight = atIdx >= 0 && atIdx < atMatches.length ? atIdx : 0;
+
+  // @ 菜单展开时确保根目录已加载（懒加载一层；目录选中仅插入路径不展开）
+  useEffect(() => {
+    if (!atMenu || !workspaceCwd || atTree[workspaceCwd]) return;
+    let alive = true;
+    workspaceListDir(workspaceCwd)
+      .then((entries) => {
+        if (alive && Array.isArray(entries)) {
+          setAtTree((t) => ({ ...t, [workspaceCwd]: filterExcluded(entries) }));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [atMenu, workspaceCwd, atTree]);
+
+  // F-11-1/F-11-3：键盘导航时滚动跟随（菜单容器内滚，不滚页面）
+  useEffect(() => {
+    if (!slashOpen) return;
+    const el = slashMenuRef.current?.querySelector(".slash-item.active") as HTMLElement | null;
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [slashHighlight, slashOpen]);
+  useEffect(() => {
+    if (!atMenu) return;
+    const el = atMenuRef.current?.querySelector(".slash-item.active") as HTMLElement | null;
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [atHighlight, atMenu]);
 
   const sessionRef = useRef<AcpSession | null>(null);
   const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
@@ -275,6 +331,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     if (!full.trim()) return;
     setInput("");
     setSlashIdx(-1);
+    setAtMenu(null);
     setFiles([]);
     if (files.length > 0) logger.info("chat", "send-with-files", { count: files.length });
     appendUser(tabKey, full);
@@ -435,6 +492,19 @@ function pickSlash(w: CommandWord) {
     setInput(completeCommand(w));
     setSlashIdx(-1);
     slashRef.current?.focus();
+  }
+
+  // F-11-3 @ 选中：替换 @ token 为 @file: 路径，同步附件胶囊（复用 F-8-3 files）
+  function pickAt(entry: { rel: string; abs: string; isDir: boolean }) {
+    if (!atMenu) return;
+    setInput((prev) => applyAtToken(prev, atMenu, entry));
+    setAtMenu(null);
+    setAtIdx(0);
+    if (!entry.isDir) {
+      // 文件 → 进附件胶囊（目录只插入路径，不进胶囊）
+      addFiles([{ path: entry.abs }]);
+    }
+    requestAnimationFrame(() => slashRef.current?.focus());
   }
 
   const runRef = useRef<{ promise: Promise<void> } | null>(null);
@@ -847,12 +917,13 @@ function pickSlash(w: CommandWord) {
         <VoiceInput onTranscribed={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))} />
         <div className="input-wrap">
           {slashOpen && slashMatches.length > 0 && (
-            <div className="slash-menu">
+            <div className="slash-menu" ref={slashMenuRef}>
               {slashMatches.map((w, i) => (
                 <button
                   type="button"
                   key={w.name}
-                  className={i === slashIdx ? "slash-item active" : "slash-item"}
+                  aria-selected={i === slashHighlight}
+                  className={i === slashHighlight ? "slash-item active" : "slash-item"}
                   onMouseDown={(e) => {
                     e.preventDefault(); // 抢在 textarea blur 前选中
                     pickSlash(w);
@@ -864,15 +935,68 @@ function pickSlash(w: CommandWord) {
               ))}
             </div>
           )}
+          {/* F-11-3 @ 文件联想菜单（复用 slash 菜单结构） */}
+          {atMenu && atMatches.length > 0 && (
+            <div className="slash-menu at-menu" ref={atMenuRef}>
+              {atMatches.map((f, i) => (
+                <button
+                  type="button"
+                  key={f.rel}
+                  aria-selected={i === atHighlight}
+                  className={i === atHighlight ? "slash-item active" : "slash-item"}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pickAt(f);
+                  }}
+                >
+                  <span className="slash-name">{f.isDir ? "📁" : "📄"} {f.rel}</span>
+                  <span className="slash-desc">{f.isDir ? "目录" : "文件"}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             ref={slashRef}
             aria-label="消息输入"
             value={input}
             onChange={(e) => {
-              setInput(e.currentTarget.value);
+              const v = e.currentTarget.value;
+              const caret = e.currentTarget.selectionStart ?? v.length;
+              setInput(v);
               setSlashIdx(-1); // 输入变化重置高亮
+              // F-11-3：@ 联想开合（词首 @ 才触发）
+              const token = detectAtToken(v, caret);
+              if (token) {
+                setAtMenu((m) => (m ? { ...token } : token));
+                setAtIdx(0);
+              } else {
+                setAtMenu(null);
+              }
             }}
             onKeyDown={(e) => {
+              // F-11-3 @ 菜单键盘导航（与 slash 互斥：同帧只开一个菜单）
+              if (atMenu && atMatches.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setAtIdx((i) => (i + 1) % atMatches.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setAtIdx((i) => (i <= 0 ? atMatches.length - 1 : i - 1));
+                  return;
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  pickAt(atMatches[atHighlight]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setAtMenu(null);
+                  return;
+                }
+              }
               if (slashOpen && slashMatches.length > 0) {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
@@ -886,7 +1010,7 @@ function pickSlash(w: CommandWord) {
                 }
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  pickSlash(slashMatches[slashIdx >= 0 ? slashIdx : 0]);
+                  pickSlash(slashMatches[slashHighlight]);
                   return;
                 }
                 if (e.key === "Escape") {
