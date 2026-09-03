@@ -51,7 +51,7 @@ P11.1 输入交互（F-11-1 → F-11-2 → F-11-3 → F-11-4 spike+实施）
 
 **架构决策**：
 
-- **DEC-25**：模糊匹配自研纯函数 `fuzzyScore(needle, haystack) → number | null`（null=不匹配），评分因子：子序列命中 + 连续命中加成 + 词首/分隔符后命中加成 + 间隔惩罚 + 起始位置加成（对齐 fzf v2 简化版）。所有匹配场景（slash/@/全局搜索）共用。不引第三方模糊库（候选 fzf.js/v fuzzy 均低维护或体积大；60 行纯函数可穷举单测）。
+- **DEC-25**：模糊匹配**采用 fuzzysort@4**（0 依赖、<1KB gzip、周下载 ~10M、TypeScript 内建类型、2026-08 仍在维护），不重复造轮子（金标准修订）。首版自研 60 行评分器被 fuzzysort 替换：评分（连续/词首/起始位置）内置且经过大规模实战校准；`threshold: -Infinity` 全收 + 按分数排序（v4 默认 0.5 阈值会丢弃弱子序列命中，对文件路径导航仍有价值）。候选库否决记录：fuse.js（6.8KB+，面向自然语言字段，路径评分差）、microfuzz（社区规模小）、fzf.js（无维护）。
 - **DEC-26**：快捷键分配：**Ctrl+F = 全局 session 搜索**（App 层监听，悬浮顶部弹层）；**Ctrl+Shift+F = 会话内内容搜索**（ChatPanel 层监听，改绑）。两层互不拦截。
 - **DEC-27**：全局搜索弹层用 shadcn `CommandDialog`（cmdk，成熟方案），顶部悬浮定位（top: 12% 居中），数据源 = `sessions_list` 全量 + `fuzzyScore` 过滤排序；回车/点击 → 复用 `resolveHistoryOpen` 打开会话 Tab。
 - **DEC-28**：`@` 文件选取复用 FileRef 体系：输入 `@` 触发文件联想菜单（对 cwd 递归目录索引，懒加载 + fuzzy 过滤），选中 → 当前光标处插入 `@file:/abs/path ` 附件语义文本；发送时既可作为附件胶囊（复用 files state）也可留在文本中。首个 `@` 语义与 Claude Code 对齐：**引用文件**，不是上传。
