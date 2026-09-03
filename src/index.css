@@ -266,95 +266,100 @@ body {
   opacity: 1;
 }
 
-/* ======================= Markdown / 代码高亮（F-7-10）======================= */
+/* ======================= Markdown 渲染（P11 · Streamdown）======================= */
 
-/* 浅色走 highlight.js github.css（main.tsx import）；深色在此覆盖为 github-dark 同款色值，
- * 随 data-theme 切换（AC-P7-10-3：无深底深字）。 */
-:root[data-theme="dark"] .hljs {
-  background: #0d1117;
-  color: #c9d1d9;
-}
-:root[data-theme="dark"] .hljs-doctag,
-:root[data-theme="dark"] .hljs-keyword,
-:root[data-theme="dark"] .hljs-meta .hljs-keyword,
-:root[data-theme="dark"] .hljs-template-tag,
-:root[data-theme="dark"] .hljs-template-variable,
-:root[data-theme="dark"] .hljs-type,
-:root[data-theme="dark"] .hljs-variable.language_ {
-  color: #ff7b72;
-}
-:root[data-theme="dark"] .hljs-title,
-:root[data-theme="dark"] .hljs-title.class_,
-:root[data-theme="dark"] .hljs-title.class_.inherited__,
-:root[data-theme="dark"] .hljs-title.function_ {
-  color: #d2a8ff;
-}
-:root[data-theme="dark"] .hljs-attr,
-:root[data-theme="dark"] .hljs-attribute,
-:root[data-theme="dark"] .hljs-literal,
-:root[data-theme="dark"] .hljs-meta,
-:root[data-theme="dark"] .hljs-number,
-:root[data-theme="dark"] .hljs-operator,
-:root[data-theme="dark"] .hljs-variable,
-:root[data-theme="dark"] .hljs-selector-attr,
-:root[data-theme="dark"] .hljs-selector-class,
-:root[data-theme="dark"] .hljs-selector-id {
-  color: #79c0ff;
-}
-:root[data-theme="dark"] .hljs-regexp,
-:root[data-theme="dark"] .hljs-string,
-:root[data-theme="dark"] .hljs-meta .hljs-string {
-  color: #a5d6ff;
-}
-:root[data-theme="dark"] .hljs-built_in,
-:root[data-theme="dark"] .hljs-symbol {
-  color: #ffa657;
-}
-:root[data-theme="dark"] .hljs-comment,
-:root[data-theme="dark"] .hljs-code,
-:root[data-theme="dark"] .hljs-formula {
-  color: #8b949e;
-}
-:root[data-theme="dark"] .hljs-name,
-:root[data-theme="dark"] .hljs-quote,
-:root[data-theme="dark"] .hljs-selector-tag,
-:root[data-theme="dark"] .hljs-selector-pseudo {
-  color: #7ee787;
-}
-:root[data-theme="dark"] .hljs-section {
-  color: #1f6feb;
-  font-weight: bold;
-}
-:root[data-theme="dark"] .hljs-addition {
-  color: #aff5b4;
-  background: #033a16;
-}
-:root[data-theme="dark"] .hljs-deletion {
-  color: #ffdcd7;
-  background: #67060c;
-}
+/*
+ * Tailwind v4 需要 @source 扫描 Streamdown 及其插件的类名，否则样式被 purge。
+ * 见 docs/plan-p11-rendering.md §3。
+ */
+@source "../node_modules/streamdown/dist/**/*.js";
+@source "../node_modules/@streamdown/code/dist/**/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/**/*.js";
+@source "../node_modules/@streamdown/math/dist/**/*.js";
 
-/* 代码块卡片化 + hover 复制按钮（AC-P7-10-2） */
-.md .code-block-wrap {
-  position: relative;
-}
-.code-copy {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  font-size: 12px;
-  border-radius: var(--radius-sm);
+/* Streamdown 块级元素与设计令牌对接（DEC-22）：只在 data-streamdown 属性上定制，
+ * 不引入第二套主题系统；深色由 :root[data-theme=dark] 换令牌值天然生效。 */
+
+/* —— F-R5 排版补齐（AC-R5-1/2/4）—— */
+
+/* 代码块卡片：圆角 + 边框 + 横向滚动（AC-R2-4） */
+.md [data-streamdown="code-block"] {
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
   background: var(--bg-2);
-  color: var(--text-secondary);
-  opacity: 0;
-  transition: opacity var(--motion-fast);
 }
-.code-block-wrap:hover .code-copy {
-  opacity: 1;
+.md [data-streamdown="code-block"] pre {
+  overflow-x: auto;
+}
+
+/* 标题层级：收紧边距 + 顶部分隔观感（h1/h2） */
+.md [data-streamdown="heading-1"],
+.md [data-streamdown="heading-2"] {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--bg-3);
+  font-weight: 600;
+}
+
+/* 分隔线用令牌色 */
+.md [data-streamdown="horizontal-rule"] {
+  border-color: var(--bg-3);
+}
+
+/* 链接：品牌色 + 下划线 hover */
+.md [data-streamdown="link"] {
+  color: var(--primary);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.md [data-streamdown="link"]:hover {
+  border-bottom-color: var(--primary);
+}
+
+/* 表格容器：横向滚动 + 表头底色（AC-R5-2） */
+.md [data-streamdown="table-wrapper"] {
+  overflow-x: auto;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+}
+.md [data-streamdown="table-header"] {
+  background: var(--bg-2);
+}
+.md [data-streamdown="table"] th,
+.md [data-streamdown="table"] td {
+  border-color: var(--bg-3);
+  padding: 6px 10px;
+}
+
+/* 行内代码底色统一走令牌 */
+.md :not(pre) > code {
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+
+/* 图片：限宽 + 圆角（lightbox 见 MarkdownView 的 react-photo-view） */
+.md [data-streamdown="image"] img,
+.md img {
+  max-width: 100%;
+  border-radius: var(--radius);
+}
+
+/* —— F-R6 工具输出折叠按钮 —— */
+.tool-text-fold {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+}
+.tool-text-fold:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 /* ======================= flexlayout-react 主题映射（P10 F-10-3，DEC-22a）=======================

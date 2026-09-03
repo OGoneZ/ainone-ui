@@ -7,10 +7,16 @@
 //   - 一轮 agent 回复内部 blocks 顺序渲染：text / thought / tool
 //   - thinking 流式中浅色小字展开，结束后自动折叠为「已思考 N 秒」，可点击展开
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Streamdown } from "streamdown";
+import { code } from "@streamdown/code";
+import { mermaid } from "@streamdown/mermaid";
+import { math } from "@streamdown/math";
+import { PhotoProvider, PhotoView } from "react-photo-view";
+import "react-photo-view/dist/react-photo-view.css";
+// ansi-to-react 是 CJS 单导出（exports.default），ESM interop 后需再取一层 default
+import AnsiPkg from "ansi-to-react";
+const Ansi = (AnsiPkg as unknown as { default?: typeof AnsiPkg }).default ?? AnsiPkg;
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
@@ -34,6 +40,7 @@ import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/
 import { truncateToMessageIndex } from "../acp/rewind";
 import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../acp/lastPrompt";
 import { searchMessages } from "../acp/search";
+import { prettyJson } from "../acp/toolFormat";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
@@ -511,12 +518,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
-  function onSelectText(text: string, e?: React.MouseEvent) {
+  // P11 F-R7：useCallback 稳定引用，避免 memo 化的 MessageLine 因回调新引用而失效
+  const onSelectText = useCallback((text: string, e?: React.MouseEvent) => {
     setQuickSel(text);
     // 悬浮窗锚定到选区附近
     setQuickAnchor({ x: e?.clientX ?? 120, y: e?.clientY ?? 80 });
     setQuickPop(null);
-  }
+  }, []);
   async function runQuickAsk() {
     if (!quickSel) return;
     const text = quickSel;
@@ -1171,7 +1179,10 @@ function Welcome({ adapter, onSuggest }: { adapter: AdapterWithStatus; onSuggest
 }
 
 // —— 消息行渲染：user 右气泡 / assistant 左（全宽）+ 头像 + hover 复制（F-7-4）——
-function MessageLine({
+// P11 F-R7（AC-R7-1）：React.memo 包裹——流式新 chunk 只更新末条消息，
+// 历史消息 props 引用不变（store 保证非末条 block 引用稳定）→ 跳过重渲染，
+// 也就跳过 Streamdown 对长文本的全量重解析。导出供测试。
+export const MessageLine = memo(function MessageLine({
   msg,
   adapter,
   busy,
@@ -1257,6 +1268,53 @@ function MessageLine({
       </div>
     </div>
   );
+});
+
+/** P11：assistant 正文 markdown 渲染（导出供测试与复用；批注选区监听在容器上） */
+export function MarkdownView({
+  text,
+  live,
+  onSelect,
+}: {
+  text: string;
+  live: boolean;
+  onSelect?: (text: string, e: React.MouseEvent) => void;
+}) {
+  return (
+    <div
+      className="md"
+      onMouseUp={(e) => {
+        // F-8-2（用法1）+ F-8-7（快问）：选中 assistant 正文文字 → 记录选区
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) return;
+        const t = sel.toString().trim();
+        if (t) onSelect?.(t, e);
+      }}
+    >
+      {/* P11（DEC-21）：Streamdown 替代 ReactMarkdown——GFM/代码块(Shiki)/Mermaid/
+          KaTeX/不完整块兜底/内部 memo 一体化；shikiTheme 双主题走 CSS 变量，
+          深色由 data-theme 驱动（@custom-variant dark 对齐）。live 时启用
+          不完整块解析，静态消息关闭以走 memo 快路径。 */}
+      {/* F-R5 图片 lightbox（DEC-24）：md 内 img 全部可点击放大（缩放/Esc 关闭） */}
+      <PhotoProvider>
+        <Streamdown
+          mode="static"
+          parseIncompleteMarkdown={live}
+          plugins={{ code, mermaid, math }}
+          shikiTheme={["github-light", "github-dark"]}
+          components={{
+            img: ({ src, alt }) => (
+              <PhotoView src={typeof src === "string" ? src : undefined}>
+                <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} loading="lazy" />
+              </PhotoView>
+            ),
+          }}
+        >
+          {text}
+        </Streamdown>
+      </PhotoProvider>
+    </div>
+  );
 }
 
 function BlockView({
@@ -1270,28 +1328,7 @@ function BlockView({
 }) {
   switch (block.kind) {
     case "text":
-      return (
-        <div
-          className="md"
-          onMouseUp={(e) => {
-            // F-8-2（用法1）+ F-8-7（快问）：选中 assistant 正文文字 → 记录选区
-            const sel = window.getSelection();
-            if (!sel || sel.isCollapsed) return;
-            const text = sel.toString().trim();
-            if (text) onSelect?.(text, e);
-          }}
-        >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={{
-              pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-            }}
-          >
-            {block.text}
-          </ReactMarkdown>
-        </div>
-      );
+      return <MarkdownView text={block.text} live={live} onSelect={onSelect} />;
     case "thought":
       return <ThoughtView text={block.text} ms={block.ms} live={live} />;
     case "tool":
@@ -1304,31 +1341,6 @@ function BlockView({
         />
       );
   }
-}
-
-/** 代码块包装：hover 右上角浮现复制按钮（F-7-10 AC-P7-10-2） */
-function CodeBlock({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  return (
-    <div className="code-block-wrap" ref={ref}>
-      <pre>{children}</pre>
-      <button
-        type="button"
-        aria-label="复制代码"
-        className="code-copy"
-        onClick={() => {
-          const code = ref.current?.querySelector("code")?.textContent ?? "";
-          navigator.clipboard?.writeText(code).then(
-            () => toast.success("代码已复制"),
-            () => toast.error("复制失败"),
-          );
-        }}
-      >
-        <CopyIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
-        复制
-      </button>
-    </div>
-  );
 }
 
 function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
@@ -1386,10 +1398,19 @@ function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: bool
             padding: "8px 12px",
             marginLeft: "20px",
             marginTop: "2px",
-            whiteSpace: "pre-wrap",
           }}
         >
-          {text}
+          {/* P11 F-R8（DEC-25）：thinking 展开体走 markdown 渲染（thinking 同样可能
+              含代码围栏/公式/列表）；小字号沿用外层 13px。不用 PhotoProvider
+              （AC-R8-3：thinking 是过程性内容，批注选区明确降级不开放）。 */}
+          <Streamdown
+            mode="static"
+            parseIncompleteMarkdown={live}
+            plugins={{ code, math }}
+            shikiTheme={["github-light", "github-dark"]}
+          >
+            {text}
+          </Streamdown>
         </div>
       )}
     </div>
@@ -1437,14 +1458,54 @@ function ToolBlock({
   );
 }
 
+/** P11 F-R6：工具 text 内容渲染——JSON pretty / ANSI 彩色 / 纯文本三分支，
+ *  超长输出默认折叠（AC-R6-1..4）。导出供测试。 */
+export const TOOL_TEXT_FOLD_LIMIT = 2000;
+
+export function ToolTextView({ text }: { text: string }) {
+  const pretty = useMemo(() => prettyJson(text), [text]);
+  const foldable = text.length > TOOL_TEXT_FOLD_LIMIT;
+  const [expanded, setExpanded] = useState(false);
+  // 折叠态截断渲染（ansi-to-react 对超长文本慢，先截断再渲染）
+  const shown = foldable && !expanded ? text.slice(0, TOOL_TEXT_FOLD_LIMIT) : text;
+  const body =
+    pretty !== null ? (
+      <pre className="tool-text">
+        <code>{pretty}</code>
+      </pre>
+    ) : (
+      <AnsiView text={shown} />
+    );
+  return (
+    <div className="tool-text-view">
+      {body}
+      {foldable && (
+        <button
+          type="button"
+          className="tool-text-fold"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "收起" : `展开全部（${text.length} 字符）`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** ANSI 转义渲染（DEC-23：ansi-to-react）；无 ANSI 码时原样文本 */
+function AnsiView({ text }: { text: string }) {
+  // ansi-to-react 仅在含转义序列时产生彩色 span，否则整段直出——这里直接交给它
+  return (
+    <pre className="tool-text">
+      <Ansi>{text}</Ansi>
+    </pre>
+  );
+}
+
 function ToolContentView({ content }: { content: ToolContent }) {
   switch (content.kind) {
     case "text":
-      return (
-        <pre className="tool-text">
-          <code>{content.text}</code>
-        </pre>
-      );
+      return <ToolTextView text={content.text} />;
     case "diff":
       return (
         <DiffView path={content.diff.path} oldText={content.diff.oldText} newText={content.diff.newText} />
