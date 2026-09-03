@@ -34,6 +34,10 @@ import { filterExcluded } from "../acp/fileTree";
 import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
 import { truncateToMessageIndex } from "../acp/rewind";
+import { truncateMessagesToEdit } from "../acp/edit-resend";
+import { composeDiffComments, type DiffComment } from "../acp/diffComments";
+import { buildActivityGroups, type RenderItem } from "../acp/activity";
+import { aggregateFileChanges } from "../acp/fileChanges";
 import { searchMessages } from "../acp/search";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
@@ -220,6 +224,15 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-11-6 Esc 判定用的最新值镜像（state 声明后同步）
   const searchOpenRef = useRef(false);
   searchOpenRef.current = searchOpen;
+  // F-12-1 编辑重试：null = 非编辑态；否则为 {index, original}（index 处消息被替换）
+  const [editTarget, setEditTarget] = useState<{ index: number; original: string } | null>(null);
+  // F-12-5 diff 行内评论：待发评论集（随 tabKey 独立，按组件实例隔离）
+  const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
+  // F-12-5 评论条带展开态
+  const [diffCommentsOpen, setDiffCommentsOpen] = useState(false);
+  // F-12-1 Esc 判定用的最新值镜像（state 声明后同步）
+  const editTargetRef = useRef<{ index: number; original: string } | null>(null);
+  editTargetRef.current = editTarget;
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -272,7 +285,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         setSearchOpen((v) => !v);
       }
       if (e.key === "Escape") {
-        if (quickSelRef.current !== null) {
+        if (editTargetRef.current) {
+          cancelEdit();
+        } else if (quickSelRef.current !== null) {
           setQuickSel(null);
           logger.debug("chat", "quick-pop-dismiss", { reason: "escape" });
         } else if (searchOpenRef.current) {
@@ -354,6 +369,40 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const filePart = files.length > 0 ? composeFileReference(files) : "";
     const full = [filePart, text].filter(Boolean).join("\n\n");
     if (!full.trim()) return;
+    // F-12-1 编辑重试：编辑态发送 = 截断到该条（替换文本）+ 走回溯的进程断开链路
+    if (editTarget) {
+      const target = editTarget;
+      setEditTarget(null);
+      const truncated = truncateMessagesToEdit(messages, target.index, full);
+      if (!truncated) {
+        toast.error("编辑失败：消息状态已变化，请重试");
+        return;
+      }
+      logger.warn("chat", "edit-resend", {
+        index: target.index,
+        oldLen: target.original.length,
+        newLen: full.length,
+      });
+      useSessionStore.getState().setMessages(tabKey, truncated);
+      persistedRef.current = truncated.length;
+      const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+      if (sid) {
+        logTruncate(sid, truncated.length).catch(() => {});
+      }
+      // 断开当前子进程，下次 prompt 重新 session/load 恢复（与回溯同链路，DEC-35）
+      sessionRef.current?.dispose().catch(() => {});
+      sessionRef.current = null;
+      setInput("");
+      setSlashIdx(-1);
+      setAtMenu(null);
+      setFiles([]);
+      if (busy) {
+        pendingTextRef.current = full;
+        return;
+      }
+      await runPrompt(full);
+      return;
+    }
     setInput("");
     setSlashIdx(-1);
     setAtMenu(null);
@@ -646,6 +695,46 @@ function pickSlash(w: CommandWord) {
     permResolver.current = null;
   }
 
+  // —— F-12-1 编辑重试：进入编辑态（回填输入框 + 聚焦） ——
+  function startEdit(index: number) {
+    const msg = messages[index];
+    if (!msg || msg.role !== "user") return;
+    setEditTarget({ index, original: msg.text });
+    setInput(msg.text);
+    slashRef.current?.focus();
+    logger.debug("chat", "edit-start", { index });
+  }
+  // Esc 退出编辑态（不改动消息列表）
+  function cancelEdit() {
+    if (!editTarget) return;
+    logger.debug("chat", "edit-cancel", { index: editTarget.index });
+    setEditTarget(null);
+    setInput("");
+  }
+
+  // —— F-12-5 diff 行内评论：收集 → 随消息发送 → 清空 ——
+  function addDiffComment(c: DiffComment) {
+    setDiffComments((prev) => [...prev, c]);
+    logger.info("chat", "diff-comment-add", { path: c.path, line: c.line });
+  }
+  function removeDiffComment(idx: number) {
+    setDiffComments((prev) => prev.filter((_, i) => i !== idx));
+  }
+  function sendDiffComments() {
+    if (diffComments.length === 0) return;
+    const text = composeDiffComments(diffComments);
+    setDiffComments([]);
+    setDiffCommentsOpen(false);
+    logger.info("chat", "diff-comment-send", { count: diffComments.length });
+    appendUser(tabKey, text);
+    if (busy) {
+      void stop();
+      pendingTextRef.current = text;
+      return;
+    }
+    void runPrompt(text);
+  }
+
   const pending = rt?.pending ?? null;
 
   // F-9-2 搜索：命中列表（随关键词变化）
@@ -757,6 +846,9 @@ function pickSlash(w: CommandWord) {
                   onSelect={onSelectText}
                   onFork={onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}
+                  onEdit={m.role === "user" ? () => startEdit(vi.index) : undefined}
+                  diffComments={diffComments}
+                  onAddDiffComment={addDiffComment}
                 />
               </div>
             );
@@ -914,6 +1006,50 @@ function pickSlash(w: CommandWord) {
 
       {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
       <CommandQueuePanel tabKey={tabKey} />
+
+      {/* F-12-5 diff 行内评论条带：待发评论徽标 + 展开/删除/单独发送 */}
+      {diffComments.length > 0 && (
+        <div className="diff-comments-bar">
+          <button
+            type="button"
+            aria-expanded={diffCommentsOpen}
+            className="diff-comments-toggle"
+            style={{ transitionDuration: "var(--motion-fast)" }}
+            onClick={() => setDiffCommentsOpen((v) => !v)}
+          >
+            {diffComments.length} 条 diff 评论
+          </button>
+          {diffCommentsOpen && (
+            <div className="diff-comments-list">
+              {diffComments.map((c, i) => (
+                <div key={i} className="diff-comment-item" title={`${c.path}:${c.line} · ${c.lineText}`}>
+                  <span className="diff-comment-loc">
+                    {c.path.split("/").filter(Boolean).pop()}
+                    {c.line > 0 ? `:${c.line}` : ""}
+                  </span>
+                  <span className="diff-comment-text">{c.comment}</span>
+                  <button
+                    type="button"
+                    aria-label={`删除评论 ${i + 1}`}
+                    onClick={() => removeDiffComment(i)}
+                    className="diff-comment-remove"
+                  >
+                    <CloseIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            className="diff-comments-send"
+            style={{ transitionDuration: "var(--motion-fast)" }}
+            onClick={sendDiffComments}
+          >
+            发送评论
+          </button>
+        </div>
+      )}
 
       {/* F-9-4 工作区文件树（当前会话 cwd） */}
       <FileTree
@@ -1139,6 +1275,9 @@ function MessageLine({
   onSelect,
   onFork,
   onRewind,
+  onEdit,
+  diffComments,
+  onAddDiffComment,
 }: {
   msg: ChatMsg;
   adapter: AdapterWithStatus;
@@ -1147,6 +1286,11 @@ function MessageLine({
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
   onRewind?: () => void;
+  /** F-12-1 编辑重试：仅 user 消息传入 */
+  onEdit?: () => void;
+  /** F-12-5 diff 行内评论：待发评论集（已评论行标记用）+ 收集回调 */
+  diffComments?: DiffComment[];
+  onAddDiffComment?: (c: DiffComment) => void;
 }) {
   if (msg.role === "user") {
     return (
@@ -1154,33 +1298,55 @@ function MessageLine({
         <div className="user-bubble max-w-[75%] px-3.5 py-2.5" style={{ backgroundColor: "var(--message-user-bg)", color: "#fff", borderRadius: "var(--radius-lg)", borderBottomRightRadius: "4px" }}>
           <span className="whitespace-pre-wrap break-words">{msg.text}</span>
         </div>
-        {/* F-8-6 回溯：用户消息 hover 操作行（回溯到这里） */}
-        {onRewind && (
-          <button
-            type="button"
-            aria-label="回溯到这里"
-            className="ml-2 self-center rounded-md px-2 py-1 text-xs opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
-            style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
-            onClick={onRewind}
-          >
-            ↩ 回溯
-          </button>
-        )}
+        {/* hover 操作行：F-12-1 编辑 + F-8-6 回溯 */}
+        <div className="ml-2 self-center flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          {onEdit && (
+            <button
+              type="button"
+              aria-label="编辑并重发"
+              className="rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              onClick={onEdit}
+            >
+              ✎ 编辑
+            </button>
+          )}
+          {onRewind && (
+            <button
+              type="button"
+              aria-label="回溯到这里"
+              className="rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              onClick={onRewind}
+            >
+              ↩ 回溯
+            </button>
+          )}
+        </div>
       </div>
     );
   }
+  // F-12-3 活动组：连续已完成 thought/tool 聚合为一张卡（DEC-36）
+  // 流式末条 turn 的运行中块不入组（isSettled 判定 + live 判定在渲染项内处理）
+  const renderItems = buildActivityGroups(msg.blocks);
   return (
     <div className="group flex gap-2.5 my-2.5">
       <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={32} className="shrink-0 mt-0.5" />
       <div className="min-w-0 flex-1">
-        {msg.blocks.map((b, i) => (
-          <BlockView
-            key={i}
-            block={b}
-            live={busy && isLast && i === msg.blocks.length - 1 && b.kind === "thought" && b.ms === undefined}
-            onSelect={onSelect}
-          />
-        ))}
+        {renderItems.map((item, i) =>
+          item.type === "block" ? (
+            <BlockView
+              key={i}
+              block={item.block}
+              live={busy && isLast && i === renderItems.length - 1 && item.block.kind === "thought" && item.block.ms === undefined}
+              onSelect={onSelect}
+              diffComments={diffComments}
+              onAddDiffComment={onAddDiffComment}
+            />
+          ) : (
+            <ActivityGroupCard key={i} item={item} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+          ),
+        )}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {onFork && (
@@ -1223,10 +1389,14 @@ function BlockView({
   block,
   live,
   onSelect,
+  diffComments,
+  onAddDiffComment,
 }: {
   block: BlockMsg;
   live: boolean;
   onSelect?: (text: string, e: React.MouseEvent) => void;
+  diffComments?: DiffComment[];
+  onAddDiffComment?: (c: DiffComment) => void;
 }) {
   switch (block.kind) {
     case "text":
@@ -1261,9 +1431,129 @@ function BlockView({
           title={block.title}
           status={block.status}
           content={block.content}
+          diffComments={diffComments}
+          onAddDiffComment={onAddDiffComment}
         />
       );
   }
+}
+
+/** F-12-3 活动组卡：折叠态摘要 + 展开态时间线（含 F-12-4 文件变更子卡） */
+function ActivityGroupCard({
+  item,
+  onSelect,
+  diffComments,
+  onAddDiffComment,
+}: {
+  item: Extract<RenderItem, { type: "activity_group" }>;
+  onSelect?: (text: string, e: React.MouseEvent) => void;
+  diffComments?: DiffComment[];
+  onAddDiffComment?: (c: DiffComment) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const seconds = (item.ms / 1000).toFixed(0);
+  const parts: string[] = [];
+  if (item.thoughts > 0) parts.push(`思考 ${item.thoughts} 次`);
+  if (item.tools > 0) parts.push(`工具 ${item.tools} 个`);
+  const summary = parts.join(" · ") || "活动";
+  // F-12-4 文件变更聚合：组内 tool 块的 diff content 按路径去重
+  const diffs = item.blocks.flatMap((b) =>
+    b.kind === "tool" ? b.content.filter((c): c is Extract<typeof c, { kind: "diff" }> => c.kind === "diff") : [],
+  );
+  const fileChanges = aggregateFileChanges(
+    diffs.map((d) => ({ path: d.diff.path, oldText: d.diff.oldText, newText: d.diff.newText })),
+  );
+  return (
+    <div className="activity-group my-1.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="activity-head inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
+        style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span
+          className="inline-flex transition-transform"
+          style={{ transform: open ? "rotate(90deg)" : "none", transitionDuration: "var(--motion-fast)", transitionTimingFunction: "var(--ease-out-soft)" }}
+        >
+          <ChevronRightIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
+        </span>
+        <ToolIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
+        <span>{summary}</span>
+        {seconds !== "0" && <span>· 用时 {seconds} 秒</span>}
+      </button>
+      {open && (
+        <div
+          className="activity-body"
+          style={{
+            borderLeft: "2px solid var(--border)",
+            marginLeft: "10px",
+            paddingLeft: "12px",
+            marginTop: "4px",
+          }}
+        >
+          {fileChanges.length > 0 && (
+            <div className="file-changes my-1.5 rounded-md px-2.5 py-2" style={{ backgroundColor: "var(--bg-2)" }}>
+              <div className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                文件变更
+              </div>
+              {fileChanges.map((f) => (
+                <FileChangeRow key={f.path} change={f} diffs={diffs} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+              ))}
+            </div>
+          )}
+          {item.blocks.map((b, i) => (
+            <BlockView key={i} block={b} live={false} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** F-12-4 文件变更行：路径 + 增删徽标，点击展开该文件 diff */
+function FileChangeRow({
+  change,
+  diffs,
+  diffComments,
+  onAddDiffComment,
+}: {
+  change: { path: string; added: number; removed: number };
+  diffs: Array<Extract<ToolContent, { kind: "diff" }>>;
+  diffComments?: DiffComment[];
+  onAddDiffComment?: (c: DiffComment) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = change.path.split("/").filter(Boolean).pop() ?? change.path;
+  const own = diffs.filter((d) => d.diff.path === change.path);
+  return (
+    <div className="file-change-row">
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-[var(--bg-hover)]"
+        style={{ color: "var(--text-primary)", transitionDuration: "var(--motion-fast)" }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span title={change.path}>{name}</span>
+        {change.added > 0 && <span style={{ color: "var(--success)" }}>+{change.added}</span>}
+        {change.removed > 0 && <span style={{ color: "var(--danger)" }}>−{change.removed}</span>}
+      </button>
+      {open && (
+        <div className="mt-1">
+          {own.map((d, i) => (
+            <DiffView
+              key={i}
+              path={d.diff.path}
+              oldText={d.diff.oldText}
+              newText={d.diff.newText}
+              diffComments={diffComments}
+              onAddDiffComment={onAddDiffComment}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** 代码块包装：hover 右上角浮现复制按钮（F-7-10 AC-P7-10-2） */
@@ -1360,11 +1650,15 @@ function ToolBlock({
   title,
   status,
   content,
+  diffComments,
+  onAddDiffComment,
 }: {
   toolCallId: string;
   title: string;
   status: string;
   content: ToolContent[];
+  diffComments?: DiffComment[];
+  onAddDiffComment?: (c: DiffComment) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1389,7 +1683,7 @@ function ToolBlock({
       {open && content.length > 0 && (
         <div className="tool-body">
           {content.map((c, i) => (
-            <ToolContentView key={i} content={c} />
+            <ToolContentView key={i} content={c} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
           ))}
         </div>
       )}
@@ -1397,7 +1691,15 @@ function ToolBlock({
   );
 }
 
-function ToolContentView({ content }: { content: ToolContent }) {
+function ToolContentView({
+  content,
+  diffComments,
+  onAddDiffComment,
+}: {
+  content: ToolContent;
+  diffComments?: DiffComment[];
+  onAddDiffComment?: (c: DiffComment) => void;
+}) {
   switch (content.kind) {
     case "text":
       return (
@@ -1407,7 +1709,13 @@ function ToolContentView({ content }: { content: ToolContent }) {
       );
     case "diff":
       return (
-        <DiffView path={content.diff.path} oldText={content.diff.oldText} newText={content.diff.newText} />
+        <DiffView
+          path={content.diff.path}
+          oldText={content.diff.oldText}
+          newText={content.diff.newText}
+          diffComments={diffComments}
+          onAddDiffComment={onAddDiffComment}
+        />
       );
     case "terminal":
       return (
@@ -1423,31 +1731,61 @@ function DiffView({
   path,
   oldText,
   newText,
+  diffComments,
+  onAddDiffComment,
 }: {
   path: string;
   oldText?: string | null;
   newText: string;
+  /** F-12-5 行内评论：待发评论集（已评论行标记）+ 收集回调；缺省 = 不启用评论入口 */
+  diffComments?: DiffComment[];
+  onAddDiffComment?: (c: DiffComment) => void;
 }) {
   const oldLines = (oldText ?? "").split("\n");
   const newLines = newText.split("\n");
-  const rows: { type: "del" | "add" | "ctx"; line: string }[] = [];
+  const rows: { type: "del" | "add" | "ctx"; line: string; /** 该行在 newText 中的 1 基行号；del 行 0 */ newLine: number }[] = [];
   const max = Math.max(oldLines.length, newLines.length);
+  let newLineNo = 0;
   for (let i = 0; i < max; i++) {
     const o = oldLines[i];
     const n = newLines[i];
-    if (o === n) rows.push({ type: "ctx", line: o ?? "" });
-    else {
-      if (o !== undefined) rows.push({ type: "del", line: o });
-      if (n !== undefined) rows.push({ type: "add", line: n });
+    if (o === n) {
+      if (n !== undefined) newLineNo += 1;
+      rows.push({ type: "ctx", line: o ?? "", newLine: n !== undefined ? newLineNo : 0 });
+    } else {
+      if (o !== undefined) rows.push({ type: "del", line: o, newLine: 0 });
+      if (n !== undefined) {
+        newLineNo += 1;
+        rows.push({ type: "add", line: n, newLine: newLineNo });
+      }
     }
   }
+  const commented = (ln: number, lineText: string) =>
+    diffComments?.some((c) => c.path === path && c.line === ln && c.lineText === lineText) ?? false;
   return (
     <div className="diff">
       <div className="diff-path">{path}</div>
       {rows.map((r, i) => (
-        <div key={i} className={`diff-line ${r.type}`}>
+        <div key={i} className={`diff-line group/diff ${r.type}`} data-commented={commented(r.newLine, r.line) ? "true" : "false"}>
           <span className="diff-sign">{r.type === "add" ? "+" : r.type === "del" ? "-" : " "}</span>
           {r.line}
+          {/* F-12-5：hover 行尾浮现评论入口（del 行无新行号，不支持评论） */}
+          {onAddDiffComment && r.newLine > 0 && (
+            <button
+              type="button"
+              aria-label={`评论 ${path}:${r.newLine}`}
+              className="diff-comment-btn ml-auto inline-flex items-center rounded px-1 text-[11px] opacity-0 transition-opacity group-hover/diff:opacity-100 hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              onClick={() => {
+                const comment = window.prompt(`评论 ${path}:${r.newLine}`);
+                if (comment && comment.trim()) {
+                  onAddDiffComment({ path, line: r.newLine, lineText: r.line, comment: comment.trim() });
+                }
+              }}
+            >
+              ✎ 评论
+            </button>
+          )}
         </div>
       ))}
     </div>
