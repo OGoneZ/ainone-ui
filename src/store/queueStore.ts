@@ -18,6 +18,8 @@ interface QueueStore {
   edit: (key: string, id: string, text: string) => void;
   /** 上移/下移（delta = -1 / +1） */
   move: (key: string, id: string, delta: number) => void;
+  /** 拖拽重排：把 fromId 移到 toId 的位置（之后） */
+  reorder: (key: string, fromId: string, toId: string) => void;
   /** 消费队首，返回被消费的指令（空队列返回 null） */
   dequeue: (key: string) => QueueItem | null;
   /** 清空某 tabKey 队列 */
@@ -58,6 +60,17 @@ export const useQueueStore = create<QueueStore>()(
           const to = idx + delta;
           if (idx < 0 || to < 0 || to >= arr.length) return {};
           const [moved] = arr.splice(idx, 1);
+          arr.splice(to, 0, moved);
+          return { queues: { ...s.queues, [key]: arr } };
+        }),
+
+      reorder: (key, fromId, toId) =>
+        set((s) => {
+          const arr = [...(s.queues[key] ?? [])];
+          const from = arr.findIndex((i) => i.id === fromId);
+          const to = arr.findIndex((i) => i.id === toId);
+          if (from < 0 || to < 0 || from === to) return {};
+          const [moved] = arr.splice(from, 1);
           arr.splice(to, 0, moved);
           return { queues: { ...s.queues, [key]: arr } };
         }),

@@ -1474,6 +1474,30 @@ button:hover:not(:disabled) {
   gap: 6px;
 }
 
+.queue-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-disabled);
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.queue-grip:hover {
+  color: var(--text-secondary);
+}
+
+.queue-grip-dragging {
+  opacity: 0.4;
+}
+
+.queue-drop-target {
+  outline: 2px dashed var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .queue-input {
   flex: 1;
   min-width: 0;
