@@ -3,6 +3,7 @@
 // 侧栏按工作区归集会话；工作区右键：新建会话 / 重命名 / 移除。
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Layout, Model, Actions, DockLocation, type TabNode } from "flexlayout-react";
 import { listAdapters, type AdapterWithStatus } from "./config/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./config/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./config/workspaces";
@@ -30,6 +31,8 @@ import { resolveHistoryOpen, type Tab } from "./store/tabs";
 import { groupSessions } from "./store/workspaceGroup";
 import { useSessionStore } from "./store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "./store/sessionStatus";
+import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf } from "./store/layout";
+import { logger } from "./lib/logger";
 import "./App.css";
 
 /** 侧栏会话行 leading 槽：harness logo + 状态角标（F-8-1 收尾，融合 F-7-7 状态机） */
@@ -73,6 +76,112 @@ function App() {
   // 主题：light / dark / auto（默认 auto 跟随系统）
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   const nextKey = useRef(1);
+  // F-10-3 flexlayout Model：布局 + tab 集合的单一真源（跨渲染稳定，重建会丢拖拽布局）
+  const modelRef = useRef<Model | null>(null);
+
+  const activeTab = tabs.find((t) => t.key === activeKey);
+  const activeAdapter = activeTab ? adapters.find((a) => a.id === activeTab.adapterId) : undefined;
+
+  function getModel(): Model {
+    if (!modelRef.current) {
+      modelRef.current = Model.fromJson({
+        global: { tabEnableClose: true, tabEnableDrag: true, tabSetEnableTabStrip: true },
+        borders: [],
+        layout: { type: "row", weight: 100, children: [] },
+      });
+    }
+    return modelRef.current;
+  }
+
+  /** 业务 Tab → flexlayout IJsonTabNode（config 存投影回业务所需字段） */
+  function tabToJson(tab: Tab) {
+    return {
+      type: "tab",
+      id: tab.key,
+      name: tab.title,
+      component: "chat",
+      config: {
+        adapterId: tab.adapterId,
+        sessionId: tab.sessionId,
+        cwd: tab.cwd,
+        workspaceId: tab.workspaceId,
+      },
+    };
+  }
+
+  /** 从 flexlayout Model 投影回业务 tabs + activeKey（单向同步，不反向重建 model） */
+  function syncFromModel() {
+    const m = getModel();
+    setTabs(extractTabsFromModel(m));
+    setActiveKey(activeKeyOf(m));
+  }
+
+  /** 在 target tab 所在 tabset 内 dock 一个新 tab（默认 CENTER=叠入，select） */
+  function addTabToModel(tab: Tab, location: DockLocation = DockLocation.CENTER, targetNodeId?: string) {
+    const m = getModel();
+    let to = targetNodeId ?? activeKey;
+    // 空布局（无任何 tab）时 target 无效 → 落到根 row，由 flexlayout 自动建 tabset
+    if (!to || !m.getNodeById(to)) {
+      to = m.getRootRow()?.getId() ?? "";
+      location = DockLocation.CENTER;
+    }
+    m.doAction(Actions.addTab(tabToJson(tab), to, location, -1, true));
+    syncFromModel();
+  }
+
+  /** 分屏：Ctrl+D（左右）/ Ctrl+Shift+D（上下），新窗格 = 同 harness 同 cwd 新会话（DEC-23） */
+  function splitCurrent(axis: "row" | "col") {
+    const src = activeTab;
+    if (!src || !activeAdapter) return;
+    const st = resolveSplitTab({ adapterId: src.adapterId, workspaceId: src.workspaceId, cwd: src.cwd });
+    const key = `tab-${nextKey.current++}`;
+    const dir = axis === "row" ? DockLocation.RIGHT : DockLocation.BOTTOM;
+    addTabToModel(
+      { key, adapterId: st.adapterId, title: "新会话", workspaceId: st.workspaceId, cwd: st.cwd },
+      dir,
+      activeKey,
+    );
+    logger.info("split", "split-pane", { axis, srcTabKey: activeKey, newTabKey: key });
+  }
+
+  // 快捷键监听：仅在编辑器区（非输入框）响应分屏快捷键（AC-P10-8）
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const axis = splitShortcut(e);
+      if (!axis) return;
+      if (inEditable(document.activeElement)) return;
+      e.preventDefault();
+      splitCurrent(axis);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey, activeTab, activeAdapter]);
+
+  // flexlayout tab 内容工厂：tab.id = tabKey，渲染 ChatPanel
+  const factory = (node: TabNode) => {
+    const t = tabs.find((x) => x.key === node.getId());
+    if (!t) return null;
+    const ad = adapters.find((a) => a.id === t.adapterId);
+    if (!ad) return null;
+    return (
+      <ChatPanel
+        key={t.key}
+        tabKey={t.key}
+        adapter={ad}
+        resumeSessionId={t.sessionId}
+        cwd={t.cwd}
+        onFirstPrompt={(text, sid) => handleFirstPrompt(sid, t.adapterId, text, t.workspaceId, t.cwd)}
+        onFork={(fromId, toId) => handleFork(fromId, toId, t.adapterId, t.workspaceId, t.cwd)}
+        onRewind={() => {}}
+      />
+    );
+  };
+
+  // flexlayout 动作回调：任何模型变更（含用户关闭 tab / 拖拽 dock）→ 投影回 tabs
+  function handleAction() {
+    syncFromModel();
+  }
 
   useEffect(() => {
     const root = document.documentElement;
@@ -98,33 +207,7 @@ function App() {
     reloadWorkspaces();
   }, []);
 
-  const activeTab = tabs.find((t) => t.key === activeKey);
-  const activeAdapter = activeTab ? adapters.find((a) => a.id === activeTab.adapterId) : undefined;
-
-  function newTab(adapterId: string, workspaceId?: string | null, cwd?: string) {
-    const key = `tab-${nextKey.current++}`;
-    setTabs((ts) => [...ts, { key, adapterId, title: "新会话", workspaceId: workspaceId ?? null, cwd }]);
-    setActiveKey(key);
-  }
-
-  function openFromHistory(entry: SessionEntry) {
-    const r = resolveHistoryOpen(tabs, entry, `tab-${nextKey.current}`);
-    if (r.newTab) {
-      nextKey.current++;
-      setTabs((ts) => [...ts, r.newTab!]);
-    }
-    setActiveKey(r.activateKey);
-  }
-
-  function closeTab(key: string) {
-    setTabs((ts) => {
-      const rest = ts.filter((t) => t.key !== key);
-      if (activeKey === key && rest.length > 0) setActiveKey(rest[rest.length - 1].key);
-      return rest;
-    });
-    // 子进程清理在 ChatPanel 卸载时由 session.dispose 兜底（见 ChatPanel 的 useEffect 清理）
-  }
-
+  // 首条消息 → 写会话索引（带上工作区归属与运行目录）
   // 首条消息 → 写会话索引（带上工作区归属与运行目录）
   function handleFirstPrompt(sessionId: string, adapterId: string, text: string, workspaceId?: string | null, cwd?: string) {
     sessionsUpsert({
@@ -139,6 +222,26 @@ function App() {
 
   function deleteHistory(id: string) {
     sessionsRemove(id).then(reloadHistory);
+  }
+
+  function newTab(adapterId: string, workspaceId?: string | null, cwd?: string) {
+    const key = `tab-${nextKey.current++}`;
+    addTabToModel(
+      { key, adapterId, title: "新会话", workspaceId: workspaceId ?? null, cwd },
+      DockLocation.CENTER,
+      activeKey,
+    );
+  }
+
+  function openFromHistory(entry: SessionEntry) {
+    const r = resolveHistoryOpen(tabs, entry, `tab-${nextKey.current}`);
+    if (r.newTab) {
+      nextKey.current++;
+      addTabToModel(r.newTab, DockLocation.CENTER, activeKey);
+    } else {
+      setActiveKey(r.activateKey);
+      getModel().doAction(Actions.selectTab(r.activateKey));
+    }
   }
 
   // F-8-5 分叉：新 sessionId 落索引（标题标「从 XX 分叉」，与父会话同工作区/目录）
@@ -334,44 +437,13 @@ function App() {
         </aside>
 
         <section className="tabs-area">
-          <div className="tabs-bar">
-            {tabs.map((t) => {
-              const tAdapter = adapters.find((a) => a.id === t.adapterId);
-              return (
-                <button
-                  key={t.key}
-                  className={t.key === activeKey ? "tab active" : "tab"}
-                  onClick={() => setActiveKey(t.key)}
-                >
-                  {tAdapter && <AgentAvatar adapterId={tAdapter.id} name={tAdapter.name} brandColor={tAdapter.logo} size={14} className="shrink-0" />}
-                  {t.title}
-                  <span className="tab-close" role="button" aria-label="关闭标签页" onClick={(e) => { e.stopPropagation(); closeTab(t.key); }}>
-                    <CloseIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="tab-content">
-            {activeAdapter ? (
-              <ChatPanel
-                key={activeTab!.key}
-                tabKey={activeTab!.key}
-                adapter={activeAdapter}
-                resumeSessionId={activeTab!.sessionId}
-                cwd={activeTab!.cwd}
-                onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text, activeTab!.workspaceId, activeTab!.cwd)}
-                onFork={(fromId, toId) => handleFork(fromId, toId, activeTab!.adapterId, activeTab!.workspaceId, activeTab!.cwd)}
-                onRewind={() => {}}
-              />
-            ) : (
-              <EmptyState
-                title="开始新的对话"
-                description="点击新建会话开始，或从左侧工作区恢复历史"
-                actionLabel="新建会话"
-                onAction={() => setNewSession({ open: true })}
-              />
-            )}
+          {/* F-10-3 flexlayout 分屏窗格：替换原 tabs-bar + tab-content 区域 */}
+          <div className="layout-host" data-dragging={false}>
+            <Layout
+              model={getModel()}
+              factory={factory}
+              onModelChange={handleAction}
+            />
           </div>
           {/* F-8-4 元数据侧栏：右侧可折叠第二侧栏 */}
           {activeAdapter && activeTab && (

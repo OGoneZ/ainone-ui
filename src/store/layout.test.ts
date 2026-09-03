@@ -1,7 +1,14 @@
 // P10 分屏纯逻辑单测（F-10-3 AC-P10-8/9）。
 
 import { describe, it, expect } from "vitest";
-import { inEditable, splitShortcut, resolveSplitTab } from "./layout";
+import {
+  inEditable,
+  splitShortcut,
+  resolveSplitTab,
+  extractTabsFromModel,
+  activeKeyOf,
+  type ModelLike,
+} from "./layout";
 
 describe("P10 分屏纯逻辑", () => {
   it("splitShortcut：Ctrl+D→row，Ctrl+Shift+D→col，其余→null", () => {
@@ -17,7 +24,8 @@ describe("P10 分屏纯逻辑", () => {
   });
 
   it("inEditable：textarea/input/contenteditable 不可拦截，普通元素可拦截", () => {
-    const mk = (tagName: string, contentEditable = false) => ({ tagName, isContentEditable: contentEditable });
+    const mk = (tagName: string, contentEditable = false) =>
+      ({ tagName, isContentEditable: contentEditable }) as unknown as Element;
     expect(inEditable(mk("TEXTAREA"))).toBe(true);
     expect(inEditable(mk("input"))).toBe(true);
     expect(inEditable(mk("div"))).toBe(false);
@@ -34,5 +42,36 @@ describe("P10 分屏纯逻辑", () => {
     expect(r.title).toBe("新会话");
     // workspaceId 缺省 → null
     expect(resolveSplitTab({ adapterId: "omp" }).workspaceId).toBeNull();
+  });
+
+  it("extractTabsFromModel：只收 tab 节点，config 投影为业务 Tab", () => {
+    const mkTab = (id: string, cfg: Record<string, unknown>, name = "标题") => ({
+      getType: () => "tab",
+      getId: () => id,
+      getName: () => name,
+      getConfig: () => cfg,
+    });
+    const model: ModelLike = {
+      visitNodes: (fn) => {
+        fn({ getType: () => "row", getId: () => "r1", getName: () => "", getConfig: () => undefined }, 0);
+        fn(mkTab("tab-1", { adapterId: "omp", cwd: "/x", workspaceId: "ws-1" }), 1);
+        fn(mkTab("tab-2", { adapterId: "pi" }), 1);
+      },
+      getActiveTabset: () => ({ getSelectedNode: () => ({ getId: () => "tab-1" }) }),
+    };
+    const tabs = extractTabsFromModel(model);
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].key).toBe("tab-1");
+    expect(tabs[0].adapterId).toBe("omp");
+    expect(tabs[0].workspaceId).toBe("ws-1");
+    expect(tabs[1].workspaceId).toBeNull(); // 缺省 workspaceId → null
+    expect(tabs[1].sessionId).toBeUndefined(); // 缺省 sessionId → undefined
+  });
+
+  it("activeKeyOf：取激活 tabset 的选中 tab id；无则空串", () => {
+    const withSel: ModelLike = { visitNodes: () => {}, getActiveTabset: () => ({ getSelectedNode: () => ({ getId: () => "k9" }) }) };
+    expect(activeKeyOf(withSel)).toBe("k9");
+    const none: ModelLike = { visitNodes: () => {}, getActiveTabset: () => undefined };
+    expect(activeKeyOf(none)).toBe("");
   });
 });

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { attach, installConsoleForward } from "./lib/logger";
 import "./index.css"; // Tailwind v4 + 设计令牌层（P7 F-7-1/F-7-2）
+import "flexlayout-react/style/light.css"; // P10 分屏基础样式（主题色映射见 index.css）
 import "highlight.js/styles/github.css"; // F-7-10 深色覆盖见 index.css
 
 // 尽早接入日志：前端 console 转发到 log 插件（与 Rust 同文件落盘）+ Rust 日志灌入 devtools
