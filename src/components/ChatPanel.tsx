@@ -686,8 +686,11 @@ function pickSlash(w: CommandWord) {
           turnRef.current = next;
           useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
         });
-        // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）
-        useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
+        // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）；
+        // 空 turn（无事件）不新起 assistant 气泡（编辑重试后的静默重开场景）
+        if (turnRef.current.blocks.length > 0) {
+          useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
+        }
       } catch (err) {
         logger.error("chat", "prompt 失败", { tabKey, adapter: adapter.id, error: String(err) });
         toast.error(`出错了：${String(err)}`);
@@ -756,10 +759,11 @@ function pickSlash(w: CommandWord) {
     slashRef.current?.focus();
     logger.debug("chat", "edit-start", { index });
   }
-  // Esc 退出编辑态（不改动消息列表）
+  // Esc 退出编辑态（不改动消息列表）；判定走 ref（keydown 监听闭包来自首帧挂载）
   function cancelEdit() {
-    if (!editTarget) return;
-    logger.debug("chat", "edit-cancel", { index: editTarget.index });
+    const cur = editTargetRef.current;
+    if (!cur) return;
+    logger.debug("chat", "edit-cancel", { index: cur.index });
     setEditTarget(null);
     setInput("");
   }
