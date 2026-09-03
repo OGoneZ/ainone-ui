@@ -26,6 +26,16 @@ describe("slash 命令补全（F-4-7）", () => {
     expect(r.map((w) => w.name)).toEqual(["fast", "fresh"]); // 前缀优先
   });
 
+  it("P11 模糊匹配：/clr 命中 security（c…urity…r 子序列）于非命令时排除", () => {
+    const r = filterCommands(words, "/mdel");
+    expect(r.map((w) => w.name)).toEqual(["model"]); // m…del 子序列
+  });
+
+  it("P11 模糊匹配：连续命中排在散布命中前", () => {
+    const r = filterCommands(words, "/fas");
+    expect(r[0].name).toBe("fast"); // 连续+词首，得分高于 security 里的散布
+  });
+
   it("包含命中断后（无前缀命中）", () => {
     const r = filterCommands(words, "/ecur");
     expect(r.map((w) => w.name)).toEqual(["security"]);
