@@ -10,13 +10,11 @@ import { ChatPanel } from "./components/ChatPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { EmptyState } from "./components/EmptyState";
+import { MetadataPanel } from "./components/MetadataPanel";
 import { AgentAvatar } from "./components/AgentAvatar";
 import {
   WorkspaceIcon,
   WorkspaceOpenIcon,
-  WorkingIcon,
-  AwaitingIcon,
-  DoneIcon,
   CloseIcon,
   PlusIcon,
   SettingsIcon,
@@ -34,31 +32,26 @@ import { useSessionStore } from "./store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "./store/sessionStatus";
 import "./App.css";
 
-/** 侧栏会话行 leading 槽 22px 状态机（F-7-7 AC-P7-7-1/2） */
-function StatusLeading({ st }: { st: SessionStatus }) {
-  const base = "flex h-[22px] w-[22px] shrink-0 items-center justify-center";
-  switch (st) {
-    case "working":
-      return (
-        <span className={base} title="工作中">
-          <WorkingIcon className="animate-spin" style={{ width: 14, height: 14, strokeWidth: 1.75, color: "var(--primary)" }} />
-        </span>
-      );
-    case "awaiting_input":
-      return (
-        <span className={base} title="等待输入">
-          <AwaitingIcon className="wiggle" style={{ width: 16, height: 16, strokeWidth: 1.75, color: "var(--warning)" }} />
-        </span>
-      );
-    case "done":
-    case "idle":
-    default:
-      return (
-        <span className={base} title={st === "idle" ? "空闲" : "已完成"}>
-          <DoneIcon style={{ width: 14, height: 14, strokeWidth: 1.75, color: st === "idle" ? "var(--text-disabled)" : "var(--text-secondary)" }} />
-        </span>
-      );
-  }
+/** 侧栏会话行 leading 槽：harness logo + 状态角标（F-8-1 收尾，融合 F-7-7 状态机） */
+function SessionRowLeading({ adapter, st }: { adapter: AdapterWithStatus | undefined; st: SessionStatus }) {
+  const dot =
+    st === "working" ? "dot-working" : st === "awaiting_input" ? "dot-awaiting_input" : "dot-done";
+  return (
+    <span className="relative inline-flex shrink-0" style={{ width: 22, height: 22 }}>
+      <AgentAvatar
+        adapterId={adapter?.id}
+        name={adapter?.name}
+        brandColor={adapter?.logo}
+        size={22}
+        className="shrink-0"
+      />
+      <span
+        className={`status-dot ${dot}`}
+        style={{ position: "absolute", right: -1, bottom: -1 }}
+        aria-hidden="true"
+      />
+    </span>
+  );
 }
 
 /** 取路径尾段（工作区 cwd 尾缀，F-7-7） */
@@ -148,6 +141,19 @@ function App() {
     sessionsRemove(id).then(reloadHistory);
   }
 
+  // F-8-5 分叉：新 sessionId 落索引（标题标「从 XX 分叉」，与父会话同工作区/目录）
+  function handleFork(fromSessionId: string, toSessionId: string, adapterId: string, workspaceId?: string | null, cwd?: string) {
+    const parent = history.find((h) => h.session_id === fromSessionId);
+    sessionsUpsert({
+      session_id: toSessionId,
+      adapter_id: adapterId,
+      title: parent ? `从「${parent.title}」分叉` : "分叉会话",
+      cwd: cwd ?? "",
+      workspace_id: workspaceId ?? null,
+      mtime_ms: Date.now(),
+    }).then(reloadHistory);
+  }
+
   function confirmNewSession(adapterId: string, workspaceId: string | null, cwd?: string) {
     newTab(adapterId, workspaceId, cwd);
   }
@@ -170,6 +176,9 @@ function App() {
 
   // 分组：侧栏渲染用
   const groups = useMemo(() => groupSessions(workspaces, history), [workspaces, history]);
+
+  // adapterId → adapter 表：会话行 harness logo（F-8-1 AC-P8-1 按 adapter_id 解析）
+  const adapterById = useMemo(() => new Map(adapters.map((a) => [a.id, a])), [adapters]);
 
   // 会话状态（F-6-1）：非活跃 Tab 的 runtime 状态仍可读（zustand store）
   const runtime = useSessionStore((s) => s.runtime);
@@ -283,13 +292,19 @@ function App() {
                   {g.sessions.map((h) => {
                     const st = statusOf(h.session_id);
                     const active = h.session_id === activeSessionId;
+                    const hAdapter = adapterById.get(h.adapter_id);
                     return (
                       <div
                         key={h.session_id}
                         className={`history-item status-${st} ${active ? "history-active" : ""}`}
                       >
-                        <StatusLeading st={st} />
-                        <button className="history-open" onClick={() => openFromHistory(h)} title={h.session_id}>
+                        <SessionRowLeading adapter={hAdapter} st={st} />
+                        {/* F-8-1 AC-P8-1：hover/聚焦显示 harness 名称 */}
+                        <button
+                          className="history-open"
+                          onClick={() => openFromHistory(h)}
+                          title={hAdapter ? hAdapter.name : h.session_id}
+                        >
                           {h.title}
                         </button>
                         <button
@@ -346,6 +361,8 @@ function App() {
                 resumeSessionId={activeTab!.sessionId}
                 cwd={activeTab!.cwd}
                 onFirstPrompt={(text, sid) => handleFirstPrompt(sid, activeTab!.adapterId, text, activeTab!.workspaceId, activeTab!.cwd)}
+                onFork={(fromId, toId) => handleFork(fromId, toId, activeTab!.adapterId, activeTab!.workspaceId, activeTab!.cwd)}
+                onRewind={() => {}}
               />
             ) : (
               <EmptyState
@@ -356,6 +373,15 @@ function App() {
               />
             )}
           </div>
+          {/* F-8-4 元数据侧栏：右侧可折叠第二侧栏 */}
+          {activeAdapter && activeTab && (
+            <MetadataPanel
+              tabKey={activeTab.key}
+              adapter={activeAdapter}
+              sessionId={activeTab.sessionId ?? null}
+              cwd={activeTab.cwd}
+            />
+          )}
         </section>
       </div>
 

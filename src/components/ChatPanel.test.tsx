@@ -13,11 +13,44 @@ import userEvent from "@testing-library/user-event";
 import { ChatPanel } from "./ChatPanel";
 import { useSessionStore } from "../store/sessionStore";
 import { openSession } from "../acp/session";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { AcpSession } from "../acp/session";
 import type { AdapterWithStatus } from "../config/adapters";
 
 vi.mock("../acp/session", () => ({
   openSession: vi.fn(),
+}));
+
+// F-8-3 文件引用：mock 文件选择对话框 + Tauri 拖拽事件（jsdom 无 Tauri 运行时）
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+}));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: () => Promise.resolve(() => {}),
+  }),
+}));
+
+// F-8-7 快问：mock 配置与调用（组件内挂载即读配置）
+vi.mock("../config/quickask", () => ({
+  quickAskConfigGet: vi.fn().mockResolvedValue({
+    base_url: "https://qa.example.com/v1",
+    model: "qa-model",
+    timeout_ms: 30000,
+    has_api_key: false,
+  }),
+  quickAsk: vi.fn().mockResolvedValue("这是快问的解释"),
+}));
+
+// logger 内部走 @tauri-apps/plugin-log（依赖 Tauri invoke），jsdom 无 Tauri 运行时 → mock 掉
+vi.mock("../lib/logger", () => ({
+  logger: {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -57,6 +90,9 @@ function fakeSession(events: Array<{ type: string; [k: string]: any }>): AcpSess
       for (const e of events) onOutgoing(e);
     },
     cancel: async () => {},
+    fork: async () => "s-forked",
+    listProviders: async () => [],
+    recycle: async () => {},
     dispose: async () => {},
   };
 }
@@ -142,5 +178,201 @@ describe("ChatPanel 交互行为", () => {
     expect(copyBtn).toBeInTheDocument();
     await user.click(copyBtn);
     // 点击后剪贴板含正文（mock clipboard）
+  });
+
+  it("F-8-2 批注：选中文本 → 悬浮窗「批注」→ 批注卡 → 发送 → user 气泡含引用组装（AC-P8-6）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "第一段需要追问的原文" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    // mock 选区：getSelection 返回一段文字
+    const selText = "需要追问";
+    const sel = { isCollapsed: false, toString: () => selText };
+    (window as any).getSelection = () => sel;
+
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    // agent 回复渲染后，选中触发 onSelect → 悬浮窗出现（含「批注」入口）
+    const mdText = await screen.findByText(/第一段需要追问的原文/);
+    expect(mdText).toBeInTheDocument();
+    mdText.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // 点「批注」加入批注卡
+    await user.click(await screen.findByRole("button", { name: "批注" }));
+
+    // 批注卡出现，填疑问
+    const qInput = await screen.findByLabelText("批注疑问 1");
+    await user.type(qInput, "为什么这样？");
+
+    // 发送批注 → user 气泡含组装文本
+    await user.click(screen.getByRole("button", { name: "发送批注" }));
+    expect(
+      await screen.findByText(/\[引用 1\] 需要追问[\s\S]*疑问：为什么这样？/),
+    ).toBeInTheDocument();
+  });
+
+  it("F-8-7 快问：选中 → 悬浮窗「快速解释」→ 解释结果不进入会话（AC-P8-10）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "某个需要解释的疑难名词" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    const selText = "疑难名词";
+    const sel = { isCollapsed: false, toString: () => selText };
+    (window as any).getSelection = () => sel;
+
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const mdText = await screen.findByText(/某个需要解释的疑难名词/);
+    mdText.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // 悬浮窗出现，点「快速解释」
+    await user.click(await screen.findByRole("button", { name: "快速解释" }));
+
+    // 悬浮窗显示解释内容
+    expect(await screen.findByText("这是快问的解释")).toBeInTheDocument();
+
+    // 解释内容不进入会话消息列表（程序化检查 store：无 user 气泡包含解释）
+    const runtime = useSessionStore.getState().runtime["k1"];
+    const allUserText = (runtime?.messages ?? [])
+      .filter((m: any) => m.role === "user")
+      .map((m: any) => m.text)
+      .join("\n");
+    expect(allUserText).not.toContain("这是快问的解释");
+  });
+
+  it("F-8-3 文件引用：按钮选文件 → 附件胶囊 → 发送含 @file 路径（AC-P8-15）", async () => {
+    const openMock = vi.mocked(open);
+    openMock.mockResolvedValue("/Users/me/project/readme.md" as any);
+
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "收到文件" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+
+    // 点「添加文件」按钮 → 附件胶囊出现
+    await user.click(screen.getByRole("button", { name: "添加文件" }));
+    expect(await screen.findByText("readme.md")).toBeInTheDocument();
+
+    // 输入文字发送 → user 气泡含 @file:/abs/path
+    await user.type(input(), "请分析这个文件");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(
+      await screen.findByText(/@file:\/Users\/me\/project\/readme\.md/),
+    ).toBeInTheDocument();
+  });
+
+  it("F-8-3 文件引用：附件 × 移除 → 发送不含该文件（AC-P8-17）", async () => {
+    const openMock = vi.mocked(open);
+    openMock.mockResolvedValue(["/a/one.ts", "/b/two.ts"] as any);
+
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "ok" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "添加文件" }));
+    expect(await screen.findByText("one.ts")).toBeInTheDocument();
+    expect(screen.getByText("two.ts")).toBeInTheDocument();
+
+    // 移除第一个附件
+    await user.click(screen.getByRole("button", { name: "移除附件 1" }));
+    expect(screen.queryByText("one.ts")).not.toBeInTheDocument();
+
+    await user.type(input(), "看剩下的文件");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    const userBubble = await screen.findByText(/@file:\/b\/two\.ts/);
+    expect(userBubble).toBeInTheDocument();
+    // 被移除的文件不出现在气泡
+    const userMsg = (useSessionStore.getState().runtime["k1"]?.messages ?? []).find(
+      (m) => m.role === "user",
+    );
+    expect(userMsg && userMsg.role === "user" ? userMsg.text : "").not.toContain("/a/one.ts");
+  });
+
+  it("F-8-5 分叉：assistant 消息 hover 出现「分叉」，点击回调 onFork（AC-P8-23 组件侧）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "可以分叉的回复" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    const onFork = vi.fn();
+    render(
+      <ChatPanel
+        tabKey="k1"
+        adapter={adapter}
+        onFirstPrompt={() => {}}
+        onFork={onFork}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const forkBtn = await screen.findByRole("button", { name: "从这里分叉" });
+    expect(forkBtn).toBeInTheDocument();
+    await user.click(forkBtn);
+
+    // onFork 被调用（分叉需真实会话，这里只验证入口接线）
+    expect(onFork).toHaveBeenCalledTimes(1);
+  });
+
+  it("F-9-2 搜索：Cmd/Ctrl+F 唤起搜索条 → 输入关键词命中计数（AC-P9-5）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "这个文件包含安全漏洞" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText(/安全漏洞/);
+
+    // 唤起搜索条
+    await user.keyboard("{Meta>}f{/Meta}");
+    expect(screen.getByLabelText("搜索会话")).toBeInTheDocument();
+
+    // 输入关键词 → 命中计数 1 / 1
+    await user.type(screen.getByLabelText("搜索会话"), "安全漏洞");
+    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
+  });
+
+  it("F-9-2 搜索：无命中 → 显示「无结果」不崩溃（AC-P9-7）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "普通回复" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText(/普通回复/);
+
+    await user.keyboard("{Meta>}f{/Meta}");
+    await user.type(screen.getByLabelText("搜索会话"), "不存在的内容");
+    expect(await screen.findByText("无结果")).toBeInTheDocument();
   });
 });

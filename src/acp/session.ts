@@ -41,6 +41,9 @@ export async function openSession(
       fsRead: (path) => invoke<string>("fd_read", { path }),
       fsWrite: (path, content) => invoke("fd_write", { path, content }),
       kill: () => invoke("agent_kill", { agentId: proc.agentId }),
+      // P8 F-8-1：空闲超时回收 kill 带活动时间（Rust 侧留痕，再落回收日志）
+      recycle: (lastActivityMs) =>
+        invoke("agent_kill_idle", { agentId: proc.agentId, lastActivityMs }),
     },
   });
 }

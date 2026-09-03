@@ -13,12 +13,26 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
-import { logRead, logAppend } from "../config/sessions";
+import { PlanBar } from "./PlanBar";
+import { CommandQueuePanel } from "./CommandQueuePanel";
+import { FileTree } from "./FileTree";
+import { VoiceInput } from "./VoiceInput";
+import { useQueueStore } from "../store/queueStore";
+import { collectModifiedPaths } from "../acp/fileTree";
+import { logRead, logAppend, logTruncate } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
+import { composeQuotedPrompt, type Quote } from "../acp/quote";
+import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
+import { truncateToMessageIndex } from "../acp/rewind";
+import { searchMessages } from "../acp/search";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
+import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
+import { quickAsk, quickAskConfigGet } from "../config/quickask";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   useSessionStore,
   type ChatMsg,
@@ -36,6 +50,7 @@ import {
   ArrowRightIcon,
   SendIcon,
   StopIcon,
+  CloseIcon,
 } from "./ui/icons";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -48,6 +63,10 @@ interface Props {
   /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
   cwd?: string;
   onFirstPrompt?: (text: string, sessionId: string) => void;
+  /** F-8-5 分叉：返回 (父 sessionId, 新 sessionId) 供 App 落索引 */
+  onFork?: (fromSessionId: string, toSessionId: string) => void;
+  /** F-8-6 回溯：启用用户消息「回溯到这里」入口 */
+  onRewind?: (index: number) => void;
 }
 
 // F-7-6 打字机 placeholder：80ms/字循环打出；prefers-reduced-motion 直接显全文（AC-P7-6-1/6）
@@ -69,7 +88,7 @@ function useTypewriter(full: string): string {
   return full.slice(0, n);
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt }: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onRewind }: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -88,6 +107,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const [input, setInput] = useState("");
   const [starting, setStarting] = useState(false);
+  // F-8-2 批注：已收集的多段批注（原文 + 疑问）
+  const [quotes, setQuotes] = useState<Quote[]>([]);
   // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
   const [historyDegraded, setHistoryDegraded] = useState(false);
   // slash 补全：高亮项下标，-1 = 无（未展开或已收起）
@@ -114,6 +135,26 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const turnRef = useRef(newTurn());
   // 已落盘的消息条数（JSONL 日志增量追加的游标）
   const persistedRef = useRef(0);
+  // F-8-1 空闲回收：最近一次交互时间戳（prompt 发起时刷新）+ 定时器句柄
+  const lastActivityRef = useRef(0);
+  const recycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // F-8-7 快问：是否已配置快问模型（未配置则入口禁用）
+  const [quickAskReady, setQuickAskReady] = useState(false);
+  // F-8-7 快问：选中的待解释文本 + 悬浮窗口坐标
+  const [quickSel, setQuickSel] = useState<string | null>(null);
+  const [quickAnchor, setQuickAnchor] = useState({ x: 120, y: 80 });
+  // F-8-7 悬浮窗：null=关闭；加载中/结果/错误三态
+  const [quickPop, setQuickPop] = useState<{ state: "loading" | "ok" | "error"; text: string } | null>(null);
+  // F-8-3 文件引用：待发送附件集（按钮选择 / 拖拽 同路径）
+  const [files, setFiles] = useState<FileRef[]>([]);
+  // F-8-3 拖拽悬停高亮
+  const [dragging, setDragging] = useState(false);
+  // F-8-6 回溯：待确认的目标消息下标（null = 无）
+  const [rewindTarget, setRewindTarget] = useState<number | null>(null);
+  // F-9-2 搜索：关键词 + 命中列表 + 当前命中下标
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [searchIdx, setSearchIdx] = useState(0);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -131,7 +172,61 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         })
         .catch(() => setHistoryDegraded(true));
     }
+    // F-8-7 快问：读配置判定入口是否可用（未配置则禁用）
+    quickAskConfigGet()
+      .then((c) => setQuickAskReady(Boolean(c.base_url.trim() && c.model.trim())))
+      .catch(() => setQuickAskReady(false));
+    // F-8-3 拖拽：监听 Tauri 原生拖拽事件（enter/drop/leave）转附件
+    // 错误环境（jsdom 测试 / 浏览器预览）静默降级——拖拽是增强能力，非必需
+    let unlisten: (() => void) | undefined;
+    try {
+      const wv = getCurrentWebview();
+      if (wv && typeof wv.onDragDropEvent === "function") {
+        wv
+          .onDragDropEvent(async (ev) => {
+            if (ev.payload.type === "enter") setDragging(true);
+            else if (ev.payload.type === "leave") setDragging(false);
+            else if (ev.payload.type === "drop") {
+              setDragging(false);
+              const abs = filterAbsoluteFiles(ev.payload.paths.map((p) => ({ path: p })));
+              if (abs.length > 0) addFiles(abs);
+            }
+          })
+          .then((fn) => {
+            unlisten = fn;
+          })
+          .catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
+    // F-9-2 搜索：Cmd/Ctrl+F 唤起/收起搜索条
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+      if (e.key === "Escape" && searchOpen) {
+        closeSearch();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    // F-8-1 空闲超时回收：周期检查，空闲超阈值且无运行中 turn → 回收子进程
+    recycleTimerRef.current = setInterval(() => {
+      const s = sessionRef.current;
+      if (!s) return;
+      // 读 store 快照的 busy（闭包里的 busy 是挂载时的旧值）
+      const isBusy = useSessionStore.getState().runtime[tabKey]?.busy ?? false;
+      if (shouldRecycleSession(lastActivityRef.current, Date.now(), RECYCLE_THRESHOLD_MS, isBusy)) {
+        sessionRef.current = null;
+        logger.info("session", "reopen after recycle", { sessionId: s.sessionId });
+        void s.recycle(lastActivityRef.current).catch(() => {});
+      }
+    }, 15_000);
     return () => {
+      if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
+      window.removeEventListener("keydown", onKeyDown);
+      unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
       drop(tabKey);
     };
@@ -174,18 +269,63 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   async function submit() {
     const text = input.trim();
-    if (!text) return;
+    // F-8-3：组装文件引用 → 拼入发送文本（传路径语义，@file:/abs/path）
+    const filePart = files.length > 0 ? composeFileReference(files) : "";
+    const full = [filePart, text].filter(Boolean).join("\n\n");
+    if (!full.trim()) return;
     setInput("");
     setSlashIdx(-1);
-    appendUser(tabKey, text);
+    setFiles([]);
+    if (files.length > 0) logger.info("chat", "send-with-files", { count: files.length });
+    appendUser(tabKey, full);
 
     // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
     if (busy) {
       await stop();
-      pendingTextRef.current = text;
+      pendingTextRef.current = full;
       return;
     }
-    await runPrompt(text);
+    await runPrompt(full);
+  }
+
+  // F-9-3 命令队列：追加指令（运行中/空闲均可，容量满 toaster 提示不静默丢弃）
+  function enqueueCommand(text: string): boolean {
+    const ok = useQueueStore.getState().enqueue(tabKey, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text });
+    if (ok) {
+      logger.info("queue", "enqueue", {
+        id: "new",
+        len: useQueueStore.getState().queues[tabKey]?.length ?? 0,
+        total: useQueueStore.getState().queues[tabKey]?.length ?? 0,
+      });
+    } else {
+      logger.warn("queue", "full", { cap: 10 });
+      toast.warning("命令队列已满（10 条），请先消费或删除");
+    }
+    return ok;
+  }
+
+  // —— F-8-3 文件引用：按钮选择 / 拖拽 同一条「待发送附件」路径 ——
+  async function pickFiles() {
+    const picked = await open({ multiple: true, directory: false });
+    const paths = picked ? (Array.isArray(picked) ? picked : [picked]) : [];
+    const abs = filterAbsoluteFiles(paths.map((p) => ({ path: p })));
+    addFiles(abs);
+  }
+  function addFiles(list: FileRef[]) {
+    setFiles((prev) => {
+      const seen = new Set(prev.map((f) => f.path));
+      const merged = [...prev];
+      for (const f of list) {
+        if (seen.has(f.path)) continue;
+        seen.add(f.path);
+        merged.push(f);
+        logger.info("chat", "attach-file", { path: f.path, count: merged.length });
+      }
+      return merged;
+    });
+  }
+  function removeFile(idx: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   }
 
   // 建议 prompt 直接发送（F-6-3，不经输入框）
@@ -198,6 +338,98 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     void runPrompt(text);
   }
 
+  // —— F-8-2 批注引用：选中 → 批注卡 → 统一发送 ——
+  function addQuote(text: string) {
+    setQuotes((qs) => [...qs, { text, question: "" }]);
+  }
+  function setQuoteQuestion(idx: number, question: string) {
+    setQuotes((qs) => qs.map((q, i) => (i === idx ? { ...q, question } : q)));
+  }
+  function removeQuote(idx: number) {
+    setQuotes((qs) => qs.filter((_, i) => i !== idx));
+  }
+  function sendQuotes() {
+    if (quotes.length === 0) return;
+    const text = composeQuotedPrompt(quotes);
+    setQuotes([]);
+    logger.info("chat", "annotate-send", { quoteCount: quotes.length });
+    appendUser(tabKey, text);
+    // 与 steering 兼容：运行中发送 → 打断当前 turn 后新发起（复用打断队列）
+    if (busy) {
+      void stop();
+      pendingTextRef.current = text;
+      return;
+    }
+    void runPrompt(text);
+  }
+
+  // —— F-8-5 会话分叉：从当前状态 fork，新会话落索引（标注来源）——
+  async function doFork() {
+    if (busy) {
+      toast.warning("当前 turn 运行中，等待结束后再分叉");
+      return;
+    }
+    const fromSessionId = sessionRef.current?.sessionId ?? resumeSessionId;
+    if (!fromSessionId) {
+      toast.error("会话尚未建立（请先发送一条消息）");
+      return;
+    }
+    try {
+      const s = await ensureSession();
+      const cwdAbs = cwd ?? adapter.cwd;
+      const newId = await s.fork(cwdAbs);
+      logger.info("session", "fork", { fromSessionId, toSessionId: newId });
+      onFork?.(fromSessionId, newId);
+      toast.success("已分叉出新会话");
+    } catch (e) {
+      logger.error("session", "fork 失败", { fromSessionId, error: String(e) });
+      toast.error(`分叉失败：${String(e)}`);
+    }
+  }
+
+  // —— F-8-6 消息回溯：确认后截断消息列表 + 本地日志 ——
+  function askRewind(index: number) {
+    setRewindTarget(index);
+  }
+  async function doRewind() {
+    if (rewindTarget === null) return;
+    const target = rewindTarget;
+    setRewindTarget(null);
+    logger.warn("chat", "rewind", { toIndex: target, withFiles: false });
+    // 情况一（M）：只回上下文 —— 截 store 消息 + 截本地日志
+    const truncated = truncateToMessageIndex(messages, target);
+    useSessionStore.getState().setMessages(tabKey, truncated);
+    persistedRef.current = truncated.length;
+    const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+    if (sid) {
+      logTruncate(sid, truncated.length).catch(() => {});
+    }
+    // 断开当前子进程，下次 prompt 时重新 session/load 恢复（不丢已截断历史）
+    sessionRef.current?.dispose().catch(() => {});
+    sessionRef.current = null;
+    toast.success(`已回溯到第 ${target} 条之前`);
+  }
+
+  // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
+  function onSelectText(text: string, e?: React.MouseEvent) {
+    setQuickSel(text);
+    // 悬浮窗锚定到选区附近
+    setQuickAnchor({ x: e?.clientX ?? 120, y: e?.clientY ?? 80 });
+    setQuickPop(null);
+  }
+  async function runQuickAsk() {
+    if (!quickSel) return;
+    const text = quickSel;
+    logger.info("chat", "quick-ask", { textLen: text.length });
+    setQuickPop({ state: "loading", text: "" });
+    try {
+      const out = await quickAsk(text);
+      setQuickPop({ state: "ok", text: out });
+    } catch (e) {
+      setQuickPop({ state: "error", text: String(e) });
+    }
+  }
+
   // slash 选中回填：命令名回填输入框，光标留在命令后（不自动发送）
 function pickSlash(w: CommandWord) {
     setInput(completeCommand(w));
@@ -208,6 +440,8 @@ function pickSlash(w: CommandWord) {
   const runRef = useRef<{ promise: Promise<void> } | null>(null);
 
   async function runPrompt(text: string) {
+    // F-8-1：刷新最近交互时间戳（回收判定的数据源）
+    lastActivityRef.current = Date.now();
     patch(tabKey, { busy: true });
     turnRef.current = newTurn();
     const p = (async () => {
@@ -216,10 +450,34 @@ function pickSlash(w: CommandWord) {
         if (!promptedOnce.current) {
           promptedOnce.current = true;
           onFirstPrompt?.(text, session.sessionId);
+          // F-8-4：建会话后拉一次 provider 路由（apiType/baseUrl）填侧栏
+          void session
+            .listProviders()
+            .then((providers) => {
+              const cur = providers.find((p) => p.current?.baseUrl)?.current;
+              useSessionStore.getState().setMeta(tabKey, cur ?? null);
+            })
+            .catch(() => {});
         }
         await session.prompt(text, (e) => {
           if (e.type === "available_commands") {
             setCommands(adapter.id, e.commands);
+            return;
+          }
+          if (e.type === "usage") {
+            // F-8-4：usage_update → 存 store（侧栏订阅）
+            logger.debug("session", "usage", { used: e.used, size: e.size, cost: e.cost });
+            useSessionStore.getState().setUsage(tabKey, { used: e.used, size: e.size, cost: e.cost });
+            return;
+          }
+          if (e.type === "plan") {
+            // F-9-1：plan 全量替换（DEC-16）
+            logger.debug("session", "plan", {
+              entries: e.entries.length,
+              done: e.entries.filter((x) => x.status === "completed").length,
+              total: e.entries.length,
+            });
+            useSessionStore.getState().setPlan(tabKey, e.entries);
             return;
           }
           const next = applyEvent(turnRef.current, e, Date.now);
@@ -239,12 +497,23 @@ function pickSlash(w: CommandWord) {
       } finally {
         patch(tabKey, { busy: false });
         runRef.current = null;
+        // F-9-1 计划栏：turn 结束清除 plan，不悬挂下一轮（AC-P9-3）
+        useSessionStore.getState().setPlan(tabKey, null);
         // 落盘增量（turn 结束一次性追加，避免流式期间高频 IO）
         persistNew();
         // steering 排队续跑
         const queued = pendingTextRef.current;
         pendingTextRef.current = null;
-        if (queued) void runPrompt(queued);
+        if (queued) {
+          void runPrompt(queued);
+        } else {
+          // F-9-3 命令队列：turn 结束后自动按序消费下一条（AC-P9-9）
+          const head = useQueueStore.getState().dequeue(tabKey);
+          if (head) {
+            logger.info("queue", "consume", { id: head.id });
+            void runPrompt(head.text);
+          }
+        }
       }
     })();
     runRef.current = { promise: p };
@@ -278,6 +547,28 @@ function pickSlash(w: CommandWord) {
 
   const pending = rt?.pending ?? null;
 
+  // F-9-2 搜索：命中列表（随关键词变化）
+  const searchHits = searchOpen ? searchMessages(messages, searchKeyword) : [];
+  const currentHit = searchHits.length > 0 ? searchHits[searchIdx % searchHits.length] : null;
+  const searchCurIndex = currentHit ? currentHit.index : -1;
+
+  // F-9-2 跳转：滚动到命中消息索引（虚拟列表按索引定位到序）
+  function jumpToSearch(index: number) {
+    logger.info("chat", "search-jump", { index });
+    virtualizer.scrollToIndex(index, { align: "start" });
+  }
+  function nextHit(delta: 1 | -1) {
+    if (searchHits.length === 0) return;
+    const next = (searchIdx + delta + searchHits.length) % searchHits.length;
+    setSearchIdx(next);
+    jumpToSearch(searchHits[next].index);
+  }
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchKeyword("");
+    setSearchIdx(0);
+  }
+
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
@@ -289,8 +580,45 @@ function pickSlash(w: CommandWord) {
 
   const empty = messages.length === 0;
 
+  // F-9-4 最近改动的文件路径（diff 出现过的，供文件树「M」徽标）
+  const modifiedPaths = useMemo(() => collectModifiedPaths(messages), [messages]);
+
   return (
-    <div className="panel">
+    <div className="panel" data-dragging={dragging ? "true" : "false"}>
+      {/* F-9-2 会话内搜索条 */}
+      {searchOpen && (
+        <div className="search-bar">
+          <input
+            aria-label="搜索会话"
+            className="search-input"
+            placeholder="搜索会话内容…（Enter 下一条 / Shift+Enter 上一条）"
+            value={searchKeyword}
+            onChange={(e) => {
+              setSearchKeyword(e.target.value);
+              setSearchIdx(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                nextHit(1);
+              } else if (e.key === "Enter" && e.shiftKey) {
+                e.preventDefault();
+                nextHit(-1);
+              }
+            }}
+          />
+          <span className="search-count">
+            {searchKeyword.trim()
+              ? searchHits.length > 0
+                ? `${searchIdx % searchHits.length + 1} / ${searchHits.length}`
+                : "无结果"
+              : ""}
+          </span>
+          <button type="button" className="search-close" aria-label="关闭搜索" onClick={closeSearch}>
+            <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+          </button>
+        </div>
+      )}
       <div className="chat" ref={chatScrollRef}>
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
         {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
@@ -311,6 +639,7 @@ function pickSlash(w: CommandWord) {
                 key={vi.key}
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
+                data-search-hit={vi.index === searchCurIndex ? "true" : "false"}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -319,11 +648,81 @@ function pickSlash(w: CommandWord) {
                   transform: `translateY(${vi.start}px)`,
                 }}
               >
-                <MessageLine msg={m} adapter={adapter} busy={busy} isLast={vi.index === messages.length - 1} />
+                <MessageLine
+                  msg={m}
+                  adapter={adapter}
+                  busy={busy}
+                  isLast={vi.index === messages.length - 1}
+                  onSelect={onSelectText}
+                  onFork={onFork ? doFork : undefined}
+                  onRewind={onRewind ? () => askRewind(vi.index) : undefined}
+                />
               </div>
             );
           })}
         </div>
+        {/* F-8-7 快问悬浮窗 */}
+        {quickSel && (
+          <div
+            className="quick-pop"
+            style={{
+              position: "absolute",
+              top: quickAnchor.y,
+              left: quickAnchor.x,
+              zIndex: 40,
+            }}
+          >
+            {!quickPop ? (
+              <>
+                <div className="quick-pop-title">对选中文本：</div>
+                <div className="quick-pop-sel" title={quickSel}>{quickSel}</div>
+                <div className="quick-pop-actions">
+                  {/* 统一入口（ideas IDEA-001）：批注＝加入批注卡；快速解释＝独立轻量模型 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      addQuote(quickSel);
+                      setQuickSel(null);
+                    }}
+                  >
+                    批注
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!quickAskReady}
+                    title={quickAskReady ? "" : "未配置快问模型"}
+                    onClick={runQuickAsk}
+                  >
+                    快速解释
+                  </button>
+                  <button type="button" onClick={() => setQuickSel(null)}>关闭</button>
+                </div>
+              </>
+            ) : quickPop.state === "loading" ? (
+              <div className="quick-pop-body">解释中…</div>
+            ) : quickPop.state === "error" ? (
+              <div className="quick-pop-body quick-pop-error">解释失败：{quickPop.text}</div>
+            ) : (
+              <>
+                <div className="quick-pop-body">{quickPop.text}</div>
+                <div className="quick-pop-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(quickPop.text).then(
+                        () => toast.success("已复制"),
+                        () => toast.error("复制失败"),
+                      );
+                    }}
+                  >
+                    复制
+                  </button>
+                  <button type="button" onClick={() => setQuickSel(null)}>关闭</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {pending && (
           <Dialog open onOpenChange={() => {}}>
             <DialogContent className="max-w-md" showCloseButton={false}>
@@ -340,12 +739,95 @@ function pickSlash(w: CommandWord) {
             </DialogContent>
           </Dialog>
         )}
+        {/* F-8-6 回溯确认（破坏性操作，二次确认） */}
+        <Dialog open={rewindTarget !== null} onOpenChange={() => setRewindTarget(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>回溯到这里？</DialogTitle>
+            </DialogHeader>
+            <p className="perm-code">
+              将截断到第 {rewindTarget} 条消息之前，之后的消息与上下文都会被丢弃。此操作不可撤销。
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRewindTarget(null)}>取消</Button>
+              <Button variant="destructive" onClick={doRewind}>确认回溯</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="harness-badge inline-flex items-center gap-2">
         <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
         <span>正在和 {adapter.name} 对话</span>
       </div>
+
+      {/* F-9-1 计划栏（输入框上方最上层，DEC-19） */}
+      <PlanBar tabKey={tabKey} />
+
+      {/* F-8-2 批注卡列表：多段批注 + 统一发送 */}
+      {quotes.length > 0 && (
+        <div className="quote-panel">
+          {quotes.map((q, i) => (
+            <div key={i} className="quote-card">
+              <span className="quote-index">引用 {i + 1}</span>
+              <div className="quote-text" title={q.text}>{q.text}</div>
+              <input
+                aria-label={`批注疑问 ${i + 1}`}
+                className="quote-input"
+                placeholder="填写疑问或评论…"
+                value={q.question}
+                onChange={(e) => setQuoteQuestion(i, e.target.value)}
+              />
+              <button type="button" className="quote-remove" aria-label={`移除引用 ${i + 1}`} onClick={() => removeQuote(i)}>
+                <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+              </button>
+            </div>
+          ))}
+          <div className="quote-actions">
+            <span className="quote-hint">已选 {quotes.length} 处</span>
+            <button type="button" className="quote-send" onClick={sendQuotes}>发送批注</button>
+          </div>
+        </div>
+      )}
+
+      {/* F-8-3 附件胶囊列表：文件名 + × 移除（拖拽高亮反馈） */}
+      {files.length > 0 && (
+        <div className="attach-list">
+          {files.map((f, i) => (
+            <span key={f.path} className="attach-chip">
+              <span className="attach-name" title={f.path}>
+                {f.path.split("/").filter(Boolean).pop() ?? f.path}
+              </span>
+              <button
+                type="button"
+                className="attach-remove"
+                aria-label={`移除附件 ${i + 1}`}
+                onClick={() => removeFile(i)}
+              >
+                <CloseIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
+      <CommandQueuePanel tabKey={tabKey} />
+
+      {/* F-9-4 工作区文件树（当前会话 cwd） */}
+      <FileTree
+        cwd={cwd}
+        modifiedPaths={modifiedPaths}
+        onRefFile={(path) => {
+          logger.info("fs", "ref-file", { path });
+          setFiles((prev) => {
+            const seen = new Set(prev.map((f) => f.path));
+            if (seen.has(path)) return prev;
+            return [...prev, { path }];
+          });
+        }}
+      />
+
       <form
         className="row"
         onSubmit={(e) => {
@@ -353,6 +835,16 @@ function pickSlash(w: CommandWord) {
           submit();
         }}
       >
+        <button
+          type="button"
+          className="attach-btn"
+          aria-label="添加文件"
+          title="添加文件"
+          onClick={pickFiles}
+        >
+          ＋
+        </button>
+        <VoiceInput onTranscribed={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))} />
         <div className="input-wrap">
           {slashOpen && slashMatches.length > 0 && (
             <div className="slash-menu">
@@ -438,6 +930,24 @@ function pickSlash(w: CommandWord) {
         >
           <StopIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
         </button>
+        {/* F-9-3 命令队列：排队追加按钮（区别于立即发送） */}
+        <button
+          type="button"
+          disabled={!input.trim() || starting}
+          aria-label="排队发送"
+          title="加入命令队列"
+          className="inline-flex h-9 px-2.5 shrink-0 items-center justify-center rounded-full text-xs"
+          style={{ backgroundColor: "var(--bg-2)", color: "var(--text-secondary)", transitionDuration: "var(--motion-default)" }}
+          onClick={() => {
+            const t = input.trim();
+            if (t) {
+              enqueueCommand(t);
+              setInput("");
+            }
+          }}
+        >
+          排队
+        </button>
       </form>
     </div>
   );
@@ -471,18 +981,36 @@ function MessageLine({
   adapter,
   busy,
   isLast,
+  onSelect,
+  onFork,
+  onRewind,
 }: {
   msg: ChatMsg;
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
+  onSelect?: (text: string, e: React.MouseEvent) => void;
+  onFork?: () => void;
+  onRewind?: () => void;
 }) {
   if (msg.role === "user") {
     return (
-      <div className="flex justify-end my-1.5">
+      <div className="group flex justify-end my-1.5">
         <div className="user-bubble max-w-[75%] px-3.5 py-2.5" style={{ backgroundColor: "var(--message-user-bg)", color: "#fff", borderRadius: "var(--radius-lg)", borderBottomRightRadius: "4px" }}>
           <span className="whitespace-pre-wrap break-words">{msg.text}</span>
         </div>
+        {/* F-8-6 回溯：用户消息 hover 操作行（回溯到这里） */}
+        {onRewind && (
+          <button
+            type="button"
+            aria-label="回溯到这里"
+            className="ml-2 self-center rounded-md px-2 py-1 text-xs opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
+            style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+            onClick={onRewind}
+          >
+            ↩ 回溯
+          </button>
+        )}
       </div>
     );
   }
@@ -495,38 +1023,69 @@ function MessageLine({
             key={i}
             block={b}
             live={busy && isLast && i === msg.blocks.length - 1 && b.kind === "thought" && b.ms === undefined}
+            onSelect={onSelect}
           />
         ))}
-        {/* hover 浮现复制按钮（F-7-4 AC-P7-4-2） */}
-        <button
-          type="button"
-          aria-label="复制回复"
-          className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
-          style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
-          onClick={() => {
-            const text = msg.blocks
-              .map((b) => (b.kind === "text" ? b.text : b.kind === "thought" ? b.text : ""))
-              .filter(Boolean)
-              .join("\n");
-            navigator.clipboard?.writeText(text).then(
-              () => toast.success("已复制"),
-              () => toast.error("复制失败"),
-            );
-          }}
-        >
-          <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
-          复制
-        </button>
+        {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制） */}
+        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          {onFork && (
+            <button
+              type="button"
+              aria-label="从这里分叉"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
+              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              onClick={onFork}
+            >
+              ⑂ 分叉
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="复制回复"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
+            style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+            onClick={() => {
+              const text = msg.blocks
+                .map((b) => (b.kind === "text" ? b.text : b.kind === "thought" ? b.text : ""))
+                .filter(Boolean)
+                .join("\n");
+              navigator.clipboard?.writeText(text).then(
+                () => toast.success("已复制"),
+                () => toast.error("复制失败"),
+              );
+            }}
+          >
+            <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+            复制
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function BlockView({ block, live }: { block: BlockMsg; live: boolean }) {
+function BlockView({
+  block,
+  live,
+  onSelect,
+}: {
+  block: BlockMsg;
+  live: boolean;
+  onSelect?: (text: string, e: React.MouseEvent) => void;
+}) {
   switch (block.kind) {
     case "text":
       return (
-        <div className="md">
+        <div
+          className="md"
+          onMouseUp={(e) => {
+            // F-8-2（用法1）+ F-8-7（快问）：选中 assistant 正文文字 → 记录选区
+            const sel = window.getSelection();
+            if (!sel || sel.isCollapsed) return;
+            const text = sel.toString().trim();
+            if (text) onSelect?.(text, e);
+          }}
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}

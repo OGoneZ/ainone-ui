@@ -176,6 +176,25 @@ pub fn log_append(app: tauri::AppHandle, session_id: String, lines: Vec<String>)
     Ok(())
 }
 
+/// F-8-6 消息回溯：把会话日志截断到前 N 行（之后消息丢弃）。
+/// 回填阶段读回再走 parseLog，损坏行会安全跳过，故按「消息条数」截断。
+#[tauri::command]
+pub fn log_truncate(app: tauri::AppHandle, session_id: String, keep_lines: usize) -> Result<(), String> {
+    let path = log_path(&app, &session_id)?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取会话日志失败: {e}"))?;
+    let lines: Vec<&str> = raw.lines().collect();
+    let kept: String = lines
+        .iter()
+        .take(keep_lines)
+        .map(|l| format!("{l}\n"))
+        .collect();
+    log::warn!("[log_truncate] 截断会话日志 {session_id}：{} → {keep_lines} 行", lines.len());
+    std::fs::write(&path, kept).map_err(|e| format!("写入会话日志失败: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::match_workspace;

@@ -34,6 +34,12 @@ export interface RuntimeState {
   pending: string | null;
   /** 是否已发出首条消息（用于写会话索引） */
   prompted: boolean;
+  /** F-8-4 元数据：上下文占用（usage_update 采集），无则为 null */
+  usage: { used: number; size: number; cost: number | null } | null;
+  /** F-8-4 元数据：provider 路由（providers/list 采集），无则为 null */
+  meta: { apiType?: string; baseUrl?: string } | null;
+  /** F-9-1 计划：当前 turn 的 plan 条目（全量替换，turn 结束清除） */
+  plan: { content: string; status: string; priority?: string }[] | null;
 }
 
 interface SessionStore {
@@ -46,6 +52,12 @@ interface SessionStore {
   drop: (key: string) => void;
   /** 绑定会话 id（session/new 或 load 后） */
   bindSession: (key: string, sessionId: string) => void;
+  /** 更新采集到的 usage（F-8-4） */
+  setUsage: (key: string, usage: { used: number; size: number; cost: number | null }) => void;
+  /** 更新采集到的 provider 路由（F-8-4） */
+  setMeta: (key: string, meta: { apiType?: string; baseUrl?: string } | null) => void;
+  /** 更新当前 turn 的 plan（F-9-1 全量替换） */
+  setPlan: (key: string, plan: { content: string; status: string; priority?: string }[] | null) => void;
   /** 整体覆盖消息列表（用于 readLog 回填） */
   setMessages: (key: string, messages: ChatMsg[]) => void;
   /** 追加一条 user 消息（新气泡） */
@@ -77,9 +89,33 @@ export const useSessionStore = create<SessionStore>()(
                 busy: false,
                 pending: null,
                 prompted: false,
+                usage: null,
+                meta: null,
+                plan: null,
               },
             },
           };
+        }),
+
+      setUsage: (key, usage) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          return { runtime: { ...s.runtime, [key]: { ...cur, usage } } };
+        }),
+
+      setMeta: (key, meta) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          return { runtime: { ...s.runtime, [key]: { ...cur, meta } } };
+        }),
+
+      setPlan: (key, plan) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          return { runtime: { ...s.runtime, [key]: { ...cur, plan } } };
         }),
 
       drop: (key) =>

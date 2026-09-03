@@ -23,6 +23,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  GripVertical,
   Loader2,
   MessageSquare,
   Plus,
@@ -63,3 +64,4 @@ export const ChevronRightIcon = ChevronRight;
 export const CloseIcon = X;
 export const PlusIcon = Plus;
 export const CheckIcon = Check;
+export const GripVerticalIcon = GripVertical; // 拖拽手柄

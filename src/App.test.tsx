@@ -36,6 +36,8 @@ function defaultHandlers() {
     workspaces_list: () => WS,
     log_read: () => "",
     default_cwd: () => "/",
+    // F-9-4 文件树（App 有 cwd 的 Tab 会调）：返回空数组
+    workspace_list_dir: () => [],
   };
 }
 

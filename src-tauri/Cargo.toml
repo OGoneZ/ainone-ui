@@ -23,8 +23,9 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-shell = "2.3.6"
-tokio = { version = "1.53.1", features = ["process", "io-util", "rt-multi-thread", "sync"] }
+tokio = { version = "1.53.1", features = ["process", "io-util", "rt-multi-thread", "sync", "macros", "time"] }
 tauri-plugin-dialog = "2.7.3"
 log = "0.4.34"
 tauri-plugin-log = "2.9.1"
-
+# P8 F-8-7 快问：Rust 侧发 OpenAI 兼容 chat/completions（密钥不暴露给 WebView，DEC-20）
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
