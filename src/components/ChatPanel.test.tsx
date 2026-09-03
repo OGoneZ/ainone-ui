@@ -350,7 +350,7 @@ describe("ChatPanel 交互行为", () => {
     await screen.findByText(/安全漏洞/);
 
     // 唤起搜索条
-    await user.keyboard("{Meta>}f{/Meta}");
+    await user.keyboard("{Meta>}{Shift>}f{/Shift}{/Meta}");
     expect(screen.getByLabelText("搜索会话")).toBeInTheDocument();
 
     // 输入关键词 → 命中计数 1 / 1
@@ -371,7 +371,7 @@ describe("ChatPanel 交互行为", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
     await screen.findByText(/普通回复/);
 
-    await user.keyboard("{Meta>}f{/Meta}");
+    await user.keyboard("{Meta>}{Shift>}f{/Shift}{/Meta}");
     await user.type(screen.getByLabelText("搜索会话"), "不存在的内容");
     expect(await screen.findByText("无结果")).toBeInTheDocument();
   });

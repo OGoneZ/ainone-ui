@@ -195,6 +195,24 @@ pub fn log_truncate(app: tauri::AppHandle, session_id: String, keep_lines: usize
     std::fs::write(&path, kept).map_err(|e| format!("写入会话日志失败: {e}"))
 }
 
+/// F-11-5 会话分叉：把父会话日志复制为新 sessionId 的日志（目标已存在则覆盖）。
+/// 分叉自动跳转后，新 Tab 靠这份副本回填 UI 历史（agent 上下文另由 session/load 恢复）。
+#[tauri::command]
+pub fn log_copy(app: tauri::AppHandle, from_session_id: String, to_session_id: String) -> Result<(), String> {
+    let from = log_path(&app, &from_session_id)?;
+    let to = log_path(&app, &to_session_id)?;
+    if !from.exists() {
+        // 源无日志（父会话从未落盘）→ 目标也置空，语义等价
+        std::fs::write(&to, "").map_err(|e| format!("写入会话日志失败: {e}"))?;
+        log::warn!("[log_copy] 源日志不存在 {from_session_id} → {to_session_id}（置空）");
+        return Ok(());
+    }
+    std::fs::copy(&from, &to).map_err(|e| format!("复制会话日志失败: {e}"))?;
+    let size = std::fs::metadata(&to).map(|m| m.len()).unwrap_or(0);
+    log::info!("[log_copy] {from_session_id} → {to_session_id}（{size} 字节）");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::match_workspace;

@@ -173,6 +173,7 @@ function App() {
         cwd={t.cwd}
         onFirstPrompt={(text, sid) => handleFirstPrompt(sid, t.adapterId, text, t.workspaceId, t.cwd)}
         onFork={(fromId, toId) => handleFork(fromId, toId, t.adapterId, t.workspaceId, t.cwd)}
+        onForkNavigate={(toId) => handleForkNavigate(toId, t.adapterId, t.workspaceId, t.cwd)}
         onRewind={() => {}}
       />
     );
@@ -255,6 +256,27 @@ function App() {
       workspace_id: workspaceId ?? null,
       mtime_ms: Date.now(),
     }).then(reloadHistory);
+  }
+
+  // F-11-5 分叉自动跳转：以新 sessionId 新开 Tab（同 adapter/workspace/cwd）并激活。
+  // ChatPanel 已先 logCopy 父日志 → 新 Tab 挂载时 logRead 回填历史 + session/load 恢复上下文。
+  function handleForkNavigate(toSessionId: string, adapterId: string, workspaceId?: string | null, cwd?: string) {
+    const entry: SessionEntry = {
+      session_id: toSessionId,
+      adapter_id: adapterId,
+      title: "分叉会话", // reloadHistory 后会被 handleFork 写入的标题覆盖（侧栏以此为准）
+      cwd: cwd ?? "",
+      workspace_id: workspaceId ?? null,
+      mtime_ms: Date.now(),
+    };
+    const r = resolveHistoryOpen(tabs, entry, `tab-${nextKey.current}`);
+    if (r.newTab) {
+      nextKey.current++;
+      addTabToModel(r.newTab, DockLocation.CENTER, activeKey);
+    } else {
+      setActiveKey(r.activateKey);
+      getModel().doAction(Actions.selectTab(r.activateKey));
+    }
   }
 
   function confirmNewSession(adapterId: string, workspaceId: string | null, cwd?: string) {

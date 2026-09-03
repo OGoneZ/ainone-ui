@@ -19,7 +19,7 @@ import { FileTree } from "./FileTree";
 import { VoiceInput } from "./VoiceInput";
 import { useQueueStore } from "../store/queueStore";
 import { collectModifiedPaths } from "../acp/fileTree";
-import { logRead, logAppend, logTruncate } from "../config/sessions";
+import { logRead, logAppend, logTruncate, logCopy } from "../config/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
@@ -73,6 +73,8 @@ interface Props {
   onFirstPrompt?: (text: string, sessionId: string) => void;
   /** F-8-5 分叉：返回 (父 sessionId, 新 sessionId) 供 App 落索引 */
   onFork?: (fromSessionId: string, toSessionId: string) => void;
+  /** F-11-5 分叉自动跳转：fork 成功后 App 以新 sessionId 开 Tab 并激活 */
+  onForkNavigate?: (newSessionId: string) => void;
   /** F-8-6 回溯：启用用户消息「回溯到这里」入口 */
   onRewind?: (index: number) => void;
 }
@@ -96,7 +98,7 @@ function useTypewriter(full: string): string {
   return full.slice(0, n);
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onRewind }: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind }: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -201,6 +203,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [quickAnchor, setQuickAnchor] = useState({ x: 120, y: 80 });
   // F-8-7 悬浮窗：null=关闭；加载中/结果/错误三态
   const [quickPop, setQuickPop] = useState<{ state: "loading" | "ok" | "error"; text: string } | null>(null);
+  // F-11-6 快问悬浮窗点外关闭：DOM ref
+  const quickPopRef = useRef<HTMLDivElement | null>(null);
+  const quickSelRef = useRef<string | null>(null);
+  quickSelRef.current = quickSel;
   // F-8-3 文件引用：待发送附件集（按钮选择 / 拖拽 同路径）
   const [files, setFiles] = useState<FileRef[]>([]);
   // F-8-3 拖拽悬停高亮
@@ -211,6 +217,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [searchIdx, setSearchIdx] = useState(0);
+  // F-11-6 Esc 判定用的最新值镜像（state 声明后同步）
+  const searchOpenRef = useRef(false);
+  searchOpenRef.current = searchOpen;
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -256,17 +265,32 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     } catch {
       /* ignore */
     }
-    // F-9-2 搜索：Cmd/Ctrl+F 唤起/收起搜索条
+    // F-9-2 搜索 + F-11-6 快问悬浮窗 Esc 关闭（会话内搜索已改绑 Ctrl+Shift+F，DEC-26）
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setSearchOpen((v) => !v);
       }
-      if (e.key === "Escape" && searchOpen) {
-        closeSearch();
+      if (e.key === "Escape") {
+        if (quickSelRef.current !== null) {
+          setQuickSel(null);
+          logger.debug("chat", "quick-pop-dismiss", { reason: "escape" });
+        } else if (searchOpenRef.current) {
+          closeSearch();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
+    // F-11-6 快问悬浮窗点外关闭：document mousedown + outside 判定（Esc 走 onKeyDown）
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (quickSelRef.current === null) return;
+      const pop = quickPopRef.current;
+      if (pop && e.target instanceof Node && pop.contains(e.target)) return;
+      setQuickSel(null);
+      setQuickPop(null);
+      logger.debug("chat", "quick-pop-dismiss", { reason: "outside" });
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
     // F-8-1 空闲超时回收：周期检查，空闲超阈值且无运行中 turn → 回收子进程
     recycleTimerRef.current = setInterval(() => {
       const s = sessionRef.current;
@@ -282,6 +306,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     return () => {
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
       window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onDocMouseDown);
       unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
       drop(tabKey);
@@ -421,6 +446,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   // —— F-8-5 会话分叉：从当前状态 fork，新会话落索引（标注来源）——
+  // F-11-5：fork 成功后复制父日志为新会话日志 + 回调 onForkNavigate 自动跳转新 Tab
   async function doFork() {
     if (busy) {
       toast.warning("当前 turn 运行中，等待结束后再分叉");
@@ -436,8 +462,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       const cwdAbs = cwd ?? adapter.cwd;
       const newId = await s.fork(cwdAbs);
       logger.info("session", "fork", { fromSessionId, toSessionId: newId });
+      await logCopy(fromSessionId, newId).catch((e) => {
+        // 日志复制失败不阻塞分叉（新 Tab 会走「历史缺失」降级，但上下文仍正确）
+        logger.warn("session", "log-copy 失败", { fromSessionId, newId, error: String(e) });
+      });
       onFork?.(fromSessionId, newId);
-      toast.success("已分叉出新会话");
+      onForkNavigate?.(newId);
+      toast.success("已分叉出新会话，已跳转");
     } catch (e) {
       logger.error("session", "fork 失败", { fromSessionId, error: String(e) });
       toast.error(`分叉失败：${String(e)}`);
@@ -731,10 +762,12 @@ function pickSlash(w: CommandWord) {
             );
           })}
         </div>
-        {/* F-8-7 快问悬浮窗 */}
+        {/* F-8-7 快问悬浮窗（F-11-6：点外/Esc 关闭，无「关闭」按钮） */}
         {quickSel && (
           <div
             className="quick-pop"
+            ref={quickPopRef}
+            data-testid="quick-pop"
             style={{
               position: "absolute",
               top: quickAnchor.y,
@@ -765,7 +798,6 @@ function pickSlash(w: CommandWord) {
                   >
                     快速解释
                   </button>
-                  <button type="button" onClick={() => setQuickSel(null)}>关闭</button>
                 </div>
               </>
             ) : quickPop.state === "loading" ? (
@@ -787,7 +819,6 @@ function pickSlash(w: CommandWord) {
                   >
                     复制
                   </button>
-                  <button type="button" onClick={() => setQuickSel(null)}>关闭</button>
                 </div>
               </>
             )}

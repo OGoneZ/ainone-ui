@@ -39,3 +39,8 @@ export async function logAppend(sessionId: string, lines: string[]): Promise<voi
 export async function logTruncate(sessionId: string, keepLines: number): Promise<void> {
   await invoke("log_truncate", { sessionId, keepLines });
 }
+
+/** F-11-5 分叉跳转：把父会话日志复制为新 sessionId 的日志（目标覆盖） */
+export async function logCopy(fromSessionId: string, toSessionId: string): Promise<void> {
+  await invoke("log_copy", { fromSessionId, toSessionId });
+}
