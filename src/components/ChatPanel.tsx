@@ -85,6 +85,9 @@ interface Props {
   resumeSessionId?: string;
   /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
   cwd?: string;
+  /** M5：当前 Tab 是否活跃（flexlayout 非激活窗格保持挂载，ref-file/拖拽等
+   *  window 级事件必须只作用于活跃实例，否则多窗格互相串扰） */
+  active?: boolean;
   onFirstPrompt?: (text: string, sessionId: string) => void;
   /** F-8-5 分叉：返回 (父 sessionId, 新 sessionId) 供 App 落索引 */
   onFork?: (fromSessionId: string, toSessionId: string) => void;
@@ -113,7 +116,7 @@ function useTypewriter(full: string): string {
   return full.slice(0, n);
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind }: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, active = true}: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -154,7 +157,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const typeText = useTypewriter(typewriterHint(adapter));
 
   // slash 候选（F-4-7 / F-11-1 模糊匹配）：输入以 / 开头才计算
-  const slashOpen = isSlashInput(input);
+  // L1：Esc 显式关闭 slash 菜单（下次输入变化时重置重新可开）
+  const [slashClosed, setSlashClosed] = useState(false);
+  const slashOpen = isSlashInput(input) && !slashClosed;
   const slashMatches = useMemo(
     () => (slashOpen ? filterCommands(commands, input) : []),
     [commands, input, slashOpen],
@@ -237,6 +242,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-11-6 Esc 判定用的最新值镜像（state 声明后同步）
   const searchOpenRef = useRef(false);
   searchOpenRef.current = searchOpen;
+  // M5：active prop 镜像——window 级监听闭包来自挂载帧，读 ref 取最新活跃态
+  const activeRef = useRef(active);
+  activeRef.current = active ?? true;
   // F-12-1 编辑重试：null = 非编辑态；否则为 {index, original}（index 处消息被替换）
   const [editTarget, setEditTarget] = useState<{ index: number; original: string } | null>(null);
   // F-12-5 diff 行内评论：待发评论集（随 tabKey 独立，按组件实例隔离）
@@ -277,6 +285,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       if (wv && typeof wv.onDragDropEvent === "function") {
         wv
           .onDragDropEvent(async (ev) => {
+            // M5：Tauri 拖拽事件是 webview 级广播，多窗格都挂着监听——
+            // 非活跃实例忽略，文件只落进用户正看着的那个面板
+            if (!(activeRef.current ?? true)) return;
             if (ev.payload.type === "enter") setDragging(true);
             else if (ev.payload.type === "leave") setDragging(false);
             else if (ev.payload.type === "drop") {
@@ -313,6 +324,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     window.addEventListener("keydown", onKeyDown);
     // F-11-7 RightRail 文件树「引用」→ 注入附件（CustomEvent，与 Rail 解耦）
     const onRefFile = (e: Event) => {
+      // M5：只接受发给自己所在 Tab 的事件（非活跃窗格忽略，防多窗格串扰）
+      if (!(activeRef.current ?? true)) return;
       const path = (e as CustomEvent<string>).detail;
       if (typeof path !== "string") return;
       logger.info("fs", "ref-file", { path });
@@ -433,6 +446,17 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       );
       sessionRef.current = s;
       bindSession(tabKey, s.sessionId);
+      // M9：resume 会话（promptedOnce 初值 true）永远不拉 providers → 侧栏
+      // apiType/baseUrl 恒空。ensureSession 建链后补拉一次（幂等，失败静默）。
+      if (resumeSessionId) {
+        void s
+          .listProviders()
+          .then((providers) => {
+            const cur = providers.find((p) => p.current?.baseUrl)?.current;
+            if (cur) useSessionStore.getState().setMeta(tabKey, cur);
+          })
+          .catch(() => {});
+      }
       return s;
     } finally {
       setStarting(false);
@@ -684,11 +708,32 @@ function pickSlash(w: CommandWord) {
   // F-11-3 @ 选中：替换 @ token 为 @file: 路径，同步附件胶囊（复用 F-8-3 files）
   function pickAt(entry: { rel: string; abs: string; isDir: boolean }) {
     if (!atMenu) return;
-    setInput((prev) => applyAtToken(prev, atMenu, entry));
+    // M6：目录项 = 展开该目录（懒加载子项进 atTree + 把 query 推进到「@rel/」），
+    // 菜单保持打开，深层文件因此可达；文件项 = 关闭菜单并落 token/胶囊。
+    if (entry.isDir) {
+      const relPrefix = `${entry.rel}/`;
+      setAtMenu({ query: relPrefix, start: atMenu.start, end: atMenu.end });
+      setAtIdx(0);
+      if (!atTree[entry.abs]) {
+        workspaceListDir(entry.abs)
+          .then((entries) => {
+            if (Array.isArray(entries)) {
+              setAtTree((t) => ({ ...t, [entry.abs]: filterExcluded(entries) }));
+            }
+          })
+          .catch(() => {});
+      }
+      return;
+    }
+    const nextText = applyAtToken(input, atMenu, entry);
+    setInput(nextText);
     setAtMenu(null);
     setAtIdx(0);
-    if (!entry.isDir) {
-      // 文件 → 进附件胶囊（目录只插入路径，不进胶囊）
+    // M7：文件只走「文本 token」路径——submit 时 composeFileReference 会把
+    // 附件胶囊再拼一遍 @file:，同一路径会出现两次引用。文本已含该路径 →
+    // 不进胶囊。
+    const tokenized = `@file:${entry.abs}`;
+    if (!nextText.includes(tokenized)) {
       addFiles([{ path: entry.abs }]);
     }
     requestAnimationFrame(() => slashRef.current?.focus());
@@ -866,10 +911,17 @@ function pickSlash(w: CommandWord) {
   const currentHit = searchHits.length > 0 ? searchHits[searchIdx % searchHits.length] : null;
   const searchCurIndex = currentHit ? currentHit.index : -1;
 
-  // F-9-2 跳转：滚动到命中消息索引（虚拟列表按索引定位到序）
+  // F-9-2 跳转：滚动到命中消息索引（虚拟列表按索引定位到序）。
+  // M8：远端条目未测量前按 estimateSize 估计，scrollToIndex 落点会漂移——
+  // 首跳后等两帧（测量已随渲染发生）再校跳一次，长消息场景落点基本准确。
   function jumpToSearch(index: number) {
     logger.info("chat", "search-jump", { index });
     virtualizer.scrollToIndex(index, { align: "start" });
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        virtualizer.scrollToIndex(index, { align: "start" });
+      }),
+    );
   }
   function nextHit(delta: 1 | -1) {
     if (searchHits.length === 0) return;
@@ -882,6 +934,11 @@ function pickSlash(w: CommandWord) {
     setSearchKeyword("");
     setSearchIdx(0);
   }
+  // M8：搜索条出现时聚焦（原实现焦点留在原地，键盘流断裂）
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -947,6 +1004,7 @@ function pickSlash(w: CommandWord) {
       {searchOpen && (
         <div className="search-bar">
           <input
+            ref={searchInputRef}
             aria-label="搜索会话"
             className="search-input"
             placeholder="搜索会话内容…（Enter 下一条 / Shift+Enter 上一条）"
@@ -1315,8 +1373,11 @@ function pickSlash(w: CommandWord) {
               const caret = e.currentTarget.selectionStart ?? v.length;
               setInput(v);
               setSlashIdx(-1); // 输入变化重置高亮
-              // F-11-3：@ 联想开合（词首 @ 才触发）
-              const token = detectAtToken(v, caret);
+              setSlashClosed(false); // L1：输入变化重新允许 slash 菜单展开
+              // F-11-3：@ 联想开合（词首 @ 才触发）。
+              // M3：与 slash 互斥——行首 / 命令输入时不开 @ 菜单（两个菜单同帧
+              // 展开会重叠渲染，键盘链互相吞噬）
+              const token = isSlashInput(v) ? null : detectAtToken(v, caret);
               if (token) {
                 setAtMenu((m) => (m ? { ...token } : token));
                 setAtIdx(0);
@@ -1325,6 +1386,9 @@ function pickSlash(w: CommandWord) {
               }
             }}
             onKeyDown={(e) => {
+              // M4：IME 组合中（中文输入法选词）不触发菜单选中/发送——
+              // 组合中的 Enter 是确认候选，不是提交意图
+              if (e.nativeEvent.isComposing) return;
               // F-11-3 @ 菜单键盘导航（与 slash 互斥：同帧只开一个菜单）
               if (atMenu && atMatches.length > 0) {
                 if (e.key === "ArrowDown") {
@@ -1366,6 +1430,9 @@ function pickSlash(w: CommandWord) {
                 }
                 if (e.key === "Escape") {
                   e.preventDefault();
+                  // L1：Esc 语义与 @ 菜单对齐——关闭菜单（原只重置高亮，菜单仍开，
+                  // Enter 会误选第 0 项）。重开靠再次输入 /。
+                  setSlashClosed(true);
                   setSlashIdx(-1);
                   return;
                 }
@@ -1895,11 +1962,13 @@ function ToolBlock({
 export const TOOL_TEXT_FOLD_LIMIT = 2000;
 
 export function ToolTextView({ text }: { text: string }) {
-  const pretty = useMemo(() => prettyJson(text), [text]);
   const foldable = text.length > TOOL_TEXT_FOLD_LIMIT;
   const [expanded, setExpanded] = useState(false);
-  // 折叠态截断渲染（ansi-to-react 对超长文本慢，先截断再渲染）
+  // 折叠态截断渲染（ansi-to-react 与 JSON.stringify 对超长文本都慢，先截断再处理）。
+  // M10：截断要同时作用于 JSON 分支——原实现 pretty 用全量原文、截断只影响
+  // ANSI 路径，折叠按钮点了没效果，超大 JSON 直接冻结面板。
   const shown = foldable && !expanded ? text.slice(0, TOOL_TEXT_FOLD_LIMIT) : text;
+  const pretty = useMemo(() => (expanded ? prettyJson(text) : prettyJson(shown)), [shown, text, expanded]);
   const body =
     pretty !== null ? (
       <pre className="tool-text">
