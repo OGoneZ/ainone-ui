@@ -8,9 +8,10 @@
 //   - thinking 流式中浅色小字展开，结束后自动折叠为「已思考 N 秒」，可点击展开
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
+import { Streamdown } from "streamdown";
+import { code } from "@streamdown/code";
+import { mermaid } from "@streamdown/mermaid";
+import { math } from "@streamdown/math";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { PlanBar } from "./PlanBar";
@@ -1064,6 +1065,43 @@ function MessageLine({
   );
 }
 
+/** P11：assistant 正文 markdown 渲染（导出供测试与复用；批注选区监听在容器上） */
+export function MarkdownView({
+  text,
+  live,
+  onSelect,
+}: {
+  text: string;
+  live: boolean;
+  onSelect?: (text: string, e: React.MouseEvent) => void;
+}) {
+  return (
+    <div
+      className="md"
+      onMouseUp={(e) => {
+        // F-8-2（用法1）+ F-8-7（快问）：选中 assistant 正文文字 → 记录选区
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) return;
+        const t = sel.toString().trim();
+        if (t) onSelect?.(t, e);
+      }}
+    >
+      {/* P11（DEC-21）：Streamdown 替代 ReactMarkdown——GFM/代码块(Shiki)/Mermaid/
+          KaTeX/不完整块兜底/内部 memo 一体化；shikiTheme 双主题走 CSS 变量，
+          深色由 data-theme 驱动（@custom-variant dark 对齐）。live 时启用
+          不完整块解析，静态消息关闭以走 memo 快路径。 */}
+      <Streamdown
+        mode="static"
+        parseIncompleteMarkdown={live}
+        plugins={{ code, mermaid, math }}
+        shikiTheme={["github-light", "github-dark"]}
+      >
+        {text}
+      </Streamdown>
+    </div>
+  );
+}
+
 function BlockView({
   block,
   live,
@@ -1075,28 +1113,7 @@ function BlockView({
 }) {
   switch (block.kind) {
     case "text":
-      return (
-        <div
-          className="md"
-          onMouseUp={(e) => {
-            // F-8-2（用法1）+ F-8-7（快问）：选中 assistant 正文文字 → 记录选区
-            const sel = window.getSelection();
-            if (!sel || sel.isCollapsed) return;
-            const text = sel.toString().trim();
-            if (text) onSelect?.(text, e);
-          }}
-        >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={{
-              pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-            }}
-          >
-            {block.text}
-          </ReactMarkdown>
-        </div>
-      );
+      return <MarkdownView text={block.text} live={live} onSelect={onSelect} />;
     case "thought":
       return <ThoughtView text={block.text} ms={block.ms} live={live} />;
     case "tool":
@@ -1109,31 +1126,6 @@ function BlockView({
         />
       );
   }
-}
-
-/** 代码块包装：hover 右上角浮现复制按钮（F-7-10 AC-P7-10-2） */
-function CodeBlock({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  return (
-    <div className="code-block-wrap" ref={ref}>
-      <pre>{children}</pre>
-      <button
-        type="button"
-        aria-label="复制代码"
-        className="code-copy"
-        onClick={() => {
-          const code = ref.current?.querySelector("code")?.textContent ?? "";
-          navigator.clipboard?.writeText(code).then(
-            () => toast.success("代码已复制"),
-            () => toast.error("复制失败"),
-          );
-        }}
-      >
-        <CopyIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
-        复制
-      </button>
-    </div>
-  );
 }
 
 function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
