@@ -13,6 +13,7 @@ import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
 import { SearchBar } from "@/chat/components/SearchBar";
+import { QuotePanel, AttachList, DiffCommentsBar, EditBanner } from "@/chat/components/PanelStrips";
 import { Composer } from "@/chat/composer/Composer";
 import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
 import { UsageBar } from "@/chat/components/UsageBar";
@@ -51,7 +52,6 @@ import {
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { AskCard } from "@/chat/components/AskCard";
-import { CloseIcon } from "@/components/ui/icons";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -1071,52 +1071,9 @@ function pickSlash(w: CommandWord) {
       {/* F-9-1 计划栏（输入框上方最上层，DEC-19） */}
       <PlanBar tabKey={tabKey} />
 
-      {/* F-8-2 批注卡列表：多段批注 + 统一发送 */}
-      {quotes.length > 0 && (
-        <div className="quote-panel">
-          {quotes.map((q, i) => (
-            <div key={i} className="quote-card">
-              <span className="quote-index">引用 {i + 1}</span>
-              <div className="quote-text" title={q.text}>{q.text}</div>
-              <input
-                aria-label={`批注疑问 ${i + 1}`}
-                className="quote-input"
-                placeholder="填写疑问或评论…"
-                value={q.question}
-                onChange={(e) => setQuoteQuestion(i, e.target.value)}
-              />
-              <button type="button" className="quote-remove" aria-label={`移除引用 ${i + 1}`} onClick={() => removeQuote(i)}>
-                <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
-              </button>
-            </div>
-          ))}
-          <div className="quote-actions">
-            <span className="quote-hint">已选 {quotes.length} 处</span>
-            <button type="button" className="quote-send" onClick={sendQuotes}>发送批注</button>
-          </div>
-        </div>
-      )}
+      <QuotePanel quotes={quotes} onSetQuestion={setQuoteQuestion} onRemove={removeQuote} onSend={sendQuotes} />
 
-      {/* F-8-3 附件胶囊列表：文件名 + × 移除（拖拽高亮反馈） */}
-      {files.length > 0 && (
-        <div className="attach-list">
-          {files.map((f, i) => (
-            <span key={f.path} className="attach-chip">
-              <span className="attach-name" title={f.path}>
-                {f.path.split("/").filter(Boolean).pop() ?? f.path}
-              </span>
-              <button
-                type="button"
-                className="attach-remove"
-                aria-label={`移除附件 ${i + 1}`}
-                onClick={() => removeFile(i)}
-              >
-                <CloseIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
+      <AttachList files={files} onRemove={removeFile} />
 
       {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
       <CommandQueuePanel tabKey={tabKey} />
@@ -1124,50 +1081,7 @@ function pickSlash(w: CommandWord) {
       {/* F-11-7：文件树移入 RightRail；通过 CustomEvent 接收其「引用」动作注入附件 */}
       {/*（监听挂载在下方 useEffect） */}
 
-      {/* F-12-5 diff 行内评论条带：待发评论徽标 + 展开/删除/单独发送 */}
-      {diffComments.length > 0 && (
-        <div className="diff-comments-bar">
-          <button
-            type="button"
-            aria-expanded={diffCommentsOpen}
-            className="diff-comments-toggle"
-            style={{ transitionDuration: "var(--motion-fast)" }}
-            onClick={() => setDiffCommentsOpen((v) => !v)}
-          >
-            {diffComments.length} 条 diff 评论
-          </button>
-          {diffCommentsOpen && (
-            <div className="diff-comments-list">
-              {diffComments.map((c, i) => (
-                <div key={i} className="diff-comment-item" title={`${c.path}:${c.line} · ${c.lineText}`}>
-                  <span className="diff-comment-loc">
-                    {c.path.split("/").filter(Boolean).pop()}
-                    {c.line > 0 ? `:${c.line}` : ""}
-                  </span>
-                  <span className="diff-comment-text">{c.comment}</span>
-                  <button
-                    type="button"
-                    aria-label={`删除评论 ${i + 1}`}
-                    onClick={() => removeDiffComment(i)}
-                    className="diff-comment-remove"
-                  >
-                    <CloseIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            className="diff-comments-send"
-            style={{ transitionDuration: "var(--motion-fast)" }}
-            onClick={sendDiffComments}
-          >
-            发送评论
-          </button>
-        </div>
-      )}
-
+      <DiffCommentsBar count={diffComments.length} comments={diffComments} open={diffCommentsOpen} onToggle={() => setDiffCommentsOpen((v) => !v)} onRemove={removeDiffComment} onSend={sendDiffComments} />
 
       {/* F-12-2 结构化提问卡：agent 请求输入时插入消息区与输入框之间 */}
       {rt?.ask && (
@@ -1178,20 +1092,7 @@ function pickSlash(w: CommandWord) {
         />
       )}
 
-      {/* F-12-1 编辑态横幅：发送后从该条重新对话（独立条带，位于输入框上方） */}
-      {editTarget && (
-        <div className="edit-banner" data-testid="edit-banner">
-          <span>正在编辑第 {editTarget.index + 1} 条消息，发送后将从此处重新对话</span>
-          <button
-            type="button"
-            aria-label="取消编辑"
-            onClick={cancelEdit}
-            style={{ transitionDuration: "var(--motion-fast)" }}
-          >
-            取消（Esc）
-          </button>
-        </div>
-      )}
+      <EditBanner target={editTarget} onCancel={cancelEdit} />
 
       <Composer
         input={input}
