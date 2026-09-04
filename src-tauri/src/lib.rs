@@ -10,6 +10,7 @@
 mod adapters;
 mod agent;
 mod asr;
+mod connector;
 mod env_path;
 mod fs;
 mod fslist;
@@ -55,6 +56,8 @@ pub fn run() {
             adapters::adapter_available,
             adapters::adapter_status,
             adapters::default_cwd,
+            connector::connector_status,
+            connector::connector_install,
             agent::agent_spawn,
             agent::agent_stdin_write,
             agent::agent_kill,

@@ -203,7 +203,9 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
                     ? a.resolvedPath
                       ? `✓ 可用（${a.resolvedPath}）`
                       : "✓ 可用"
-                    : "✗ 未找到"}
+                    : a.id === "claude-code"
+                      ? "未找到（首次使用时自动安装连接器）"
+                      : "✗ 未找到"}
               </span>
               <button onClick={() => testConnection(a.id)} disabled={a.probing}>
                 {a.probing ? "探测中…" : "测试连接"}

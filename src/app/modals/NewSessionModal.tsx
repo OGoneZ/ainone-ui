@@ -93,8 +93,9 @@ export function NewSessionModal({
         </label>
         {selectedAdapter && !selectedAdapter.available && (
           <p className="ns-hint bad">
-            程序 {selectedAdapter.program} 未找到（已搜索 ~/.local/bin、~/.bun/bin、nvm、登录 shell
-            PATH 与系统 PATH）。请先安装，或在设置中改为绝对路径。
+            {selectedAdapter.id === "claude-code"
+              ? "Claude Code 连接器未找到——首次开始对话时将自动安装（需 bun/node 与网络），并使用已安装的 claude CLI。"
+              : `程序 ${selectedAdapter.program} 未找到（已搜索 ~/.local/bin、~/.bun/bin、nvm、登录 shell PATH 与系统 PATH）。请先安装，或在设置中改为绝对路径。`}
           </p>
         )}
 

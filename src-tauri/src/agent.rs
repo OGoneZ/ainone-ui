@@ -127,6 +127,13 @@ pub fn spawn_inner(
     args: &[String],
     cwd: &str,
 ) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
+    // Claude Code 连接器懒安装兜底：PATH 自装优先；没有则尝试应用管理的连接器
+    //（bun <entry> 形式 spawn），连接器缺失时自动安装（connector.rs）。
+    if program == "claude-agent-acp" && crate::env_path::find_program(program).is_none() {
+        let connector = crate::connector::connector_install(app.to_owned())?;
+        return spawn_connector(app, agent_id, &connector, args, cwd);
+    }
+
     let hit = crate::env_path::find_program(program);
     let resolved = match &hit {
         Some(h) => h.path.clone(),
@@ -148,7 +155,8 @@ pub fn spawn_inner(
         .command(&resolved)
         .args(args)
         .set_raw_out(true)
-        .env("PATH", crate::env_path::enhanced_path());
+        .env("PATH", crate::env_path::enhanced_path())
+        .envs(claude_env_inject());
     if !cwd.is_empty() {
         cmd = cmd.current_dir(cwd);
     }
@@ -159,6 +167,61 @@ pub fn spawn_inner(
         .map_err(|_| "进程表锁中毒".to_string())?
         .insert(agent_id, child);
     Ok(rx)
+}
+
+/// spawn 应用管理的连接器：`bun <entry> <args>`（连接器纯 ESM JS，bun/node 均可跑）。
+fn spawn_connector(
+    app: &AppHandle,
+    agent_id: u64,
+    connector: &crate::connector::ResolvedConnector,
+    args: &[String],
+    cwd: &str,
+) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
+    let runtime = crate::env_path::find_program("bun")
+        .map(|h| h.path)
+        .or_else(|| crate::env_path::find_program("node").map(|h| h.path))
+        .ok_or_else(|| "未找到 bun 或 node 运行时，无法启动 Claude Code 连接器".to_string())?;
+    log::info!(
+        "[agent:{agent_id}] spawn claude-agent-acp(managed v{}) → {} {} {:?} cwd={cwd}",
+        connector.version,
+        runtime.display(),
+        connector.entry,
+        args
+    );
+    let mut cmd = app
+        .shell()
+        .command(&runtime)
+        .arg(&connector.entry)
+        .args(args)
+        .set_raw_out(true)
+        .env("PATH", crate::env_path::enhanced_path())
+        .envs(claude_env_inject());
+    if !cwd.is_empty() {
+        cmd = cmd.current_dir(cwd);
+    }
+    let (rx, child) = cmd
+        .spawn()
+        .map_err(|e| format!("spawn claude-agent-acp 失败: {e}"))?;
+    app.state::<AgentStore>()
+        .0
+        .lock()
+        .map_err(|_| "进程表锁中毒".to_string())?
+        .insert(agent_id, child);
+    Ok(rx)
+}
+
+/// Claude Code 连接器的 claude 二进制定位：注入 CLAUDE_CODE_EXECUTABLE
+/// （acp-agent.js claudeCliPath() 的官方覆盖点）。用户没装 claude 时不注入，
+/// 由连接器报清晰错误引导安装。
+fn claude_env_inject() -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if let Some(hit) = crate::env_path::find_program("claude") {
+        env.push((
+            "CLAUDE_CODE_EXECUTABLE".to_string(),
+            hit.path.to_string_lossy().into_owned(),
+        ));
+    }
+    env
 }
 
 /// 把事件接收端逐条转发到前端 Channel；前端断开则停止。
