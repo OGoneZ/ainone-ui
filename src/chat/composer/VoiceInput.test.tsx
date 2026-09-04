@@ -7,12 +7,12 @@ import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { VoiceInput } from "./VoiceInput";
 
-vi.mock("../ipc/asr", () => ({
+vi.mock("@/ipc/asr", () => ({
   asrTranscribe: vi.fn().mockResolvedValue("这是转写文本"),
 }));
 
 // logger 走 @tauri-apps/plugin-log（依赖 Tauri invoke），jsdom 无 Tauri → mock 掉
-vi.mock("../lib/logger", () => ({
+vi.mock("@/lib/logger", () => ({
   logger: {
     trace: vi.fn(),
     debug: vi.fn(),
