@@ -12,6 +12,7 @@ import { openSession, type AcpSession } from "../acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
+import { SearchBar } from "@/chat/components/SearchBar";
 import { Composer } from "@/chat/composer/Composer";
 import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
 import { UsageBar } from "@/chat/components/UsageBar";
@@ -962,41 +963,23 @@ function pickSlash(w: CommandWord) {
 
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
-      {/* F-9-2 会话内搜索条 */}
-      {searchOpen && (
-        <div className="search-bar">
-          <input
-            ref={searchInputRef}
-            aria-label="搜索会话"
-            className="search-input"
-            placeholder="搜索会话内容…（Enter 下一条 / Shift+Enter 上一条）"
-            value={searchKeyword}
-            onChange={(e) => {
-              setSearchKeyword(e.target.value);
-              setSearchIdx(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                nextHit(1);
-              } else if (e.key === "Enter" && e.shiftKey) {
-                e.preventDefault();
-                nextHit(-1);
-              }
-            }}
-          />
-          <span className="search-count">
-            {searchKeyword.trim()
-              ? searchHits.length > 0
-                ? `${searchIdx % searchHits.length + 1} / ${searchHits.length}`
-                : "无结果"
-              : ""}
-          </span>
-          <button type="button" className="search-close" aria-label="关闭搜索" onClick={closeSearch}>
-            <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
-          </button>
-        </div>
-      )}
+      <SearchBar
+        keyword={searchKeyword}
+        onKeywordChange={(v) => {
+          setSearchKeyword(v);
+          setSearchIdx(0);
+        }}
+        countText={
+          searchKeyword.trim()
+            ? searchHits.length > 0
+              ? `${searchIdx % searchHits.length + 1} / ${searchHits.length}`
+              : "无结果"
+            : ""
+        }
+        inputRef={searchInputRef}
+        onHit={nextHit}
+        onClose={closeSearch}
+      />
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}
