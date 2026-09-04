@@ -64,11 +64,10 @@ export async function probeInitialize(deps: ProbeDeps): Promise<ProbeResult> {
   try {
     const resp = await Promise.race([
       initPromise,
+      // closed 缺省用永不 settle 的占位（不能用立即 throw 的 promise，会秒赢 race）
       closed?.then((c) => {
         throw new Error(`__probe_spawn__${JSON.stringify(c)}`);
-      }) ?? Promise.resolve(undefined as never).then(() => {
-        throw new Error("__probe_spawn__null");
-      }),
+      }) ?? new Promise<never>(() => {}),
       timeoutPromise,
     ]);
     return {
@@ -82,8 +81,12 @@ export async function probeInitialize(deps: ProbeDeps): Promise<ProbeResult> {
       return { ok: false, level: "handshake", message: `initialize 握手超时（${timeoutMs}ms），进程可能卡住` };
     }
     if (msg.startsWith("__probe_spawn__")) {
-      const code = JSON.parse(msg.slice("__probe_spawn__".length)).code as number | null;
-      return { ok: false, level: "spawn", message: spawnFailMessage(code, stderrTail) };
+      try {
+        const code = JSON.parse(msg.slice("__probe_spawn__".length)).code as number | null;
+        return { ok: false, level: "spawn", message: spawnFailMessage(code, stderrTail) };
+      } catch {
+        return { ok: false, level: "spawn", message: spawnFailMessage(null, stderrTail) };
+      }
     }
     // initialize 本身 reject（协议错误/流中断）——区分「进程已死」与「协议失败」
     if (closed) {
