@@ -11,7 +11,7 @@ import type { Workspace } from "@/ipc/workspaces";
 import * as wsMod from "@/ipc/workspaces";
 
 vi.mock("@/ipc/workspaces", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../ipc/workspaces")>();
+  const actual = await importOriginal<typeof import("@/ipc/workspaces")>();
   return {
     ...actual,
     pickDirectory: vi.fn(),

@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { ToolTextView } from "./ChatPanel";
+import { ToolTextView } from "./ToolTextView";
 
 vi.mock("../lib/logger", () => ({
   logger: { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },

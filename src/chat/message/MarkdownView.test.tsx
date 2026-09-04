@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { MarkdownView } from "./ChatPanel";
+import { MarkdownView } from "./MarkdownView";
 
 // logger 走 tauri log 插件（jsdom 无运行时）
 vi.mock("../lib/logger", () => ({
