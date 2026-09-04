@@ -25,7 +25,7 @@ import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "@/ipc/sessions";
 import { parseLog, serializeMessages } from "@/acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "@/acp/turn";
-import { isSlashInput, filterCommands, completeCommand } from "../chat/logic/slash";
+import { completeCommand } from "../chat/logic/slash";
 import {
   flattenWorkspaceFiles,
   filterAtFiles,
@@ -100,13 +100,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [quotes, setQuotes] = useState<Quote[]>([]);
   // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
   const [historyDegraded, setHistoryDegraded] = useState(false);
-  // slash 补全：高亮项下标；菜单展开时默认 0（F-11-1：直接 Enter 即选中首项）
-  const [slashIdx, setSlashIdx] = useState(-1);
   const slashRef = useRef<HTMLTextAreaElement | null>(null);
 
   // F-11-3 @ 文件联想：null = 未展开；展开时为 token 信息
   const [atMenu, setAtMenu] = useState<{ query: string; start: number; end: number } | null>(null);
-  const [atIdx, setAtIdx] = useState(0);
   // @ 数据源：cwd 目录懒加载缓存（与 FileTree 共用 workspaceListDir，形状：路径→子项）
   const [atTree, setAtTree] = useState<Record<string, Array<{ name: string; is_dir: boolean }>>>({});
   const atMenuRef = useRef<HTMLDivElement | null>(null);
@@ -117,24 +114,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文
   const typeText = useTypewriter(typewriterHint(adapter));
 
-  // slash 候选（F-4-7 / F-11-1 模糊匹配）：菜单开合/Esc 关闭状态在 Composer 内部，
-  // ChatPanel 只为滚动跟随近似推断 open 态（isSlashInput(input)）。
-  const slashOpen = isSlashInput(input);
-  const slashMatches = useMemo(
-    () => (slashOpen ? filterCommands(commands, input) : []),
-    [commands, input, slashOpen],
-  );
-  // F-11-1：菜单展开时默认高亮第 0 项（直接 Enter 即选中）
-  const slashHighlight = slashIdx >= 0 && slashIdx < slashMatches.length ? slashIdx : 0;
-
   // @ 候选（F-11-3）：菜单展开才计算（扁平化 + fuzzy 过滤）
   const atMatches = useMemo(() => {
     if (!atMenu) return [];
     const files = flattenWorkspaceFiles(workspaceCwd, atTree);
     return filterAtFiles(files, atMenu.query);
   }, [atMenu, atTree, workspaceCwd]);
-  const atHighlight = atIdx >= 0 && atIdx < atMatches.length ? atIdx : 0;
-
   // @ 菜单展开时确保根目录已加载（懒加载一层；目录选中仅插入路径不展开）
   useEffect(() => {
     if (!atMenu || !workspaceCwd || atTree[workspaceCwd]) return;
@@ -150,18 +135,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       alive = false;
     };
   }, [atMenu, workspaceCwd, atTree]);
-
-  // F-11-1/F-11-3：键盘导航时滚动跟随（菜单容器内滚，不滚页面）
-  useEffect(() => {
-    if (!slashOpen) return;
-    const el = slashMenuRef.current?.querySelector(".slash-item.active") as HTMLElement | null;
-    el?.scrollIntoView?.({ block: "nearest" });
-  }, [slashHighlight, slashOpen]);
-  useEffect(() => {
-    if (!atMenu) return;
-    const el = atMenuRef.current?.querySelector(".slash-item.active") as HTMLElement | null;
-    el?.scrollIntoView?.({ block: "nearest" });
-  }, [atHighlight, atMenu]);
 
   const sessionRef = useRef<AcpSession | null>(null);
   const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
@@ -463,7 +436,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       sessionRef.current?.dispose().catch(() => {});
       sessionRef.current = null;
       setInput("");
-      setSlashIdx(-1);
       setAtMenu(null);
       setFiles([]);
       if (busy) {
@@ -474,7 +446,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       return;
     }
     setInput("");
-    setSlashIdx(-1);
     setAtMenu(null);
     setFiles([]);
     if (files.length > 0) logger.info("chat", "send-with-files", { count: files.length });
@@ -665,7 +636,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // slash 选中回填：命令名回填输入框，光标留在命令后（不自动发送）
   function pickSlash(w: CommandWord) {
     setInput(completeCommand(w));
-    setSlashIdx(-1);
     slashRef.current?.focus();
   }
 
@@ -677,7 +647,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     if (entry.isDir) {
       const relPrefix = `${entry.rel}/`;
       setAtMenu({ query: relPrefix, start: atMenu.start, end: atMenu.end });
-      setAtIdx(0);
       if (!atTree[entry.abs]) {
         workspaceListDir(entry.abs)
           .then((entries) => {
@@ -692,7 +661,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const nextText = applyAtToken(input, atMenu, entry);
     setInput(nextText);
     setAtMenu(null);
-    setAtIdx(0);
     // M7：文件只走「文本 token」路径——submit 时 composeFileReference 会把
     // 附件胶囊再拼一遍 @file:，同一路径会出现两次引用。文本已含该路径 →
     // 不进胶囊。
