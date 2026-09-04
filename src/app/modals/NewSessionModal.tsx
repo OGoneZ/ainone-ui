@@ -3,10 +3,10 @@
 // P7 外壳迁到 shadcn Dialog（受控 + Esc + 遮罩 + 进出场动画）。
 
 import { useEffect, useState } from "react";
-import type { AdapterWithStatus } from "../ipc/adapters";
-import { workspacesUpsert, pickDirectory, type Workspace } from "../ipc/workspaces";
-import { normPath } from "../lib/normPath";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import type { AdapterWithStatus } from "@/ipc/adapters";
+import { workspacesUpsert, pickDirectory, type Workspace } from "@/ipc/workspaces";
+import { normPath } from "@/lib/normPath";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface Props {
   open: boolean;

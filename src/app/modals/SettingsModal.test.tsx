@@ -5,10 +5,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "./SettingsModal";
-import { mockTauriIpc } from "../test/mockIpc";
+import { mockTauriIpc } from "@/test/mockIpc";
 
 // F-8-7：快问配置走独立 Rust 命令，组件测试里 mock 掉（不依赖 Tauri 后端）
-vi.mock("../ipc/quickask", () => ({
+vi.mock("@/ipc/quickask", () => ({
   quickAskConfigGet: vi.fn().mockResolvedValue({
     base_url: "",
     model: "",

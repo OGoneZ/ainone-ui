@@ -9,8 +9,8 @@ import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from 
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./ipc/workspaces";
 import { ChatPanel } from "./components/ChatPanel";
 import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
-import { SettingsModal } from "./components/SettingsModal";
-import { NewSessionModal } from "./components/NewSessionModal";
+import { SettingsModal } from "@/app/modals/SettingsModal";
+import { NewSessionModal } from "@/app/modals/NewSessionModal";
 import { EmptyState } from "./components/EmptyState";
 import { RightRail } from "@/sidebar/RightRail";
 import { AgentAvatar } from "./components/AgentAvatar";
