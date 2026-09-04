@@ -1,0 +1,513 @@
+/* ainone-ui 聊天域样式（P13 C4 自 App.css 按域拆出）。颜色一律取设计令牌。 */
+
+/* —— 聊天面板 —— */
+.chat {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--bg-1);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.harness-badge {
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  margin: 4px 2px;
+}
+
+/* —— 欢迎页 —— */
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.welcome h2 {
+  margin: 0;
+  font-size: 1.4em;
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.suggestion {
+  font-size: 0.85em;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+/* ======================= P9 · F-9-1 计划栏 ======================= */
+.plan-bar {
+  margin: 4px 2px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+
+.plan-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.plan-summary {
+  font-weight: 500;
+}
+
+.plan-list {
+  margin: 0;
+  padding: 0 10px 8px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.plan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-disabled);
+}
+
+.plan-in_progress .plan-dot {
+  background: var(--warning);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.plan-completed .plan-dot {
+  background: var(--success);
+}
+
+.plan-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-completed .plan-content {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+.plan-status {
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* ======================= P9 · F-9-2 会话内搜索 ======================= */
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.search-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.search-close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.search-close:hover {
+  color: var(--text-primary);
+}
+
+/* 命中消息高亮 */
+[data-search-hit="true"] {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ======================= P9 · F-9-3 命令队列 ======================= */
+.queue-panel {
+  margin: 4px 2px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+
+.queue-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.queue-summary {
+  font-weight: 500;
+}
+
+.queue-list {
+  margin: 0;
+  padding: 0 10px 8px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-disabled);
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.queue-grip:hover {
+  color: var(--text-secondary);
+}
+
+.queue-grip-dragging {
+  opacity: 0.4;
+}
+
+.queue-drop-target {
+  outline: 2px dashed var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.queue-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+
+.queue-move {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.queue-move:hover {
+  color: var(--primary);
+}
+
+.queue-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.queue-remove:hover {
+  color: var(--danger);
+}
+
+/* ======================= P11 · F-11-9 上一条指令回跳气泡 ======================= */
+.last-prompt-bubble {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-height: 40px;
+  margin: 0 auto 6px;
+  max-width: 70%;
+  padding: 6px 14px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-full);
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.last-prompt-bubble:hover {
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+/* L2：sticky 于消息区顶部（原为 .panel 兄弟块，显隐推拉内容跳动）。
+ * .chat 是 flex column + overflow-y:auto，sticky top 生效于滚动容器。 */
+.last-prompt-bubble.last-prompt-sticky {
+  position: sticky;
+  top: 6px;
+  z-index: var(--z-sticky, 10);
+  margin: 0 auto 6px;
+  flex-shrink: 0;
+}
+
+/* L2：回跳目标消息短暂高亮（与搜索命中同型的退场动画） */
+.chat [data-flash="true"] {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+  transition: outline-color var(--motion-default) ease-out;
+}
+
+.last-prompt-label {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.last-prompt-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ======================= P12 · F-12-5 diff 评论条带 ======================= */
+.diff-comments-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px;
+  font-size: 12px;
+}
+
+.diff-comments-toggle {
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out-soft),
+    transform var(--motion-fast) var(--ease-out-soft);
+}
+
+.diff-comments-toggle:hover {
+  background: var(--bg-3);
+}
+
+.diff-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-comment-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+
+.diff-comment-loc {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.diff-comment-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-comment-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.diff-comment-remove:hover {
+  color: var(--danger);
+}
+
+.diff-comments-send {
+  flex-shrink: 0;
+  border: none;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-out-express),
+    filter var(--motion-fast) var(--ease-out-soft);
+}
+
+.diff-comments-send:hover {
+  filter: brightness(1.08);
+}
+
+.diff-comments-send:active {
+  transform: scale(0.96);
+}
+
+/* 已评论 diff 行：左侧色条标记 */
+.diff-line[data-commented="true"] {
+  box-shadow: inset 2px 0 0 var(--warning);
+}
+
+.diff-comment-btn {
+  align-self: center;
+}
+
+/* ======================= F-12-2 提问卡（灵动悬浮卡） ======================= */
+.ask-card {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.ask-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-question-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ask-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--motion-fast) var(--ease-out-soft);
+}
+
+.ask-option:hover {
+  background: var(--bg-hover);
+}
+
+.ask-option:has(input:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  outline-offset: 1px;
+}
+
+.ask-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ask-other-input {
+  margin-left: 22px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+
+.ask-other-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.ask-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ask-answered {
+  align-self: flex-end;
+  font-size: 12px;
+  color: var(--success);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}

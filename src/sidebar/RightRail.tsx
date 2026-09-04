@@ -12,6 +12,7 @@ import { collectModifiedPaths } from "@/lib/fileTree";
 import type { ChatMsg } from "@/acp/message-log";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import { logger } from "@/lib/logger";
+import "@/sidebar/sidebar.css";
 
 export type RailTab = "meta" | "files";
 

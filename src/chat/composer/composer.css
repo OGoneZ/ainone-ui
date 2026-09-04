@@ -1,0 +1,226 @@
+/* ainone-ui 输入区样式（P13 C4 自 App.css 按域拆出）。颜色一律取设计令牌。 */
+
+/* —— slash 补全菜单 —— */
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg-1);
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-float);
+  padding: 4px;
+}
+
+.slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.slash-item.active {
+  background: var(--bg-hover);
+}
+
+.slash-name {
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.slash-desc {
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ======================= P8 · F-8-7 快问悬浮窗 ======================= */
+/* 外观单一归宿：基础盒模型在此；背景/边框由下方 F-12-6b 毛玻璃渐进增强块统一管理 */
+.quick-pop {
+  min-width: 240px;
+  max-width: 360px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-pop-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.quick-pop-sel {
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 2px solid var(--bg-3);
+  padding-left: 8px;
+  max-height: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quick-pop-body {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.quick-pop-error {
+  color: var(--danger);
+}
+
+.quick-pop-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.quick-pop-actions button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.quick-pop-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ======================= P8 · F-8-3 文件引用 ======================= */
+.attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 2px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.attach-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+}
+
+.attach-remove:hover {
+  color: var(--danger);
+}
+
+.attach-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.attach-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* 拖拽悬停高亮：整个面板描边 */
+.panel[data-dragging="true"] {
+  outline: 2px dashed var(--primary);
+  outline-offset: -4px;
+  border-radius: var(--radius);
+}
+
+
+/* —— 悬浮输入框（F-10-4）—— */
+.input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.input-wrap textarea {
+  width: 100%;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: flex-end;
+  /* F-10-4 悬浮输入框：半透明 + 背景模糊 + 圆角 + 浮起阴影 */
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg-1) 82%, transparent);
+  backdrop-filter: blur(var(--blur-panel));
+  -webkit-backdrop-filter: blur(var(--blur-panel));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+
+/* 悬浮容器内的输入框融入半透明底（否则不透明方块盖住 blur） */
+.row textarea {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.row textarea:focus {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--bg-1) 60%, transparent);
+}
+
+/* ④ 悬浮毛玻璃卡（渐进增强：实底兜底，支持时才叠加 blur + 半透明） */
+.quick-pop {
+  background: var(--bg-1);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .quick-pop {
+    background: color-mix(in srgb, var(--bg-1) 78%, transparent);
+    backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+    border: 1px solid color-mix(in srgb, var(--bg-3) 70%, transparent);
+  }
+}

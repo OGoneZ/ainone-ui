@@ -34,7 +34,7 @@ import { useSessionStore } from "./store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "./sidebar/logic/sessionStatus";
 import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf } from "./app/logic/layout";
 import { logger } from "./lib/logger";
-import "./App.css";
+
 
 /** 侧栏会话行 leading 槽：harness logo + 状态角标（F-8-1 收尾，融合 F-7-7 状态机） */
 function SessionRowLeading({ adapter, st }: { adapter: AdapterWithStatus | undefined; st: SessionStatus }) {

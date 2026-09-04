@@ -1,3 +1,6 @@
+/* P13 C4：应用壳层样式拆至 app/app.css（壳/侧栏/顶栏/表单/微交互横切） */
+@import "./app/app.css";
+
 @import "tailwindcss";
 @import "tw-animate-css";
 

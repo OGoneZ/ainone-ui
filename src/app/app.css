@@ -1,0 +1,513 @@
+/* ainone-ui 应用壳层样式（P13 C4 自 App.css 按域拆出）。
+ * 颜色一律取 src/index.css 的设计令牌（var(--*)），本文件不再出现裸色值。
+ * 深色主题由 :root[data-theme="dark"] 换令牌值自动生效。
+ * 灵动微交互（F-12-6b）是跨域横切，随壳层引入。 */
+
+/* —— 应用壳 —— */
+/* 原 .container 类已删除：与 Tailwind v4 内置 container 工具类同名冲突，
+ * 被 max-width/display 覆盖导致根布局塌陷（窗口放大内容不跟随的根因）。
+ * 根容器改用 Tailwind 工具类（见 App.tsx <main>）。 */
+
+.hint {
+  margin: 0 0 12px;
+  font-size: 0.8em;
+  color: var(--text-secondary);
+}
+
+.hint.degraded {
+  color: var(--warning);
+}
+
+/* —— 顶栏工具行 —— */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.toolbar label {
+  font-size: 0.9em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar .theme-select {
+  font-size: 0.85em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar .settings-btn {
+  margin-left: auto;
+}
+
+select {
+  font-family: inherit;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: inherit;
+}
+
+/* —— 多 Tab 工作区：左侧栏 + 内容区 —— */
+.workspace {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--bg-1);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sidebar h3 {
+  margin: 0 0 8px;
+  font-size: 0.9em;
+}
+
+.add-ws {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.add-ws:hover {
+  color: var(--primary);
+  opacity: 0.8;
+}
+
+/* —— 工作区分组 —— */
+.ws-group {
+  margin-bottom: 10px;
+}
+
+.ws-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 0.88em;
+  cursor: context-menu;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.ws-head:hover {
+  background: var(--bg-hover);
+}
+
+.ws-icon {
+  font-size: 0.9em;
+}
+
+.ws-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-count {
+  color: var(--text-secondary);
+  font-size: 0.8em;
+}
+
+.ws-rename {
+  flex: 1;
+  font-size: 0.9em;
+  padding: 2px 4px;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+}
+
+.ws-sessions {
+  padding-left: 14px;
+}
+
+.ws-empty {
+  margin: 0 0 4px;
+}
+
+/* —— 会话行 —— */
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* working / awaiting 高亮边（F-6-2 的既有语义，P7 保留） */
+.history-item.status-working {
+  border-left: 3px solid var(--primary);
+  padding-left: 4px;
+}
+
+.history-item.status-awaiting_input {
+  border-left: 3px solid var(--warning);
+  padding-left: 4px;
+}
+
+/* —— H5 修复：会话行状态角标（F-8-1 复用 F-7-7 状态机）——
+ * App.tsx 的 SessionRowLeading 在头像右下角渲染 status-dot，
+ * 三个状态类曾在 P7 迁移中被当死类删除、P8 又把 JSX 加回，此处补回样式。
+ * working=品牌色呼吸脉冲、awaiting_input=警告色 wiggle（复用 index.css keyframes）。 */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--bg-1);
+  box-sizing: border-box;
+}
+.status-dot.dot-working {
+  background: var(--primary);
+  animation: dot-pulse 1.4s ease-in-out infinite;
+}
+.status-dot.dot-awaiting_input {
+  background: var(--warning);
+  animation: wiggle 3s ease-in-out infinite;
+  transform-origin: center;
+}
+.status-dot.dot-done {
+  background: var(--bg-3);
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 0%, transparent);
+  }
+}
+
+/* reduced-motion：呼吸/摇动全部短路（F-7-11 全局开关已覆盖 animation，此处兜底显色） */
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.dot-working,
+  .status-dot.dot-awaiting_input {
+    animation: none;
+  }
+}
+
+.history-open {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: inherit;
+  font-size: 0.85em;
+}
+
+.history-open:hover {
+  background: var(--bg-hover);
+  border-radius: 4px;
+}
+
+.history-del {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.history-del:hover {
+  color: var(--danger);
+}
+
+/* —— Tab 区（P10 迁移到 flexlayout，.tabs-area 仍是外层容器；旧 .tab/.tabs-bar 已废弃删除）—— */
+.tabs-area {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+  gap: 8px;
+}
+
+/* flexlayout 宿主填充剩余空间（tab 栏 + 内容由 flexlayout 内部渲染） */
+.layout-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* —— 原生表单控件（shadcn Button 之外的 input/textarea/button）—— */
+input,
+textarea,
+button {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  padding: 0.6em 1em;
+  font-size: 1em;
+  font-family: inherit;
+  color: var(--text-primary);
+  background-color: var(--bg-1);
+}
+
+textarea {
+  resize: none;
+  line-height: 1.4;
+}
+
+button {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+/* —— 新建会话弹层表单 —— */
+.ns-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9em;
+}
+
+/* 权限审批对话框里的行内代码（P7 F-7-8） */
+.perm-code {
+  margin: 0;
+}
+
+.perm-code code {
+  font-size: 0.85em;
+  background: var(--bg-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ns-label select {
+  font-family: inherit;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: inherit;
+}
+
+.ns-new-ws {
+  align-self: flex-start;
+}
+
+/* —— 设置弹层（外壳已迁 shadcn Dialog，此处仅表单布局）—— */
+.modal-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-1));
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  margin: 0;
+}
+
+.adapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.adapter-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+.adapter-row input,
+.adapter-row textarea {
+  font-family: inherit;
+  font-size: 0.85em;
+  padding: 4px 6px;
+  border: 1px solid var(--bg-3);
+  border-radius: 5px;
+}
+
+.adapter-row textarea {
+  grid-column: 1 / -1;
+  resize: vertical;
+}
+
+.adapter-row .ok {
+  color: var(--success);
+}
+
+.adapter-row .bad {
+  color: var(--danger);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ======================= P8 · F-8-7 快问模型配置 ======================= */
+.quickask-config {
+  border-top: 1px solid var(--bg-3);
+  margin-top: 4px;
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quickask-config h3 {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+/* ======================= P12 · F-12-6b 灵动微交互（DEC-40 五类） ======================= */
+/* ① 卡片 hover 抬升：消息气泡 / 侧栏会话行 / 面板卡 */
+.user-bubble,
+.agent-card-hover {
+  transition: transform var(--motion-fast) var(--ease-out-soft),
+    box-shadow var(--motion-fast) var(--ease-out-soft);
+}
+
+.user-bubble:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ② 按压回弹：全局按钮（含 shadcn Button 与原生 button） */
+button:not(:disabled):active {
+  transition-duration: var(--motion-fast);
+}
+
+/* ③ 面板/弹层入场：提问卡 / 快问悬浮窗 / slash 菜单 / 评论条带 */
+.activity-group,
+.quick-pop,
+.slash-menu,
+.diff-comments-bar {
+  animation: p12-pop-in var(--motion-default) var(--ease-out-soft);
+}
+
+@keyframes p12-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ⑤ reduced-motion 全局短路：新动画一并瞬时完成 */
+@media (prefers-reduced-motion: reduce) {
+  .activity-group,
+  .quick-pop,
+  .slash-menu,
+  .diff-comments-bar {
+    animation: none;
+  }
+
+  .user-bubble,
+  .agent-card-hover,
+  .diff-comments-send,
+  .diff-comments-toggle {
+    transition: none;
+  }
+
+  .user-bubble:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* F-12-1 编辑态横幅（输入框上方独立条带） */
+.edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 2px 0;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  animation: p12-pop-in var(--motion-default) var(--ease-out-soft);
+}
+
+.edit-banner button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.edit-banner button:hover {
+  background: var(--bg-hover, var(--bg-3));
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-banner {
+    animation: none;
+  }
+}
+
+/* F-12-6a 上下文用量进度条（三态着色经 --usage-color 注入） */
+.usage-bar {
+  display: inline-flex;
+  align-items: center;
+}
+
+.usage-bar [data-slot="progress"] {
+  background: var(--bg-3);
+}
+
+.usage-bar [data-slot="progress-indicator"] {
+  background: var(--usage-color, var(--primary));
+}
+

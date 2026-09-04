@@ -55,6 +55,9 @@ import { CloseIcon } from "./ui/icons";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
+import "@/chat/chat.css";
+import "@/chat/message/messages.css";
+import "@/chat/composer/composer.css";
 
 interface Props {
   tabKey: string;
