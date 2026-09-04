@@ -7,7 +7,7 @@ import { Layout, Model, Actions, DockLocation, type TabNode } from "flexlayout-r
 import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "@/ipc/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "@/ipc/workspaces";
-import { ChatPanel } from "@/components/ChatPanel";
+import { ChatPanel } from "@/chat/ChatPanel";
 import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
 import { SettingsModal } from "@/app/modals/SettingsModal";
 import { NewSessionModal } from "@/app/modals/NewSessionModal";

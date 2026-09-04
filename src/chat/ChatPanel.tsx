@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { openSession, type AcpSession } from "../acp/session";
+import { openSession, type AcpSession } from "@/acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
@@ -20,40 +20,40 @@ import { Welcome } from "@/chat/Welcome";
 import { MessageLine } from "@/chat/message/MessageLine";
 import { useTypewriter } from "@/chat/hooks/useTypewriter";
 import { useQueueStore } from "@/store/queueStore";
-import { logRead, logAppend, logTruncate, logCopy } from "../ipc/sessions";
-import { parseLog, serializeMessages } from "../acp/message-log";
-import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
+import { logRead, logAppend, logTruncate, logCopy } from "@/ipc/sessions";
+import { parseLog, serializeMessages } from "@/acp/message-log";
+import { newTurn, applyEvent, type TurnAccumulator } from "@/acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../chat/logic/slash";
 import {
   flattenWorkspaceFiles,
   filterAtFiles,
   applyAtToken,
 } from "../chat/logic/atFile";
-import { workspaceListDir } from "../ipc/fslist";
-import { filterExcluded } from "../lib/fileTree";
+import { workspaceListDir } from "@/ipc/fslist";
+import { filterExcluded } from "@/lib/fileTree";
 import { composeQuotedPrompt, type Quote } from "../chat/logic/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../chat/logic/fileRef";
-import { truncateToMessageIndex } from "../acp/rewind";
+import { truncateToMessageIndex } from "@/acp/rewind";
 import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../chat/logic/lastPrompt";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
 import { searchMessages } from "../chat/logic/search";
 import { typewriterHint } from "../chat/logic/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
-import { logger } from "../lib/logger";
-import { quickAsk, quickAskConfigGet } from "../ipc/quickask";
+import { logger } from "@/lib/logger";
+import { quickAsk, quickAskConfigGet } from "@/ipc/quickask";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   useSessionStore,
   type CommandWord,
-} from "../store/sessionStore";
-import type { AdapterWithStatus } from "../ipc/adapters";
-import { AgentAvatar } from "./AgentAvatar";
+} from "@/store/sessionStore";
+import type { AdapterWithStatus } from "@/ipc/adapters";
+import { AgentAvatar } from "@/components/AgentAvatar";
 import { AskCard } from "@/chat/components/AskCard";
-import { CloseIcon } from "./ui/icons";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
-import { Button } from "./ui/button";
+import { CloseIcon } from "@/components/ui/icons";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import "@/chat/chat.css";
 import "@/chat/message/messages.css";

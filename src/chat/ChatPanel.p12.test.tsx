@@ -5,7 +5,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ChatPanel } from "./ChatPanel";
+import { ChatPanel } from "@/chat/ChatPanel";
 import { openSession } from "../acp/session";
 import { useSessionStore } from "../store/sessionStore";
 import { logger } from "../lib/logger";

@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ChatPanel } from "./ChatPanel";
+import { ChatPanel } from "@/chat/ChatPanel";
 import { useSessionStore } from "../store/sessionStore";
 import { openSession } from "../acp/session";
 import { open } from "@tauri-apps/plugin-dialog";
