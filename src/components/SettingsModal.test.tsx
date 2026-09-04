@@ -8,7 +8,7 @@ import { SettingsModal } from "./SettingsModal";
 import { mockTauriIpc } from "../test/mockIpc";
 
 // F-8-7：快问配置走独立 Rust 命令，组件测试里 mock 掉（不依赖 Tauri 后端）
-vi.mock("../config/quickask", () => ({
+vi.mock("../ipc/quickask", () => ({
   quickAskConfigGet: vi.fn().mockResolvedValue({
     base_url: "",
     model: "",

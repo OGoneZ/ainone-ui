@@ -4,8 +4,8 @@
 
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Adapter } from "../config/adapters";
-import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "../config/quickask";
+import type { Adapter } from "../ipc/adapters";
+import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "../ipc/quickask";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface Props {

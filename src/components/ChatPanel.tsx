@@ -25,7 +25,7 @@ import { CommandQueuePanel } from "./CommandQueuePanel";
 import { VoiceInput } from "./VoiceInput";
 import { UsageBar } from "./UsageBar";
 import { useQueueStore } from "../store/queueStore";
-import { logRead, logAppend, logTruncate, logCopy } from "../config/sessions";
+import { logRead, logAppend, logTruncate, logCopy } from "../ipc/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
@@ -35,7 +35,7 @@ import {
   filterAtFiles,
   applyAtToken,
 } from "../acp/atFile";
-import { workspaceListDir } from "../config/fslist";
+import { workspaceListDir } from "../ipc/fslist";
 import { filterExcluded } from "../acp/fileTree";
 import { composeQuotedPrompt, type Quote } from "../acp/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
@@ -50,7 +50,7 @@ import { prettyJson } from "../acp/toolFormat";
 import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
 import { logger } from "../lib/logger";
-import { quickAsk, quickAskConfigGet } from "../config/quickask";
+import { quickAsk, quickAskConfigGet } from "../ipc/quickask";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
@@ -59,7 +59,7 @@ import {
   type CommandWord,
 } from "../store/sessionStore";
 import type { ToolContent } from "../acp/session-core";
-import type { AdapterWithStatus } from "../config/adapters";
+import type { AdapterWithStatus } from "../ipc/adapters";
 import { AgentAvatar } from "./AgentAvatar";
 import { AskCard } from "./AskCard";
 import {

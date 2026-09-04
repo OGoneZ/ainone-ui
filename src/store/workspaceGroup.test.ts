@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { groupSessions } from "./workspaceGroup";
-import type { Workspace } from "../config/workspaces";
-import type { SessionEntry } from "../config/sessions";
+import type { Workspace } from "../ipc/workspaces";
+import type { SessionEntry } from "../ipc/sessions";
 
 const ws = (id: string, name: string, cwd: string): Workspace => ({
   id,

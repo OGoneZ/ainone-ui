@@ -4,9 +4,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layout, Model, Actions, DockLocation, type TabNode } from "flexlayout-react";
-import { listAdapters, type AdapterWithStatus } from "./config/adapters";
-import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./config/sessions";
-import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./config/workspaces";
+import { listAdapters, type AdapterWithStatus } from "./ipc/adapters";
+import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./ipc/sessions";
+import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./ipc/workspaces";
 import { ChatPanel } from "./components/ChatPanel";
 import { GlobalSearchDialog } from "./components/GlobalSearchDialog";
 import { SettingsModal } from "./components/SettingsModal";

@@ -3,7 +3,7 @@
 //   - welcomeGreeting：按小时给出时间段问候（早上好/下午好/晚上好）
 //   - suggestionsFor：按 adapter 给出差异化建议 prompt
 
-import type { AdapterWithStatus } from "../config/adapters";
+import type { AdapterWithStatus } from "../ipc/adapters";
 
 /** 按小时（0-23）返回问候语 */
 export function welcomeGreeting(hour: number): string {

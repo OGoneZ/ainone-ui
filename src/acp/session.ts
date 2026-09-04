@@ -14,7 +14,7 @@ import {
   type ElicitationHandler,
 } from "./session-core";
 import { logger } from "../lib/logger";
-import type { Adapter } from "../config/adapters";
+import type { Adapter } from "../ipc/adapters";
 
 export type { AcpSession, PermissionDecision, ElicitationHandler, Outgoing } from "./session-core";
 

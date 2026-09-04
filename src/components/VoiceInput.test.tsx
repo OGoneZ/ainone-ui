@@ -7,7 +7,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { VoiceInput } from "./VoiceInput";
 
-vi.mock("../config/asr", () => ({
+vi.mock("../ipc/asr", () => ({
   asrTranscribe: vi.fn().mockResolvedValue("这是转写文本"),
 }));
 
@@ -22,7 +22,7 @@ vi.mock("../lib/logger", () => ({
   },
 }));
 
-import { asrTranscribe } from "../config/asr";
+import { asrTranscribe } from "../ipc/asr";
 
 class FakeRecorder {
   static instances: FakeRecorder[] = [];

@@ -15,7 +15,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { openSession } from "../acp/session";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AcpSession } from "../acp/session";
-import type { AdapterWithStatus } from "../config/adapters";
+import type { AdapterWithStatus } from "../ipc/adapters";
 
 vi.mock("../acp/session", () => ({
   openSession: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
 }));
 
 // F-8-7 快问：mock 配置与调用（组件内挂载即读配置）
-vi.mock("../config/quickask", () => ({
+vi.mock("../ipc/quickask", () => ({
   quickAskConfigGet: vi.fn().mockResolvedValue({
     base_url: "https://qa.example.com/v1",
     model: "qa-model",

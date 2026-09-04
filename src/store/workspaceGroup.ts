@@ -6,8 +6,8 @@
 //   - 空工作区仍然占一个父级（F-5-1「空工作区显示为单行父级标题」）
 //   - 未归组组仅在非空时产出（不显示空列）
 
-import type { Workspace } from "../config/workspaces";
-import type { SessionEntry } from "../config/sessions";
+import type { Workspace } from "../ipc/workspaces";
+import type { SessionEntry } from "../ipc/sessions";
 
 export interface GroupedSessions {
   workspace: Workspace | null; // null = 未归组

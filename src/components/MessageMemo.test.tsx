@@ -8,7 +8,7 @@ import { render, cleanup } from "@testing-library/react";
 import { memo } from "react";
 import { MessageLine } from "./ChatPanel";
 import { useSessionStore, type ChatMsg } from "../store/sessionStore";
-import type { AdapterWithStatus } from "../config/adapters";
+import type { AdapterWithStatus } from "../ipc/adapters";
 
 vi.mock("../lib/logger", () => ({
   logger: { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },

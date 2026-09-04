@@ -6,12 +6,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewSessionModal } from "./NewSessionModal";
-import type { AdapterWithStatus } from "../config/adapters";
-import type { Workspace } from "../config/workspaces";
-import * as wsMod from "../config/workspaces";
+import type { AdapterWithStatus } from "../ipc/adapters";
+import type { Workspace } from "../ipc/workspaces";
+import * as wsMod from "../ipc/workspaces";
 
-vi.mock("../config/workspaces", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../config/workspaces")>();
+vi.mock("../ipc/workspaces", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../ipc/workspaces")>();
   return {
     ...actual,
     pickDirectory: vi.fn(),

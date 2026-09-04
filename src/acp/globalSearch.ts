@@ -6,7 +6,7 @@
 
 import { filterPathsFuzzy } from "./fuzzy";
 
-/** 与 config/sessions.ts SessionEntry 对齐的最小字段（避免引 Tauri 依赖） */
+/** 与 ipc/sessions.ts SessionEntry 对齐的最小字段（避免引 Tauri 依赖） */
 export interface SearchableSession {
   session_id: string;
   adapter_id: string;

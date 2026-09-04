@@ -4,14 +4,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GlobalSearchDialog } from "./GlobalSearchDialog";
-import { sessionsList } from "../config/sessions";
-import { listAdapters } from "../config/adapters";
-import type { SessionEntry } from "../config/sessions";
+import { sessionsList } from "../ipc/sessions";
+import { listAdapters } from "../ipc/adapters";
+import type { SessionEntry } from "../ipc/sessions";
 
-vi.mock("../config/sessions", () => ({
+vi.mock("../ipc/sessions", () => ({
   sessionsList: vi.fn(),
 }));
-vi.mock("../config/adapters", () => ({
+vi.mock("../ipc/adapters", () => ({
   listAdapters: vi.fn(),
 }));
 vi.mock("../lib/logger", () => ({

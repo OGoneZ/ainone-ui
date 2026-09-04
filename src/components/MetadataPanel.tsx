@@ -12,7 +12,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { usagePercent } from "../acp/metadata";
 import { extractModel } from "../acp/metadata";
 import { ChevronRightIcon, CloseIcon } from "./ui/icons";
-import type { AdapterWithStatus } from "../config/adapters";
+import type { AdapterWithStatus } from "../ipc/adapters";
 
 interface Props {
   tabKey: string;

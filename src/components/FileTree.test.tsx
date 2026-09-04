@@ -7,11 +7,11 @@ import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FileTree } from "./FileTree";
 
-vi.mock("../config/fslist", () => ({
+vi.mock("../ipc/fslist", () => ({
   workspaceListDir: vi.fn(),
 }));
 
-import { workspaceListDir } from "../config/fslist";
+import { workspaceListDir } from "../ipc/fslist";
 const mockList = vi.mocked(workspaceListDir);
 
 beforeEach(() => {

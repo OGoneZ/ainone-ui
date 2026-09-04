@@ -8,7 +8,7 @@ import { useSessionStore, type ChatMsg, type CommandWord } from "../store/sessio
 import type { BlockMsg } from "../acp/message-log";
 import type { ToolContent } from "../acp/session-core";
 import { ChatPanel } from "../components/ChatPanel";
-import type { AdapterWithStatus } from "../config/adapters";
+import type { AdapterWithStatus } from "../ipc/adapters";
 
 // —— 样例文本块 ——————————————————————————————————————————————
 

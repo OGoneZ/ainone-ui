@@ -10,7 +10,7 @@ import { MetadataPanel } from "./MetadataPanel";
 import { FileTree } from "./FileTree";
 import { collectModifiedPaths } from "../acp/fileTree";
 import type { ChatMsg } from "../acp/message-log";
-import type { AdapterWithStatus } from "../config/adapters";
+import type { AdapterWithStatus } from "../ipc/adapters";
 import { logger } from "../lib/logger";
 
 export type RailTab = "meta" | "files";
