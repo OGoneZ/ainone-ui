@@ -4,7 +4,7 @@
 // 搜标题≈搜话题。前端拉全量后 fuzzy 过滤（DEC-25 fuzzysort 封装）。
 // 空查询 = 最近 mtime 前 N 条（默认 20）。
 
-import { filterPathsFuzzy } from "@/chat/logic/fuzzy";
+import { filterPathsFuzzy } from "./fuzzy";
 
 /** 与 ipc/sessions.ts SessionEntry 对齐的最小字段（避免引 Tauri 依赖） */
 export interface SearchableSession {

@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "./ui/command";
 import { AgentAvatar } from "./AgentAvatar";
 import { sessionsList, type SessionEntry } from "../ipc/sessions";
-import { filterSessions, relativeTime, type SearchableSession } from "../acp/globalSearch";
+import { filterSessions, relativeTime, type SearchableSession } from "../chat/logic/globalSearch";
 import { logger } from "../lib/logger";
 
 import { listAdapters, type AdapterWithStatus } from "../ipc/adapters";
