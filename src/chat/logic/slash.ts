@@ -6,7 +6,7 @@
 // 选中后回填 `/<name> `（含尾随空格），光标由 UI 移到命令后供补参数；
 // 命令始终作为普通文本发给 harness 解释（不本地执行）。
 
-import type { CommandWord } from "../store/sessionStore";
+import type { CommandWord } from "@/store/sessionStore";
 import { filterFuzzy } from "./fuzzy";
 
 /** 是否处于命令补全态 */

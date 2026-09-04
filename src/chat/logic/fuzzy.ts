@@ -10,7 +10,7 @@
 // 本模块只做两层薄封装：命令列表过滤（slash）与文件路径过滤（@），供两处复用。
 
 import fuzzysort from "fuzzysort";
-import type { CommandWord } from "../store/sessionStore";
+import type { CommandWord } from "@/store/sessionStore";
 
 export interface FuzzyHit<T> {
   item: T;

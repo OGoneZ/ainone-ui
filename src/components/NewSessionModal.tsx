@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { AdapterWithStatus } from "../ipc/adapters";
 import { workspacesUpsert, pickDirectory, type Workspace } from "../ipc/workspaces";
-import { normPath } from "../store/normPath";
+import { normPath } from "../lib/normPath";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface Props {

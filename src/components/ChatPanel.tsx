@@ -19,36 +19,36 @@ import AnsiPkg from "ansi-to-react";
 const Ansi = (AnsiPkg as unknown as { default?: typeof AnsiPkg }).default ?? AnsiPkg;
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
-import { type AskAnswer, type AskQuestion } from "../acp/askCard";
+import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "./PlanBar";
 import { CommandQueuePanel } from "./CommandQueuePanel";
 import { VoiceInput } from "./VoiceInput";
 import { UsageBar } from "./UsageBar";
-import { useQueueStore } from "../store/queueStore";
+import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "../ipc/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
-import { isSlashInput, filterCommands, completeCommand } from "../acp/slash";
+import { isSlashInput, filterCommands, completeCommand } from "../chat/logic/slash";
 import {
   detectAtToken,
   flattenWorkspaceFiles,
   filterAtFiles,
   applyAtToken,
-} from "../acp/atFile";
+} from "../chat/logic/atFile";
 import { workspaceListDir } from "../ipc/fslist";
-import { filterExcluded } from "../acp/fileTree";
-import { composeQuotedPrompt, type Quote } from "../acp/quote";
-import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../acp/fileRef";
+import { filterExcluded } from "../lib/fileTree";
+import { composeQuotedPrompt, type Quote } from "../chat/logic/quote";
+import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../chat/logic/fileRef";
 import { truncateToMessageIndex } from "../acp/rewind";
-import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../acp/lastPrompt";
-import { truncateMessagesToEdit } from "../acp/edit-resend";
-import { composeDiffComments, type DiffComment } from "../acp/diffComments";
-import { buildActivityGroups, type RenderItem } from "../acp/activity";
-import { aggregateFileChanges } from "../acp/fileChanges";
-import { searchMessages } from "../acp/search";
+import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../chat/logic/lastPrompt";
+import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
+import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
+import { buildActivityGroups, type RenderItem } from "../chat/logic/activity";
+import { aggregateFileChanges } from "../chat/logic/fileChanges";
+import { searchMessages } from "../chat/logic/search";
 import { prettyJson } from "../acp/toolFormat";
-import { welcomeGreeting, suggestionsFor, typewriterHint } from "../store/welcome";
-import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../store/recycle";
+import { welcomeGreeting, suggestionsFor, typewriterHint } from "../chat/logic/welcome";
+import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
 import { logger } from "../lib/logger";
 import { quickAsk, quickAskConfigGet } from "../ipc/quickask";
 import { open } from "@tauri-apps/plugin-dialog";

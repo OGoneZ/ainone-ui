@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { truncateMessagesToEdit } from "./edit-resend";
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 const msgs: ChatMsg[] = [
   { role: "user", text: "问题一" },

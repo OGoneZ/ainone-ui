@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CommandQueuePanel } from "./CommandQueuePanel";
-import { useQueueStore } from "../store/queueStore";
+import { useQueueStore } from "@/store/queueStore";
 
 beforeEach(() => {
   useQueueStore.setState({ queues: {} });

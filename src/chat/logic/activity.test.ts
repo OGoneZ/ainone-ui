@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildActivityGroups, type RenderItem } from "./activity";
-import type { BlockMsg } from "./message-log";
+import type { BlockMsg } from "@/acp/message-log";
 
 const t = (id: string, status = "completed"): BlockMsg => ({
   kind: "tool",

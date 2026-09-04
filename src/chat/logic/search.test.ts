@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 import { searchMessages, messageSearchText } from "./search";
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 describe("messageSearchText", () => {
   it("user 消息 → 原文", () => {

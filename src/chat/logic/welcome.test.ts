@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { welcomeGreeting, suggestionsFor } from "./welcome";
-import type { AdapterWithStatus } from "../ipc/adapters";
+import type { AdapterWithStatus } from "@/ipc/adapters";
 
 const adapter = (name: string): AdapterWithStatus => ({
   id: "x",

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { filterFuzzy, filterCommandsFuzzy, filterPathsFuzzy } from "./fuzzy";
-import type { CommandWord } from "../store/sessionStore";
+import type { CommandWord } from "@/store/sessionStore";
 
 const words: CommandWord[] = [
   { name: "clear", description: "清屏" },

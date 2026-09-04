@@ -1,6 +1,6 @@
 // 顶部「上一条指令」回跳纯逻辑（P11 · F-11-9）。零依赖，可单测。
 
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 /** 最后一条 user 消息下标（无则 -1） */
 export function lastUserIndex(messages: ChatMsg[]): number {

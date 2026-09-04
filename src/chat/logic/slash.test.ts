@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isSlashInput, filterCommands, completeCommand } from "./slash";
-import type { CommandWord } from "../store/sessionStore";
+import type { CommandWord } from "@/store/sessionStore";
 
 const words: CommandWord[] = [
   { name: "model", description: "显示模型" },

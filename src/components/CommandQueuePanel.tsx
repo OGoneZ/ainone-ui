@@ -2,7 +2,7 @@
 // 条目可编辑、删除、上移/下移、拖拽重排；容量上限 10（超出 toaster 提示不静默丢弃）。
 
 import { useState } from "react";
-import { useQueueStore } from "../store/queueStore";
+import { useQueueStore } from "@/store/queueStore";
 import { ChevronRightIcon, CloseIcon, GripVerticalIcon } from "./ui/icons";
 
 interface Props {

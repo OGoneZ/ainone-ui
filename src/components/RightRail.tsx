@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MetadataPanel } from "./MetadataPanel";
 import { FileTree } from "./FileTree";
-import { collectModifiedPaths } from "../acp/fileTree";
+import { collectModifiedPaths } from "../lib/fileTree";
 import type { ChatMsg } from "../acp/message-log";
 import type { AdapterWithStatus } from "../ipc/adapters";
 import { logger } from "../lib/logger";

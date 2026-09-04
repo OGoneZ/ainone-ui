@@ -9,9 +9,9 @@
 import { filterPathsFuzzy } from "./fuzzy";
 
 export interface AtFileEntry {
-  /** 相对 cwd 路径（展示与过滤用），如 src/acp/fuzzy.ts */
+  /** 相对 cwd 路径（展示与过滤用），如 src/chat/logic/fuzzy.ts */
   rel: string;
-  /** 绝对路径（插入用），如 /Users/x/dev/ainone-ui/src/acp/fuzzy.ts */
+  /** 绝对路径（插入用），如 /Users/x/dev/ainone-ui/src/chat/logic/fuzzy.ts */
   abs: string;
   isDir: boolean;
 }

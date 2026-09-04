@@ -4,7 +4,7 @@
 //   - index 之后的所有消息（上一轮回复等）全部丢弃
 // 零 React/Tauri 依赖，vitest 直接覆盖。
 
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 /** 越界 / 非用户消息 / 空文本 → null（调用方降级提示，不截断） */
 export function truncateMessagesToEdit(

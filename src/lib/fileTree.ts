@@ -3,7 +3,7 @@
 //
 // 排除大目录（node_modules/.git/target/dist/build）——硬编码清单（DEC-18）。
 
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 export const EXCLUDED_DIRS = ["node_modules", ".git", "target", "dist", "build"];
 

@@ -28,11 +28,11 @@ import {
   ContextMenuItem,
 } from "./components/ui/context-menu";
 import { Toaster } from "./components/ui/sonner";
-import { resolveHistoryOpen, type Tab } from "./store/tabs";
-import { groupSessions } from "./store/workspaceGroup";
+import { resolveHistoryOpen, type Tab } from "./app/logic/tabs";
+import { groupSessions } from "./sidebar/logic/workspaceGroup";
 import { useSessionStore } from "./store/sessionStore";
-import { collectSignals, deriveStatus, type SessionStatus } from "./store/sessionStatus";
-import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf } from "./store/layout";
+import { collectSignals, deriveStatus, type SessionStatus } from "./sidebar/logic/sessionStatus";
+import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf } from "./app/logic/layout";
 import { logger } from "./lib/logger";
 import "./App.css";
 

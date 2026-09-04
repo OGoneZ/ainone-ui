@@ -3,7 +3,7 @@
 // 数据源（DEC-17）：内存态消息列表（正文 / thinking / 工具标题）。5000 条规模
 // 线性扫描足够（纯前端 <10ms），不建倒排索引；性能不达标再升级。
 
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 /** 一条消息的可搜纯文本（正文 + thinking + 工具标题） */
 export function messageSearchText(msg: ChatMsg): string {

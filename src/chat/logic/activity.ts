@@ -5,7 +5,7 @@
 //   - text 块、运行中块 → 独立渲染项，并截断分组
 // 零 React 依赖，vitest 直接覆盖。
 
-import type { BlockMsg } from "./message-log";
+import type { BlockMsg } from "@/acp/message-log";
 
 /** 渲染项：原块透传 或 聚合组 */
 export type RenderItem =

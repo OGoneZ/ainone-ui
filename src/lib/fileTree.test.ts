@@ -8,7 +8,7 @@ import {
   collectModifiedPaths,
   EXCLUDED_DIRS,
 } from "./fileTree";
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 describe("shouldExcludeDir", () => {
   it("排除清单命中", () => {

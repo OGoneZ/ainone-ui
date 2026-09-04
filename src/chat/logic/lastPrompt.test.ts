@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "./lastPrompt";
-import type { ChatMsg } from "./message-log";
+import type { ChatMsg } from "@/acp/message-log";
 
 const user = (t: string): ChatMsg => ({ role: "user", text: t });
 const agent = (): ChatMsg => ({ role: "assistant", blocks: [{ kind: "text", text: "r" }] });

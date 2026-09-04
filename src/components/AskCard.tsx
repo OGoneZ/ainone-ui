@@ -14,7 +14,7 @@ import {
   composeAskAnswers,
   type AskAnswer,
   type AskQuestion,
-} from "../acp/askCard";
+} from "../chat/logic/askCard";
 
 const OTHER = "其他";
 
