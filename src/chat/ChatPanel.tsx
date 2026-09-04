@@ -663,7 +663,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   // slash 选中回填：命令名回填输入框，光标留在命令后（不自动发送）
-function pickSlash(w: CommandWord) {
+  function pickSlash(w: CommandWord) {
     setInput(completeCommand(w));
     setSlashIdx(-1);
     slashRef.current?.focus();
