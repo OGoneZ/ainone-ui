@@ -19,6 +19,7 @@ import { UsageBar } from "@/chat/components/UsageBar";
 import { Welcome } from "@/chat/Welcome";
 import { MessageLine } from "@/chat/message/MessageLine";
 import { useTypewriter } from "@/chat/hooks/useTypewriter";
+import { useChatSearch } from "@/chat/hooks/useChatSearch";
 import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "@/ipc/sessions";
 import { parseLog, serializeMessages } from "@/acp/message-log";
@@ -37,7 +38,6 @@ import { truncateToMessageIndex } from "@/acp/rewind";
 import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../chat/logic/lastPrompt";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
-import { searchMessages } from "../chat/logic/search";
 import { typewriterHint } from "../chat/logic/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
 import { logger } from "@/lib/logger";
@@ -197,13 +197,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [dragging, setDragging] = useState(false);
   // F-8-6 回溯：待确认的目标消息下标（null = 无）
   const [rewindTarget, setRewindTarget] = useState<number | null>(null);
-  // F-9-2 搜索：关键词 + 命中列表 + 当前命中下标
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchKeyword, setSearchKeyword] = useState("");
-  const [searchIdx, setSearchIdx] = useState(0);
-  // F-11-6 Esc 判定用的最新值镜像（state 声明后同步）
-  const searchOpenRef = useRef(false);
-  searchOpenRef.current = searchOpen;
   // M5：active prop 镜像——window 级监听闭包来自挂载帧，读 ref 取最新活跃态
   const activeRef = useRef(active);
   activeRef.current = active ?? true;
@@ -279,7 +272,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           setQuickSel(null);
           logger.debug("chat", "quick-pop-dismiss", { reason: "escape" });
         } else if (searchOpenRef.current) {
-          closeSearch();
+          closeSearchRef.current();
         }
       }
     };
@@ -877,40 +870,6 @@ function pickSlash(w: CommandWord) {
 
   const pending = rt?.pending ?? null;
 
-  // F-9-2 搜索：命中列表（随关键词变化）
-  const searchHits = searchOpen ? searchMessages(messages, searchKeyword) : [];
-  const currentHit = searchHits.length > 0 ? searchHits[searchIdx % searchHits.length] : null;
-  const searchCurIndex = currentHit ? currentHit.index : -1;
-
-  // F-9-2 跳转：滚动到命中消息索引（虚拟列表按索引定位到序）。
-  // M8：远端条目未测量前按 estimateSize 估计，scrollToIndex 落点会漂移——
-  // 首跳后等两帧（测量已随渲染发生）再校跳一次，长消息场景落点基本准确。
-  function jumpToSearch(index: number) {
-    logger.info("chat", "search-jump", { index });
-    virtualizer.scrollToIndex(index, { align: "start" });
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        virtualizer.scrollToIndex(index, { align: "start" });
-      }),
-    );
-  }
-  function nextHit(delta: 1 | -1) {
-    if (searchHits.length === 0) return;
-    const next = (searchIdx + delta + searchHits.length) % searchHits.length;
-    setSearchIdx(next);
-    jumpToSearch(searchHits[next].index);
-  }
-  function closeSearch() {
-    setSearchOpen(false);
-    setSearchKeyword("");
-    setSearchIdx(0);
-  }
-  // M8：搜索条出现时聚焦（原实现焦点留在原地，键盘流断裂）
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
-
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
@@ -919,6 +878,18 @@ function pickSlash(w: CommandWord) {
     estimateSize: () => 120,
     overscan: 8,
   });
+
+  // F-9-2 会话内搜索（状态机见 chat/hooks/useChatSearch.ts）
+  const {
+    searchOpen, setSearchOpen, searchKeyword, setSearchKeyword, setSearchIdx,
+    searchHits, searchCurIndex, searchIdx, nextHit, closeSearch, searchInputRef,
+  } = useChatSearch(messages, virtualizer);
+
+  // Esc 判定用的最新值镜像（keydown 闭包来自挂载帧；hook state 需逐帧同步）
+  const searchOpenRef = useRef(false);
+  searchOpenRef.current = searchOpen;
+  const closeSearchRef = useRef<() => void>(() => {});
+  closeSearchRef.current = closeSearch;
 
   // F-11-9 上一条指令回跳气泡
   const lastUserIdx = useMemo(() => lastUserIndex(messages), [messages]);
