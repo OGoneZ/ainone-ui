@@ -8,7 +8,7 @@
 //   - 不做 JSONL 行切分——交给 SDK 内置 LineBuffer（只按 LF 切行，正是 DEC-5 语义）
 
 import { invoke, Channel } from "@tauri-apps/api/core";
-import { logger } from "../lib/logger";
+import { logger } from "@/lib/logger";
 
 export interface HarnessProcess {
   agentId: number;

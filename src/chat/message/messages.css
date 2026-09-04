@@ -1,0 +1,211 @@
+/* ainone-ui 消息渲染树样式（P13 C4 自 App.css 按域拆出）。颜色一律取设计令牌。 */
+
+/* —— 工具调用折叠（P7 改版后保留的差分层）—— */
+.tool {
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+}
+
+.tool-head {
+  cursor: pointer;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, var(--bg-1));
+}
+
+.tool-head .status {
+  margin-left: auto;
+  color: var(--warning);
+  font-size: 0.8em;
+}
+
+.tool-body {
+  padding: 8px;
+  background: var(--bg-2);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tool-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.8em;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.tool-terminal {
+  font-size: 0.85em;
+  color: var(--text-secondary);
+}
+
+/* —— diff 视图 —— */
+.diff {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  border: 1px solid var(--bg-3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.diff-path {
+  background: var(--bg-2);
+  padding: 4px 8px;
+  font-weight: 600;
+}
+
+.diff-line {
+  display: flex;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-line.del {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-1));
+  color: var(--danger);
+}
+
+.diff-line.add {
+  background: color-mix(in srgb, var(--success) 10%, var(--bg-1));
+  color: var(--success);
+}
+
+.diff-line.ctx {
+  color: var(--text-secondary);
+}
+
+.diff-sign {
+  width: 1.2em;
+  flex-shrink: 0;
+  text-align: center;
+  user-select: none;
+}
+
+/* —— Markdown 排版（P7 F-7-10）—— */
+.md {
+  text-align: left;
+}
+
+.md p {
+  margin: 0.4em 0;
+}
+
+
+.md :not(pre) > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+
+.md ul,
+.md ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+
+.md blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--bg-3);
+  color: var(--text-secondary);
+}
+
+.md table {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--bg-3);
+  padding: 4px 8px;
+  font-size: 0.9em;
+}
+/* ======================= P8 · F-8-2 批注卡 ======================= */
+.quote-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 2px;
+  padding: 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+
+.quote-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quote-index {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.quote-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 2px solid var(--bg-3);
+  padding-left: 8px;
+}
+
+.quote-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+
+.quote-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px;
+  cursor: pointer;
+}
+
+.quote-remove:hover {
+  color: var(--danger);
+}
+
+.quote-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.quote-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.quote-send {
+  padding: 4px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 13px;
+  cursor: pointer;
+}
+

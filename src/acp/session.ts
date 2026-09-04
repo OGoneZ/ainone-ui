@@ -13,8 +13,8 @@ import {
   type PermissionDecision,
   type ElicitationHandler,
 } from "./session-core";
-import { logger } from "../lib/logger";
-import type { Adapter } from "../config/adapters";
+import { logger } from "@/lib/logger";
+import type { Adapter } from "@/ipc/adapters";
 
 export type { AcpSession, PermissionDecision, ElicitationHandler, Outgoing } from "./session-core";
 

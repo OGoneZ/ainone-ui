@@ -15,8 +15,8 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ChatMsg, BlockMsg } from "../acp/message-log";
-import type { AskQuestion } from "../acp/askCard";
+import type { ChatMsg, BlockMsg } from "@/acp/message-log";
+import type { AskQuestion } from "../chat/logic/askCard";
 
 export type { ChatMsg, BlockMsg };
 

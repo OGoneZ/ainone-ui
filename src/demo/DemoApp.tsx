@@ -4,11 +4,11 @@
 // 顶栏提供浅色/深色切换，方便双主题核对（AC-R2-3 / AC-R5-4）。
 
 import { useEffect, useState } from "react";
-import { useSessionStore, type ChatMsg, type CommandWord } from "../store/sessionStore";
-import type { BlockMsg } from "../acp/message-log";
-import type { ToolContent } from "../acp/session-core";
-import { ChatPanel } from "../components/ChatPanel";
-import type { AdapterWithStatus } from "../config/adapters";
+import { useSessionStore, type ChatMsg, type CommandWord } from "@/store/sessionStore";
+import type { BlockMsg } from "@/acp/message-log";
+import type { ToolContent } from "@/acp/session-core";
+import { ChatPanel } from "@/chat/ChatPanel";
+import type { AdapterWithStatus } from "@/ipc/adapters";
 
 // —— 样例文本块 ——————————————————————————————————————————————
 
@@ -122,7 +122,7 @@ function toolContents(): ToolContent[] {
     {
       kind: "diff",
       diff: {
-        path: "src/components/ChatPanel.tsx",
+        path: "src/chat/ChatPanel.tsx",
         oldText: "import ReactMarkdown from \"react-markdown\";\nimport rehypeHighlight from \"rehype-highlight\";",
         newText: "import { Streamdown } from \"streamdown\";\nimport { code } from \"@streamdown/code\";",
       },

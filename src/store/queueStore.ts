@@ -5,7 +5,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { QueueItem } from "./queue";
+import type { QueueItem } from "@/lib/queue";
 
 interface QueueStore {
   /** tabKey → 待执行指令队列 */
