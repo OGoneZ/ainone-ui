@@ -4,36 +4,36 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layout, Model, Actions, DockLocation, type TabNode } from "flexlayout-react";
-import { listAdapters, type AdapterWithStatus } from "./ipc/adapters";
-import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./ipc/sessions";
-import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./ipc/workspaces";
-import { ChatPanel } from "./components/ChatPanel";
+import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
+import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "@/ipc/sessions";
+import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "@/ipc/workspaces";
+import { ChatPanel } from "@/components/ChatPanel";
 import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
 import { SettingsModal } from "@/app/modals/SettingsModal";
 import { NewSessionModal } from "@/app/modals/NewSessionModal";
-import { EmptyState } from "./components/EmptyState";
+import { EmptyState } from "@/components/EmptyState";
 import { RightRail } from "@/sidebar/RightRail";
-import { AgentAvatar } from "./components/AgentAvatar";
+import { AgentAvatar } from "@/components/AgentAvatar";
 import {
   WorkspaceIcon,
   WorkspaceOpenIcon,
   CloseIcon,
   PlusIcon,
   SettingsIcon,
-} from "./components/ui/icons";
+} from "@/components/ui/icons";
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-} from "./components/ui/context-menu";
-import { Toaster } from "./components/ui/sonner";
-import { resolveHistoryOpen, type Tab } from "./app/logic/tabs";
-import { groupSessions } from "./sidebar/logic/workspaceGroup";
-import { useSessionStore } from "./store/sessionStore";
-import { collectSignals, deriveStatus, type SessionStatus } from "./sidebar/logic/sessionStatus";
-import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf } from "./app/logic/layout";
-import { logger } from "./lib/logger";
+} from "@/components/ui/context-menu";
+import { Toaster } from "@/components/ui/sonner";
+import { resolveHistoryOpen, type Tab } from "@/app/logic/tabs";
+import { groupSessions } from "@/sidebar/logic/workspaceGroup";
+import { useSessionStore } from "@/store/sessionStore";
+import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
+import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf } from "@/app/logic/layout";
+import { logger } from "@/lib/logger";
 
 
 /** 侧栏会话行 leading 槽：harness logo + 状态角标（F-8-1 收尾，融合 F-7-7 状态机） */

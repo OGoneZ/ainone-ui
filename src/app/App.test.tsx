@@ -6,8 +6,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
-import { mockTauriIpc } from "./test/mockIpc";
-import { useSessionStore } from "./store/sessionStore";
+import { mockTauriIpc } from "@/test/mockIpc";
+import { useSessionStore } from "@/store/sessionStore";
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: (opts: { count: number }) => {

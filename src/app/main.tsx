@@ -17,9 +17,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { DemoApp } from "./demo/DemoApp";
-import { attach, installConsoleForward } from "./lib/logger";
-import "./index.css"; // Tailwind v4 + 设计令牌层（P7 F-7-1/F-7-2）
+import { DemoApp } from "@/demo/DemoApp";
+import { attach, installConsoleForward } from "@/lib/logger";
+import "@/index.css"; // Tailwind v4 + 设计令牌层（P7 F-7-1/F-7-2）
 // P11：katex 公式字体样式（Streamdown math 插件要求）
 import "flexlayout-react/style/light.css"; // P10 分屏基础样式（主题色映射见 index.css）
 import "katex/dist/katex.min.css";
