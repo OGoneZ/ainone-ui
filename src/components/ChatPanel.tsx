@@ -12,7 +12,8 @@ import { openSession, type AcpSession } from "../acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
-import { VoiceInput } from "@/chat/composer/VoiceInput";
+import { Composer } from "@/chat/composer/Composer";
+import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
 import { UsageBar } from "@/chat/components/UsageBar";
 import { Welcome } from "@/chat/Welcome";
 import { MessageLine } from "@/chat/message/MessageLine";
@@ -23,7 +24,6 @@ import { parseLog, serializeMessages } from "../acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "../acp/turn";
 import { isSlashInput, filterCommands, completeCommand } from "../chat/logic/slash";
 import {
-  detectAtToken,
   flattenWorkspaceFiles,
   filterAtFiles,
   applyAtToken,
@@ -50,11 +50,7 @@ import {
 import type { AdapterWithStatus } from "../ipc/adapters";
 import { AgentAvatar } from "./AgentAvatar";
 import { AskCard } from "@/chat/components/AskCard";
-import {
-  SendIcon,
-  StopIcon,
-  CloseIcon,
-} from "./ui/icons";
+import { CloseIcon } from "./ui/icons";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
@@ -117,10 +113,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文
   const typeText = useTypewriter(typewriterHint(adapter));
 
-  // slash 候选（F-4-7 / F-11-1 模糊匹配）：输入以 / 开头才计算
-  // L1：Esc 显式关闭 slash 菜单（下次输入变化时重置重新可开）
-  const [slashClosed, setSlashClosed] = useState(false);
-  const slashOpen = isSlashInput(input) && !slashClosed;
+  // slash 候选（F-4-7 / F-11-1 模糊匹配）：菜单开合/Esc 关闭状态在 Composer 内部，
+  // ChatPanel 只为滚动跟随近似推断 open 态（isSlashInput(input)）。
+  const slashOpen = isSlashInput(input);
   const slashMatches = useMemo(
     () => (slashOpen ? filterCommands(commands, input) : []),
     [commands, input, slashOpen],
@@ -1065,65 +1060,16 @@ function pickSlash(w: CommandWord) {
         </div>
         {/* F-8-7 快问悬浮窗（F-11-6：点外/Esc 关闭，无「关闭」按钮） */}
         {quickSel && (
-          <div
-            className="quick-pop"
-            ref={quickPopRef}
-            data-testid="quick-pop"
-            style={{
-              position: "absolute",
-              top: quickAnchor.y,
-              left: quickAnchor.x,
-              zIndex: "var(--z-popover, 50)",
+          <QuickAskPopup
+            state={{ quickSel, quickPop, anchor: quickAnchor, ready: quickAskReady }}
+            popRef={quickPopRef}
+            onAnnotate={() => {
+              addQuote(quickSel);
+              setQuickSel(null);
             }}
-          >
-            {!quickPop ? (
-              <>
-                <div className="quick-pop-title">对选中文本：</div>
-                <div className="quick-pop-sel" title={quickSel}>{quickSel}</div>
-                <div className="quick-pop-actions">
-                  {/* 统一入口（ideas IDEA-001）：批注＝加入批注卡；快速解释＝独立轻量模型 */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      addQuote(quickSel);
-                      setQuickSel(null);
-                    }}
-                  >
-                    批注
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!quickAskReady}
-                    title={quickAskReady ? "" : "未配置快问模型"}
-                    onClick={runQuickAsk}
-                  >
-                    快速解释
-                  </button>
-                </div>
-              </>
-            ) : quickPop.state === "loading" ? (
-              <div className="quick-pop-body">解释中…</div>
-            ) : quickPop.state === "error" ? (
-              <div className="quick-pop-body quick-pop-error">解释失败：{quickPop.text}</div>
-            ) : (
-              <>
-                <div className="quick-pop-body">{quickPop.text}</div>
-                <div className="quick-pop-actions">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(quickPop.text).then(
-                        () => toast.success("已复制"),
-                        () => toast.error("复制失败"),
-                      );
-                    }}
-                  >
-                    复制
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+            onQuickAsk={runQuickAsk}
+            onClose={() => setQuickSel(null)}
+          />
         )}
         {pending && (
           <Dialog open onOpenChange={() => {}}>
@@ -1290,196 +1236,30 @@ function pickSlash(w: CommandWord) {
         </div>
       )}
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
+      <Composer
+        input={input}
+        setInput={setInput}
+        textareaRef={slashRef}
+        busy={busy}
+        starting={starting}
+        typeText={typeText}
+        commands={commands}
+        atMenu={atMenu}
+        setAtMenu={setAtMenu}
+        atMatches={atMatches}
+        slashMenuRef={slashMenuRef}
+        atMenuRef={atMenuRef}
+        onSubmit={submit}
+        onStop={stop}
+        onPickFiles={pickFiles}
+        onEnqueue={(t) => {
+          enqueueCommand(t);
+          setInput("");
         }}
-      >
-        <button
-          type="button"
-          className="attach-btn"
-          aria-label="添加文件"
-          title="添加文件"
-          onClick={pickFiles}
-        >
-          ＋
-        </button>
-        <VoiceInput onTranscribed={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))} />
-        <div className="input-wrap">
-          {slashOpen && slashMatches.length > 0 && (
-            <div className="slash-menu" ref={slashMenuRef}>
-              {slashMatches.map((w, i) => (
-                <button
-                  type="button"
-                  key={w.name}
-                  aria-selected={i === slashHighlight}
-                  className={i === slashHighlight ? "slash-item active" : "slash-item"}
-                  onMouseDown={(e) => {
-                    e.preventDefault(); // 抢在 textarea blur 前选中
-                    pickSlash(w);
-                  }}
-                >
-                  <span className="slash-name">/{w.name}</span>
-                  <span className="slash-desc">{w.description}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {/* F-11-3 @ 文件联想菜单（复用 slash 菜单结构） */}
-          {atMenu && atMatches.length > 0 && (
-            <div className="slash-menu at-menu" ref={atMenuRef}>
-              {atMatches.map((f, i) => (
-                <button
-                  type="button"
-                  key={f.rel}
-                  aria-selected={i === atHighlight}
-                  className={i === atHighlight ? "slash-item active" : "slash-item"}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pickAt(f);
-                  }}
-                >
-                  <span className="slash-name">{f.isDir ? "📁" : "📄"} {f.rel}</span>
-                  <span className="slash-desc">{f.isDir ? "目录" : "文件"}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <textarea
-            ref={slashRef}
-            aria-label="消息输入"
-            value={input}
-            onChange={(e) => {
-              const v = e.currentTarget.value;
-              const caret = e.currentTarget.selectionStart ?? v.length;
-              setInput(v);
-              setSlashIdx(-1); // 输入变化重置高亮
-              setSlashClosed(false); // L1：输入变化重新允许 slash 菜单展开
-              // F-11-3：@ 联想开合（词首 @ 才触发）。
-              // M3：与 slash 互斥——行首 / 命令输入时不开 @ 菜单（两个菜单同帧
-              // 展开会重叠渲染，键盘链互相吞噬）
-              const token = isSlashInput(v) ? null : detectAtToken(v, caret);
-              if (token) {
-                setAtMenu((m) => (m ? { ...token } : token));
-                setAtIdx(0);
-              } else {
-                setAtMenu(null);
-              }
-            }}
-            onKeyDown={(e) => {
-              // M4：IME 组合中（中文输入法选词）不触发菜单选中/发送——
-              // 组合中的 Enter 是确认候选，不是提交意图
-              if (e.nativeEvent.isComposing) return;
-              // F-11-3 @ 菜单键盘导航（与 slash 互斥：同帧只开一个菜单）
-              if (atMenu && atMatches.length > 0) {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  setAtIdx((i) => (i + 1) % atMatches.length);
-                  return;
-                }
-                if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setAtIdx((i) => (i <= 0 ? atMatches.length - 1 : i - 1));
-                  return;
-                }
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  pickAt(atMatches[atHighlight]);
-                  return;
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setAtMenu(null);
-                  return;
-                }
-              }
-              if (slashOpen && slashMatches.length > 0) {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  setSlashIdx((i) => (i + 1) % slashMatches.length);
-                  return;
-                }
-                if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setSlashIdx((i) => (i <= 0 ? slashMatches.length - 1 : i - 1));
-                  return;
-                }
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  pickSlash(slashMatches[slashHighlight]);
-                  return;
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  // L1：Esc 语义与 @ 菜单对齐——关闭菜单（原只重置高亮，菜单仍开，
-                  // Enter 会误选第 0 项）。重开靠再次输入 /。
-                  setSlashClosed(true);
-                  setSlashIdx(-1);
-                  return;
-                }
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder={
-              busy
-                ? "运行中，输入将打断当前 turn…"
-                : input.startsWith("!")
-                  ? "！命令将交由 harness 执行（claude-code 支持；omp/pi-acp 未验证）"
-                  : typeText
-            }
-            disabled={starting}
-            rows={1}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={starting}
-          aria-label="发送"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-          style={{ backgroundColor: "var(--primary)", color: "var(--primary-foreground)", transitionDuration: "var(--motion-default)" }}
-        >
-          <SendIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-        </button>
-        <button
-          type="button"
-          onClick={stop}
-          disabled={!busy}
-          aria-label="停止"
-          className={`stop-btn inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
-            busy ? "run-pulse" : ""
-          }`}
-          style={{
-            backgroundColor: "var(--bg-2)",
-            color: busy ? "var(--danger)" : "var(--text-secondary)",
-            transitionDuration: "var(--motion-default)",
-          }}
-        >
-          <StopIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-        </button>
-        {/* F-9-3 命令队列：排队追加按钮（区别于立即发送） */}
-        <button
-          type="button"
-          disabled={!input.trim() || starting}
-          aria-label="排队发送"
-          title="加入命令队列"
-          className="inline-flex h-9 px-2.5 shrink-0 items-center justify-center rounded-full text-xs"
-          style={{ backgroundColor: "var(--bg-2)", color: "var(--text-secondary)", transitionDuration: "var(--motion-default)" }}
-          onClick={() => {
-            const t = input.trim();
-            if (t) {
-              enqueueCommand(t);
-              setInput("");
-            }
-          }}
-        >
-          排队
-        </button>
-      </form>
+        onVoice={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))}
+        onPickSlash={pickSlash}
+        onPickAt={pickAt}
+      />
     </div>
   );
 }
