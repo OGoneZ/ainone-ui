@@ -6,15 +6,15 @@
 // 交互经 radix-ui（RadioGroup/Checkbox，ui/radio-group、ui/checkbox 薄封装）。
 
 import { useMemo, useState } from "react";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
-import { Checkbox } from "./ui/checkbox";
-import { Button } from "./ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import {
   askComplete,
   composeAskAnswers,
   type AskAnswer,
   type AskQuestion,
-} from "../chat/logic/askCard";
+} from "@/chat/logic/askCard";
 
 const OTHER = "其他";
 

@@ -8,11 +8,11 @@ import { listAdapters, type AdapterWithStatus } from "./ipc/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "./ipc/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "./ipc/workspaces";
 import { ChatPanel } from "./components/ChatPanel";
-import { GlobalSearchDialog } from "./components/GlobalSearchDialog";
+import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { EmptyState } from "./components/EmptyState";
-import { RightRail } from "./components/RightRail";
+import { RightRail } from "@/sidebar/RightRail";
 import { AgentAvatar } from "./components/AgentAvatar";
 import {
   WorkspaceIcon,

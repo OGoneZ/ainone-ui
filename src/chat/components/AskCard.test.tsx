@@ -5,7 +5,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AskCard } from "./AskCard";
-import type { AskQuestion } from "../chat/logic/askCard";
+import type { AskQuestion } from "@/chat/logic/askCard";
 
 afterEach(cleanup);
 

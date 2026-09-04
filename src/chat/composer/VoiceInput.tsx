@@ -4,8 +4,8 @@
 // 麦克风权限被拒 / 服务端失败 → toaster 提示，不崩溃。
 
 import { useEffect, useRef, useState } from "react";
-import { asrTranscribe } from "../ipc/asr";
-import { logger } from "../lib/logger";
+import { asrTranscribe } from "@/ipc/asr";
+import { logger } from "@/lib/logger";
 import { toast } from "sonner";
 
 interface Props {

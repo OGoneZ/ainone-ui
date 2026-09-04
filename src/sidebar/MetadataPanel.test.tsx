@@ -6,8 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MetadataPanel } from "./MetadataPanel";
-import { useSessionStore } from "../store/sessionStore";
-import type { AdapterWithStatus } from "../ipc/adapters";
+import { useSessionStore } from "@/store/sessionStore";
+import type { AdapterWithStatus } from "@/ipc/adapters";
 
 const adapter: AdapterWithStatus = {
   id: "omp",

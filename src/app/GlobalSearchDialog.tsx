@@ -5,13 +5,13 @@
 // 由 App 挂载（拥有 openSession 回调），本组件只管弹层与选中回调。
 
 import { useEffect, useState } from "react";
-import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "./ui/command";
-import { AgentAvatar } from "./AgentAvatar";
-import { sessionsList, type SessionEntry } from "../ipc/sessions";
-import { filterSessions, relativeTime, type SearchableSession } from "../chat/logic/globalSearch";
-import { logger } from "../lib/logger";
+import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
+import { AgentAvatar } from "@/components/AgentAvatar";
+import { sessionsList, type SessionEntry } from "@/ipc/sessions";
+import { filterSessions, relativeTime, type SearchableSession } from "@/chat/logic/globalSearch";
+import { logger } from "@/lib/logger";
 
-import { listAdapters, type AdapterWithStatus } from "../ipc/adapters";
+import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
 
 interface Props {
   open: boolean;

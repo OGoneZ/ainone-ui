@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PlanBar } from "./PlanBar";
-import { useSessionStore } from "../store/sessionStore";
+import { useSessionStore } from "@/store/sessionStore";
 
 beforeEach(() => {
   useSessionStore.setState({ runtime: {}, commands: {} });

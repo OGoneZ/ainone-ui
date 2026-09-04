@@ -11,7 +11,7 @@ vi.mock("../ipc/fslist", () => ({
   workspaceListDir: vi.fn(),
 }));
 
-import { workspaceListDir } from "../ipc/fslist";
+import { workspaceListDir } from "@/ipc/fslist";
 const mockList = vi.mocked(workspaceListDir);
 
 beforeEach(() => {

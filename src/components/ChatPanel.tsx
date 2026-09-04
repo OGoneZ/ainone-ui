@@ -20,10 +20,10 @@ const Ansi = (AnsiPkg as unknown as { default?: typeof AnsiPkg }).default ?? Ans
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "../acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
-import { PlanBar } from "./PlanBar";
-import { CommandQueuePanel } from "./CommandQueuePanel";
-import { VoiceInput } from "./VoiceInput";
-import { UsageBar } from "./UsageBar";
+import { PlanBar } from "@/chat/components/PlanBar";
+import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
+import { VoiceInput } from "@/chat/composer/VoiceInput";
+import { UsageBar } from "@/chat/components/UsageBar";
 import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "../ipc/sessions";
 import { parseLog, serializeMessages, type BlockMsg } from "../acp/message-log";
@@ -61,7 +61,7 @@ import {
 import type { ToolContent } from "../acp/session-core";
 import type { AdapterWithStatus } from "../ipc/adapters";
 import { AgentAvatar } from "./AgentAvatar";
-import { AskCard } from "./AskCard";
+import { AskCard } from "@/chat/components/AskCard";
 import {
   CommentIcon,
   EditIcon,

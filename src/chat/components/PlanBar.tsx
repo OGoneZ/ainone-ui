@@ -5,9 +5,9 @@
 // 折叠态显示「已完成 N / 共 M」，展开态列条目（三态着色）。
 
 import { useEffect, useState } from "react";
-import { useSessionStore } from "../store/sessionStore";
-import { planProgress } from "../acp/plan";
-import { ChevronRightIcon } from "./ui/icons";
+import { useSessionStore } from "@/store/sessionStore";
+import { planProgress } from "@/acp/plan";
+import { ChevronRightIcon } from "@/components/ui/icons";
 
 interface Props {
   tabKey: string;

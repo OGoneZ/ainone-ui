@@ -2,8 +2,8 @@
 // 数据源 = store.runtime[t].usage（usage_update 已有链路，无新采集）；
 // 无数据（harness 未上报）→ 不渲染。与元数据侧栏共存，不重复大块信息。
 
-import { Progress } from "./ui/progress";
-import { usagePercent, usageTier, type UsageInfo, type UsageTier as Tier } from "../acp/metadata";
+import { Progress } from "@/components/ui/progress";
+import { usagePercent, usageTier, type UsageInfo, type UsageTier as Tier } from "@/acp/metadata";
 
 const tierColor: Record<Tier, string> = {
   ok: "var(--primary)",

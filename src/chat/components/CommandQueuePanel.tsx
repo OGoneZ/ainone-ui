@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useQueueStore } from "@/store/queueStore";
-import { ChevronRightIcon, CloseIcon, GripVerticalIcon } from "./ui/icons";
+import { ChevronRightIcon, CloseIcon, GripVerticalIcon } from "@/components/ui/icons";
 
 interface Props {
   tabKey: string;

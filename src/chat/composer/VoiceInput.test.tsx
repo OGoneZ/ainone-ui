@@ -22,7 +22,7 @@ vi.mock("../lib/logger", () => ({
   },
 }));
 
-import { asrTranscribe } from "../ipc/asr";
+import { asrTranscribe } from "@/ipc/asr";
 
 class FakeRecorder {
   static instances: FakeRecorder[] = [];

@@ -8,11 +8,11 @@
 // 默认折叠，展开状态持久化到 localStorage（AC-P8-21）。
 
 import { useEffect, useState } from "react";
-import { useSessionStore } from "../store/sessionStore";
-import { usagePercent } from "../acp/metadata";
-import { extractModel } from "../acp/metadata";
-import { ChevronRightIcon, CloseIcon } from "./ui/icons";
-import type { AdapterWithStatus } from "../ipc/adapters";
+import { useSessionStore } from "@/store/sessionStore";
+import { usagePercent } from "@/acp/metadata";
+import { extractModel } from "@/acp/metadata";
+import { ChevronRightIcon, CloseIcon } from "@/components/ui/icons";
+import type { AdapterWithStatus } from "@/ipc/adapters";
 
 interface Props {
   tabKey: string;

@@ -5,9 +5,9 @@
 // 最近改动文件加「M」徽标（复用 tool_call diff 的 path 集合，不做 fs watch）。
 
 import { useEffect, useState } from "react";
-import { workspaceListDir, type DirEntry } from "../ipc/fslist";
-import { filterExcluded, joinDirPath } from "../lib/fileTree";
-import { ChevronRightIcon, FileTextIcon, WorkspaceIcon } from "./ui/icons";
+import { workspaceListDir, type DirEntry } from "@/ipc/fslist";
+import { filterExcluded, joinDirPath } from "@/lib/fileTree";
+import { ChevronRightIcon, FileTextIcon, WorkspaceIcon } from "@/components/ui/icons";
 
 interface Props {
   cwd?: string;
