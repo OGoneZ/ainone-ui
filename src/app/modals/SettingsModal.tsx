@@ -5,6 +5,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Adapter } from "@/ipc/adapters";
+import { refreshAdapterStatus } from "@/ipc/adapters";
+import { probeAdapter } from "@/acp/probe";
+import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -22,10 +25,15 @@ interface EditableAdapter {
   cwd: string;
   logo: string; // 编辑态为空串；保存时转 null
   available: boolean | null; // null = 探测中
+  /** 探测到的绝对路径（找到时展示「找到于 …」） */
+  resolvedPath?: string | null;
+  /** 握手探测结果（点击「测试连接」后写入） */
+  probe: ProbeResult | null;
+  probing: boolean;
 }
 
 function toEditable(a: Adapter): EditableAdapter {
-  return { ...a, argsText: a.args.join("\n"), logo: a.logo ?? "", available: null };
+  return { ...a, argsText: a.args.join("\n"), logo: a.logo ?? "", available: null, probe: null, probing: false };
 }
 
 function fromEditable(a: EditableAdapter): Adapter {
@@ -63,18 +71,31 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
       .catch(() => {});
   }, [open]);
 
-  // 逐项探测可用性
+  // 逐项探测可用性（adapter_status：含解析路径与来源）
   useEffect(() => {
     if (!open) return;
     items.forEach((a) => {
       if (a.available !== null) return;
-      invoke<boolean>("adapter_available", { program: a.program }).then((ok) => {
+      refreshAdapterStatus(fromEditable(a)).then((status) => {
         setItems((prev) =>
-          prev.map((x) => (x.id === a.id ? { ...x, available: ok } : x)),
+          prev.map((x) =>
+            x.id === a.id
+              ? { ...x, available: status.available, resolvedPath: status.resolvedPath }
+              : x,
+          ),
         );
       });
     });
   }, [items, open]);
+
+  /** 握手级探测：真实 spawn + initialize + kill（两级错误） */
+  async function testConnection(id: string) {
+    const item = items.find((a) => a.id === id);
+    if (!item || item.probing) return;
+    update(id, { probing: true, probe: null });
+    const result = await probeAdapter(fromEditable(item));
+    setItems((prev) => prev.map((x) => (x.id === id ? { ...x, probing: false, probe: result } : x)));
+  }
 
   function update(id: string, patch: Partial<EditableAdapter>) {
     setItems((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
@@ -84,7 +105,17 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
     const id = `custom-${Date.now()}`;
     setItems((prev) => [
       ...prev,
-      { id, name: "自定义 harness", program: "", argsText: "", cwd: ".", logo: "", available: null },
+      {
+        id,
+        name: "自定义 harness",
+        program: "",
+        argsText: "",
+        cwd: ".",
+        logo: "",
+        available: null,
+        probe: null,
+        probing: false,
+      },
     ]);
   }
 
@@ -166,9 +197,27 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
                 onChange={(e) => update(a.id, { argsText: e.target.value })}
               />
               <span className={a.available === null ? "" : a.available ? "ok" : "bad"}>
-                {a.available === null ? "探测中…" : a.available ? "✓ 可用" : "✗ 未安装"}
+                {a.available === null
+                  ? "探测中…"
+                  : a.available
+                    ? a.resolvedPath
+                      ? `✓ 可用（${a.resolvedPath}）`
+                      : "✓ 可用"
+                    : "✗ 未找到"}
               </span>
+              <button onClick={() => testConnection(a.id)} disabled={a.probing}>
+                {a.probing ? "探测中…" : "测试连接"}
+              </button>
               <button onClick={() => removeRow(a.id)}>删除</button>
+              {a.probe && (
+                <p className={a.probe.ok ? "ok" : "bad"} style={{ gridColumn: "1 / -1", margin: 0 }}>
+                  {a.probe.ok
+                    ? `✓ 握手成功${a.probe.agentInfo.name ? `（${a.probe.agentInfo.name}${a.probe.agentInfo.version ? ` v${a.probe.agentInfo.version}` : ""}）` : ""}`
+                    : a.probe.level === "spawn"
+                      ? `✗ 程序启动失败：${a.probe.message}`
+                      : `✗ 握手失败：${a.probe.message}`}
+                </p>
+              )}
             </div>
           ))}
         </div>

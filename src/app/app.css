@@ -308,6 +308,13 @@ button:hover:not(:disabled) {
   font-size: 0.9em;
 }
 
+/* 新建会话弹层：选中未安装 harness 时的原因提示行 */
+.ns-hint.bad {
+  margin: 0;
+  font-size: 0.82em;
+  color: var(--danger, #dc2626);
+}
+
 /* 权限审批对话框里的行内代码（P7 F-7-8） */
 .perm-code {
   margin: 0;
@@ -510,4 +517,3 @@ button:not(:disabled):active {
 .usage-bar [data-slot="progress-indicator"] {
   background: var(--usage-color, var(--primary));
 }
-

@@ -10,6 +10,7 @@
 mod adapters;
 mod agent;
 mod asr;
+mod env_path;
 mod fs;
 mod fslist;
 mod quickask;
@@ -40,6 +41,8 @@ pub fn run() {
         )
         .setup(|app| {
             agent::init_state(app);
+            // 启动即后台抓取 login shell PATH（8s 超时，永不阻塞 UI）
+            env_path::fetch_login_shell_path_async();
             log::info!("ainone-ui 启动完成");
             Ok(())
         })
@@ -50,6 +53,7 @@ pub fn run() {
             adapters::adapters_list,
             adapters::adapters_save,
             adapters::adapter_available,
+            adapters::adapter_status,
             adapters::default_cwd,
             agent::agent_spawn,
             agent::agent_stdin_write,

@@ -27,7 +27,7 @@ const entries: SessionEntry[] = [
 ];
 
 const adapter = {
-  id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: "#7c3aed", available: true,
+  id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: "#7c3aed", available: true, resolvedPath: null, source: null,
 };
 
 beforeEach(() => {

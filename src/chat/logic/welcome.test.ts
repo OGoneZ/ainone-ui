@@ -10,6 +10,8 @@ const adapter = (name: string): AdapterWithStatus => ({
   cwd: ".",
   logo: null,
   available: true,
+  resolvedPath: null,
+  source: null,
 });
 
 describe("欢迎页（F-6-3）", () => {

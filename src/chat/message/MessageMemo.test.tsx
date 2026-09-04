@@ -24,6 +24,8 @@ const adapter: AdapterWithStatus = {
   cwd: ".",
   logo: "#7c3aed",
   available: true,
+  resolvedPath: null,
+  source: null,
 };
 
 /** 渲染计数探针：包一层 memo 组件，统计真实渲染次数 */

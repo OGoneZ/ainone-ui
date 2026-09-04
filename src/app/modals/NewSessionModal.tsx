@@ -71,6 +71,7 @@ export function NewSessionModal({
   }
 
   const selected = localWs.find((w) => w.id === workspaceId) ?? null;
+  const selectedAdapter = adapters.find((a) => a.id === adapterId) ?? null;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -90,6 +91,12 @@ export function NewSessionModal({
             ))}
           </select>
         </label>
+        {selectedAdapter && !selectedAdapter.available && (
+          <p className="ns-hint bad">
+            程序 {selectedAdapter.program} 未找到（已搜索 ~/.local/bin、~/.bun/bin、nvm、登录 shell
+            PATH 与系统 PATH）。请先安装，或在设置中改为绝对路径。
+          </p>
+        )}
 
         <label className="ns-label">
           工作区

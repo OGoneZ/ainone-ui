@@ -14,17 +14,25 @@ export interface Adapter {
 
 export interface AdapterWithStatus extends Adapter {
   available: boolean;
+  /** 程序解析到的绝对路径（找不到为 null） */
+  resolvedPath: string | null;
+  /** 命中来源（home/nvm/version_manager/platform_default/process_path） */
+  source: string | null;
 }
 
-/** 列出全部适配器（含每个 program 是否在 PATH 中） */
+/** 列出全部适配器（含每个 program 是否在增强 PATH 中） */
 export async function listAdapters(): Promise<AdapterWithStatus[]> {
   const adapters = await invoke<Adapter[]>("adapters_list");
-  return Promise.all(
-    adapters.map(async (a) => ({
-      ...a,
-      available: await invoke<boolean>("adapter_available", { program: a.program }),
-    })),
+  return Promise.all(adapters.map(refreshAdapterStatus));
+}
+
+/** 对单条适配器重跑可用性检测（编辑 program 后刷新用） */
+export async function refreshAdapterStatus(a: Adapter): Promise<AdapterWithStatus> {
+  const status = await invoke<{ available: boolean; resolved_path: string | null; source: string | null }>(
+    "adapter_status",
+    { program: a.program },
   );
+  return { ...a, available: status.available, resolvedPath: status.resolved_path, source: status.source };
 }
 
 /** 覆盖保存全部适配器 */

@@ -117,22 +117,34 @@ fn save_to(path: &PathBuf, adapters: &[Adapter]) -> Result<(), String> {
     std::fs::write(path, json).map_err(|e| format!("写入适配器配置失败: {e}"))
 }
 
-/// 检测某程序是否在 PATH 中可执行（用于「可用性」标记）。
+/// 检测某程序是否可用（增强 PATH：~/.local/bin、~/.bun/bin、nvm、login shell PATH +
+/// 进程 PATH，见 env_path.rs）。
 #[tauri::command]
 pub fn adapter_available(program: String) -> bool {
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    for dir in path_var.split(':') {
-        let candidate = std::path::Path::new(dir).join(&program);
-        if candidate.is_file() {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(&candidate) {
-                if meta.permissions().mode() & 0o111 != 0 {
-                    return true;
-                }
-            }
-        }
+    crate::env_path::find_program(&program).is_some()
+}
+
+/// 检测结果详情：绝对路径与命中来源（UI 展示「找到于 …」用）。
+#[derive(Debug, Serialize)]
+pub struct AdapterStatus {
+    pub available: bool,
+    pub resolved_path: Option<String>,
+    pub source: Option<String>,
+}
+
+#[tauri::command]
+pub fn adapter_status(program: String) -> AdapterStatus {
+    match crate::env_path::find_program(&program) {
+        Some(hit) => AdapterStatus {
+            available: true,
+            resolved_path: Some(hit.path.to_string_lossy().into_owned()),
+            source: Some(serde_json::to_value(&hit.source)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default()),
+        },
+        None => AdapterStatus { available: false, resolved_path: None, source: None },
     }
-    false
 }
 
 /// 解析 $SHELL 的默认工作目录（前端下拉「打开目录」时的回退值）

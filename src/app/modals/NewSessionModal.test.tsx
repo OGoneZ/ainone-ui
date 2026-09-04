@@ -23,7 +23,7 @@ const pick = vi.mocked(wsMod.pickDirectory);
 const upsert = vi.mocked(wsMod.workspacesUpsert);
 
 const adapters: AdapterWithStatus[] = [
-  { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: null, available: true },
+  { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: null, available: true, resolvedPath: null, source: null },
 ];
 const workspaces: Workspace[] = [
   { id: "ws-1", name: "dev", cwd: "/Users/me/dev", created_ms: 1 },

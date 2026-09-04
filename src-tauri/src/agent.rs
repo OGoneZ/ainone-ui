@@ -73,11 +73,10 @@ pub fn agent_kill_idle(app: AppHandle, agent_id: u64, last_activity_ms: f64) -> 
 
 /// 返回给 harness 子进程的基础环境。
 /// 插件 shell 的 spawn 若 `env` 为 None 会清空环境，故前端须显式传这份环境。
-/// 这里把 `~/.bun/bin` 追加到 PATH 头部，保证后续夸大 omp 时能找到 bun 系列工具。
+/// PATH 用增强 PATH 整体替换（env_path.rs：用户目录 + nvm + login shell + 进程 PATH）。
 #[tauri::command]
 pub fn get_base_env() -> std::collections::HashMap<String, String> {
     let keys = [
-        "PATH",
         "HOME",
         "SHELL",
         "USER",
@@ -90,13 +89,7 @@ pub fn get_base_env() -> std::collections::HashMap<String, String> {
         .iter()
         .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
         .collect();
-
-    if let Some(home) = std::env::var("HOME").ok() {
-        let bun = format!("{}/.bun/bin", home);
-        if let Some(path) = env.get_mut("PATH") {
-            *path = format!("{}:{}", bun, path);
-        }
-    }
+    env.insert("PATH".to_string(), crate::env_path::enhanced_path());
     env
 }
 
@@ -121,6 +114,12 @@ pub enum AgentEvent {
 pub struct AgentStore(pub Mutex<HashMap<u64, CommandChild>>);
 
 /// spawn 子进程并登记进进程表，返回事件接收端。
+///
+/// 两件关键事（leju 故障修复，见 plan）：
+///   1. 程序名解析为绝对路径——unix 上 std::process::Command 查找程序用父进程
+///      PATH（execvp 语义），只改子进程 env 不够；
+///   2. 子进程 env PATH 注入增强 PATH——桌面应用进程 PATH 常缺用户目录
+///      （~/.bun/bin 等），且系统目录旧版工具会遮蔽用户新版（/usr/local/bin/bun）。
 pub fn spawn_inner(
     app: &AppHandle,
     agent_id: u64,
@@ -128,8 +127,28 @@ pub fn spawn_inner(
     args: &[String],
     cwd: &str,
 ) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
-    log::info!("[agent:{agent_id}] spawn {program} {:?} cwd={cwd}", args);
-    let mut cmd = app.shell().command(program).args(args).set_raw_out(true);
+    let hit = crate::env_path::find_program(program);
+    let resolved = match &hit {
+        Some(h) => h.path.clone(),
+        None => {
+            return Err(format!(
+                "未找到程序 {program}：已搜索增强 PATH（~/.local/bin、~/.bun/bin、nvm、登录 shell PATH …）与进程 PATH。\
+                 请确认已安装，或在设置中把 program 改为绝对路径。"
+            ));
+        }
+    };
+    log::info!(
+        "[agent:{agent_id}] spawn {program} → {} (source={:?}) {:?} cwd={cwd}",
+        resolved.display(),
+        hit.as_ref().map(|h| &h.source),
+        args
+    );
+    let mut cmd = app
+        .shell()
+        .command(&resolved)
+        .args(args)
+        .set_raw_out(true)
+        .env("PATH", crate::env_path::enhanced_path());
     if !cwd.is_empty() {
         cmd = cmd.current_dir(cwd);
     }

@@ -77,8 +77,7 @@ const adapter: AdapterWithStatus = {
   args: [],
   cwd: ".",
   logo: "#7c3aed",
-  available: true,
-};
+  available: true, resolvedPath: null, source: null,};
 
 const input = () => screen.getByLabelText("消息输入");
 
