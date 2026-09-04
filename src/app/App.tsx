@@ -88,6 +88,12 @@ function App() {
     mq.addEventListener("change", on);
     return () => mq.removeEventListener("change", on);
   }, []);
+  // P4：聊天面板「打开设置」动作 → 打开设置弹层（自定义事件，避免 props 层层下钻）
+  useEffect(() => {
+    const on = () => setSettingsOpen(true);
+    window.addEventListener("ainone:open-settings", on);
+    return () => window.removeEventListener("ainone:open-settings", on);
+  }, []);
   const nextKey = useRef(1);
   // F-10-3 flexlayout Model：布局 + tab 集合的单一真源（跨渲染稳定，重建会丢拖拽布局）
   const modelRef = useRef<Model | null>(null);

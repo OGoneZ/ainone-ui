@@ -96,6 +96,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const [input, setInput] = useState("");
   const [starting, setStarting] = useState(false);
+  // P4 启动期错误：常驻横幅（toast 一次即逝，带「打开设置」引导）
+  const [startError, setStartError] = useState<string | null>(null);
   // F-8-2 批注：已收集的多段批注（原文 + 疑问）
   const [quotes, setQuotes] = useState<Quote[]>([]);
   // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
@@ -732,6 +734,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       } catch (err) {
         logger.error("chat", "prompt 失败", { tabKey, adapter: adapter.id, error: String(err) });
         toast.error(`出错了：${String(err)}`);
+        // P4：启动期失败常驻横幅（toast 一次即逝，用户无从得知下一步动作）
+        setStartError(String(err));
         const next: TurnAccumulator = {
           ...turnRef.current,
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
@@ -939,6 +943,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           </button>
         )}
         {starting && <div className="hint">正在启动 {adapter.name}…</div>}
+        {startError && !starting && (
+          <div className="hint degraded" role="alert">
+            ⚠️ {adapter.name} 启动失败：{startError}
+            <button className="hint-action" onClick={() => window.dispatchEvent(new CustomEvent("ainone:open-settings"))}>
+              打开设置
+            </button>
+          </div>
+        )}
         {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
         {empty && historyDegraded && (
           <div className="hint degraded">⚠️ 上下文已恢复，历史消息未找到</div>

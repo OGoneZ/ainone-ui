@@ -18,6 +18,13 @@
   color: var(--warning);
 }
 
+/* P4 启动失败横幅里的「打开设置」动作 */
+.hint .hint-action {
+  margin-left: 8px;
+  padding: 2px 10px;
+  font-size: 0.9em;
+}
+
 /* —— 顶栏工具行 —— */
 .toolbar {
   display: flex;

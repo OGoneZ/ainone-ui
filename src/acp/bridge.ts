@@ -17,6 +17,8 @@ export interface HarnessProcess {
   stdin: WritableStream<Uint8Array>;
   /** 子进程退出信号，code 为 null 表示被信号终止 */
   closed: Promise<{ code: number | null }>;
+  /** stderr 尾迹（环形缓冲最后 2KB），启动失败时拼进错误信息 */
+  stderrTail: () => string;
 }
 
 /** Rust 侧 AgentEvent 序列化后的形状（serde tag="event"） */
@@ -59,12 +61,15 @@ export async function spawnHarness(
   });
 
   const channel = new Channel<AgentEvent>();
+  // stderr 环形缓冲：只留最后 2KB，供启动失败时提示（P4）
+  let stderrTailStr = "";
   channel.onmessage = (msg) => {
     switch (msg.event) {
       case "stdout":
         stdoutCtrl.enqueue(bytes(msg.payload));
         break;
       case "stderr":
+        stderrTailStr = (stderrTailStr + new TextDecoder().decode(Uint8Array.from(msg.payload))).slice(-2048);
         stderrCtrl.enqueue(bytes(msg.payload));
         break;
       case "error":
@@ -108,5 +113,5 @@ export async function spawnHarness(
     },
   });
 
-  return { agentId, stdout, stderr, stdin, closed };
+  return { agentId, stdout, stderr, stdin, closed, stderrTail: () => stderrTailStr };
 }

@@ -45,6 +45,9 @@ export async function openSession(
     onElicitation,
     resumeSessionId,
     onCommands,
+    // P4 启动守卫：进程秒退/握手超时时给出带 stderr 尾迹的明确错误
+    closed: proc.closed,
+    stderrTail: proc.stderrTail,
     ipc: {
       fsRead: (path) => invoke<string>("fd_read", { path }),
       fsWrite: (path, content) => invoke("fd_write", { path, content }),

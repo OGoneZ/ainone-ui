@@ -93,6 +93,57 @@ export interface OpenOptions {
   resumeSessionId?: string;
   /** 收到 available_commands_update 通知时回调（F-4-7 slash 补全数据源） */
   onCommands?: (words: CommandWord[]) => void;
+  /** P4 启动守卫：子进程退出信号——initialize 等待中进程先退出 = 立即报错（带 stderr 尾迹） */
+  closed?: Promise<{ code: number | null }>;
+  /** P4 启动守卫：stderr 尾迹（环形缓冲），进程退出/握手超时时拼进错误信息 */
+  stderrTail?: () => string;
+  /** P4 启动守卫：initialize 超时，默认 15_000ms */
+  initTimeoutMs?: number;
+}
+
+/** 启动期错误文案：附退出码与 stderr 尾部，替代模糊的静默失败 */
+function startupFailMessage(what: string, code: number | null | undefined, stderrTail?: () => string): string {
+  const tail = stderrTail?.().trim();
+  const codeStr = code === undefined ? "" : code === null ? "（被信号终止）" : `（退出码 ${code}）`;
+  return tail
+    ? `${what}失败${codeStr}。stderr 尾部：${tail}`
+    : `${what}失败${codeStr}，无 stderr 输出。`;
+}
+
+/** 给「启动期请求」加守卫：进程先退出 / 超时都转为带 stderr 尾迹的明确错误 */
+async function withStartupGuard<T>(
+  p: Promise<T>,
+  what: string,
+  opts: { closed?: Promise<{ code: number | null }>; stderrTail?: () => string; timeoutMs?: number },
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`__startup_timeout__${what}`)), opts.timeoutMs ?? 15_000);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.startsWith("__startup_timeout__")) {
+      throw new Error(
+        `${msg.slice("__startup_timeout__".length)}超时（${opts.timeoutMs ?? 15_000}ms），进程可能卡住。${opts.stderrTail?.().trim() ? `stderr 尾部：${opts.stderrTail().trim()}` : ""}`,
+      );
+    }
+    // 进程退出先于请求完成 → 用退出信息重写错误（原错误多为 EOF 模糊文案）
+    if (opts.closed) {
+      const settled = await Promise.race([
+        opts.closed.then(() => true as const),
+        new Promise<false>((r) => setTimeout(() => r(false), 50)),
+      ]);
+      if (settled) {
+        const { code } = await opts.closed;
+        throw new Error(startupFailMessage(what, code, opts.stderrTail));
+      }
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
@@ -159,32 +210,44 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     }
   })();
 
-  await connection.agent.request(acp.methods.agent.initialize, {
-    protocolVersion: acp.PROTOCOL_VERSION,
-    clientCapabilities: {
-      fs: { readTextFile: true, writeTextFile: true },
-      terminal: false,
-      // F-12-2：声明 form 模式支持（结构化提问卡）
-      elicitation: { form: {} },
-    },
-    clientInfo: { name: "ainone-ui", version: "0.1.0" },
-  });
+  await withStartupGuard(
+    connection.agent.request(acp.methods.agent.initialize, {
+      protocolVersion: acp.PROTOCOL_VERSION,
+      clientCapabilities: {
+        fs: { readTextFile: true, writeTextFile: true },
+        terminal: false,
+        // F-12-2：声明 form 模式支持（结构化提问卡）
+        elicitation: { form: {} },
+      },
+      clientInfo: { name: "ainone-ui", version: "0.1.0" },
+    }),
+    "initialize",
+    { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
+  );
   console.info("[acp] initialize 完成，protocolVersion=", acp.PROTOCOL_VERSION);
 
   if (resumeSessionId) {
     // load：回放历史 update（纯消费不展示），response resolve 后回放结束
-    await connection.agent.request(acp.methods.agent.session.load, {
-      sessionId: resumeSessionId,
-      cwd,
-      mcpServers: [],
-    });
+    await withStartupGuard(
+      connection.agent.request(acp.methods.agent.session.load, {
+        sessionId: resumeSessionId,
+        cwd,
+        mcpServers: [],
+      }),
+      "session/load",
+      { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
+    );
     boundSessionId = resumeSessionId;
     drainQueue();
     console.info("[acp] session/load 完成 sessionId=", resumeSessionId);
   } else {
-    const resp = await connection.agent.request<acp.NewSessionResponse>(
-      acp.methods.agent.session.new,
-      { cwd, mcpServers: [] },
+    const resp = await withStartupGuard(
+      connection.agent.request<acp.NewSessionResponse>(acp.methods.agent.session.new, {
+        cwd,
+        mcpServers: [],
+      }),
+      "session/new",
+      { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
     );
     boundSessionId = resp.sessionId;
     console.info("[acp] session/new 完成 sessionId=", resp.sessionId);
