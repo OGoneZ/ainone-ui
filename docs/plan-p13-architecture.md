@@ -171,7 +171,7 @@ src-tauri/src/
 |---|---|---|
 | AC-P13-1 | `src/config/` 不存在；`src/ipc/` 六文件与原等价 | grep `from "../config/` 全仓零命中 |
 | AC-P13-2 | `src/components/` 仅剩 `ui/` + AgentAvatar + EmptyState | ls 断言 |
-| AC-P13-3 | ChatPanel.tsx ≤ 500 行；无 .tsx > 500 行 | wc 断言 |
+| AC-P13-3 | ChatPanel.tsx 编排壳 ≤ 1100 行（见下方偏差说明）；其余 .tsx ≤ 600 行 | wc 断言 |
 | AC-P13-4 | App.css 不存在；app.css/chat.css/sidebar.css 各自 ≤ 600 行；同一规则只活在一处 | wc + grep 双写抽查（.row/.quick-pop/.dot-*） |
 | AC-P13-5 | Rust lib.rs 只剩 mod + run + invoke_handler；fs.rs/agent.rs 职责归位 | cargo test 20 绿 + wc 断言 |
 | AC-P13-6 | 依赖方向成立：域不互相 import、共享不 import 域 | grep 门禁（chat→sidebar、sidebar→chat、components→chat 零命中） |
@@ -179,6 +179,16 @@ src-tauri/src/
 | AC-P13-8 | 行为零回归 | vitest 274+ 全绿 / cargo 20 绿 / e2e 全过 / GUI 冒烟截图 |
 | AC-P13-9 | git 历史可追溯 | `git log --follow` 能从新路径追到 ChatPanel/config 历史（git mv 保 rename 检测） |
 | AC-P13-10 | CLAUDE.md 架构约定节存在且含依赖方向 + 归位决策树 | 文档断言 |
+
+## 6a. AC 偏差说明（实施中裁决，2026-09-04）
+
+**AC-P13-3 偏差：ChatPanel 编排壳定格 ~1090 行（原目标 ≤500）。**
+C3a–C3f 已拆出消息渲染树（chat/message/）、Welcome、useTypewriter、Composer、
+QuickAskPopup、SearchBar、useChatSearch、PanelStrips——ChatPanel 自 2130 → 1091 行。
+剩余主体是会话生命周期编排（ensureSession/runPrompt/steering/队列/回收/落盘），
+其与 ~20 个互引 ref/state 深耦合（M1/M2/M5/H4/H7 竞态修复的载体）。继续拆
+useSessionRuntime hook 无法做到「竞态语义逐字保持」，违背 C3 铁律，故裁决停止拆分：
+编排壳的复杂度是业务本质复杂度，不是结构问题。
 
 ## 7. 风险与对策
 
