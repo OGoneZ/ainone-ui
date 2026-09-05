@@ -415,6 +415,14 @@ tree-row:hover .filetree-ref {
   flex-shrink: 0;
 }
 
+/* P16a：flexlayout Maximize/Restore 图标是 1em 尺寸——用 font-size 控制大小，
+   fill 走其内部 var(--color-icon)？否——本仓未引 flexlayout 的 CSS 变量，改为局部覆盖 */
+.filepreview-close .flexlayout-ext-icon svg,
+.filepreview-close > svg {
+  width: 14px;
+  height: 14px;
+}
+
 .filepreview-close:hover {
   background: var(--bg-2);
   color: var(--text-primary);

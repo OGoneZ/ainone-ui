@@ -14,7 +14,8 @@ import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
-import { XIcon, FileTextIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
+import { XIcon, FileTextIcon } from "lucide-react";
+import { MaximizeIcon as FlexMaximizeIcon, RestoreIcon as FlexRestoreIcon } from "flexlayout-react";
 import { resolvePreviewKind, shikiLangFor, PREVIEW_TEXT_LIMIT, type PreviewKind } from "./previewKind";
 import { logger } from "@/lib/logger";
 import { Button } from "@/components/ui/button";
@@ -190,6 +191,11 @@ export function FilePreview({ path, onClose }: Props) {
         <FileTextIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
         <span className="filepreview-title" title={path}>{title}</span>
         <span className="filepreview-kind">{kind}</span>
+        <button type="button" className="filepreview-close" aria-label="关闭预览" onClick={onClose}>
+          <XIcon style={{ width: 14, height: 14 }} />
+        </button>
+        {/* P16a：全屏钮贴在关闭钮左侧（flex 顺序：… × ⛶），图标复用 flexlayout session tab
+            的 Maximize/Restore 同款路径（四角括号），视觉与 session 全屏一致 */}
         <button
           type="button"
           className="filepreview-close"
@@ -197,10 +203,7 @@ export function FilePreview({ path, onClose }: Props) {
           title={fullscreen ? "退出全屏" : "全屏"}
           onClick={() => setFullscreen((v) => !v)}
         >
-          {fullscreen ? <Minimize2Icon style={{ width: 14, height: 14 }} /> : <Maximize2Icon style={{ width: 14, height: 14 }} />}
-        </button>
-        <button type="button" className="filepreview-close" aria-label="关闭预览" onClick={onClose}>
-          <XIcon style={{ width: 14, height: 14 }} />
+          {fullscreen ? <FlexRestoreIcon /> : <FlexMaximizeIcon />}
         </button>
       </div>
       <div className="filepreview-body">

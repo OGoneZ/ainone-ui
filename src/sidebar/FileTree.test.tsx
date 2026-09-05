@@ -27,7 +27,6 @@ describe("FileTree", () => {
     ]);
     const onRef = vi.fn();
     render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} onOpenFile={vi.fn()} />);
-    const user = userEvent.setup();
 
     // P16a：进入文件 tab 即显示内容（无折叠头）
     expect(await screen.findByText("src")).toBeInTheDocument();
@@ -65,7 +64,6 @@ describe("FileTree", () => {
     render(
       <FileTree cwd="/a/b" modifiedPaths={new Set(["/a/b/app.ts"])} onRefFile={() => {}} onOpenFile={vi.fn()} />,
     );
-    const user = userEvent.setup();
     expect(await screen.findByText("M")).toBeInTheDocument();
   });
 });
