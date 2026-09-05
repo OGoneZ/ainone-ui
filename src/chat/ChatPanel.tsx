@@ -247,6 +247,50 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     } catch {
       /* ignore */
     }
+    // F-18-5：dragDropEnabled=false 后 Tauri 原生拖放事件不再派发，文件拖入
+    // 改走 HTML5 dnd（dragover/drop 读 dataTransfer）；webview 级监听 →
+    // panel 内监听天然按窗格隔离（无需 M5 active 守卫，事件落点即面板）。
+    // 错误环境（jsdom / 浏览器预览无 drag 事件）静默降级。
+    const panelEl = () => panelRef.current;
+    const hasFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return; // 不拦截：flexlayout 的内部/外部拖拽不受影响
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      setDragging(true);
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      if (e.currentTarget === panelEl()) setDragging(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDragging(false);
+      // WKWebView（macOS）在 dragDropEnabled=false 后 File 对象带 webkitRelativePath
+      // 而非绝对路径；Electron 式 f.path 仅 Chromium 提供。macOS 下 HTML5 文件
+      // 拖入拿不到绝对路径 → 走 File.name 兜底不可行，改为「读取文件内容」语义：
+      // 直接读文本进附件不可靠（二进制），故 toast 引导改用 ＋ 按钮选择文件。
+      const count = e.dataTransfer?.files?.length ?? 0;
+      const anyPath = Array.from(e.dataTransfer?.files ?? []).some(
+        (f) => typeof (f as File & { path?: string }).path === "string",
+      );
+      if (count > 0 && anyPath) {
+        const paths = Array.from(e.dataTransfer!.files)
+          .map((f) => (f as File & { path?: string }).path!)
+          .filter(Boolean);
+        const abs = filterAbsoluteFiles(paths.map((p) => ({ path: p })));
+        if (abs.length > 0) addFiles(abs);
+      } else if (count > 0) {
+        toast.info("当前系统拿不到拖入文件的完整路径，请用 ＋ 按钮选择文件");
+      }
+    };
+    // 挂载时 panelRef 尚未赋值（effect 在 render 后运行，panelRef.current 已可用）
+    const host = panelEl();
+    host?.addEventListener("dragover", onDragOver);
+    host?.addEventListener("dragleave", onDragLeave);
+    host?.addEventListener("drop", onDrop);
     // F-11-6 快问悬浮窗 Esc 关闭（F-15-2：会话内搜索已移除，全局搜索走 App 层 Ctrl+F）
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -333,6 +377,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       window.removeEventListener("ainone:rewind-request", onRewindRequest);
       document.removeEventListener("mousedown", onDocMouseDown);
       unlisten?.();
+      host?.removeEventListener("dragover", onDragOver);
+      host?.removeEventListener("dragleave", onDragLeave);
+      host?.removeEventListener("drop", onDrop);
       sessionRef.current?.dispose().catch(() => {});
       drop(tabKey);
       // H4：tabKey 是内存递增（tab-N），重启后会被新 Tab 复用——关闭 Tab 必须清队列，
@@ -953,7 +1000,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const empty = messages.length === 0;
 
   // F-16-3（DEC-50）：dock 高度实测 → panel 级 CSS 变量 --dock-h，
-  // .chat 的 padding-bottom 引用它，末条消息不再被输入框遮挡
+  // .chat 的 padding-bottom 引用它，末条消息不再被输入框遮挡。
+  // P18 修复遮挡根因：flexlayout 非激活 tab 是 display:none → dock.offsetHeight=0，
+  // observer 会把 --dock-h 写成 0 → padding 塌陷只剩 8px。守卫：只写 >0 的值。
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -961,7 +1010,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const dock = dockRef.current;
     if (!panel || !dock) return;
     const apply = () => {
-      panel.style.setProperty("--dock-h", `${dock.offsetHeight}px`);
+      if (dock.offsetHeight > 0) {
+        panel.style.setProperty("--dock-h", `${dock.offsetHeight}px`);
+      }
     };
     apply();
     const ro = new ResizeObserver(apply);

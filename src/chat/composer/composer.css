@@ -201,11 +201,56 @@
   background: var(--bg-1);
   border-color: var(--bg-3);
   box-shadow: none;
+  /* F-18-1：高度自适应（Composer 用 scrollHeight 写 height），min 一行；
+   * resize:none 保持——增长由 JS 控制（上限 8 行）。 */
+  min-height: 36px;
+  max-height: 176px;
+  overflow-y: auto;
+  line-height: 1.6;
 }
 
 .row textarea:focus {
   border-color: var(--primary);
   background: var(--bg-1);
+}
+
+/* —— F-18-2 全屏编辑态：.row 撑满 panel（fixed 定位盖住整个窗格）—— */
+.composer-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+  background: var(--bg-1);
+  box-shadow: none;
+  padding: 16px;
+  align-items: stretch;
+}
+
+.composer-expanded textarea {
+  flex: 1;
+  max-height: none;
+  font-size: 1.05em;
+  resize: none;
+}
+
+.composer-expand-head {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 展开开关钮（收起态）：竖排底部对齐与发送/停止一致 */
+.composer-expand-btn {
+  align-self: flex-end;
+  margin-bottom: 2px;
 }
 
 /* ④ 悬浮毛玻璃卡（渐进增强：实底兜底，支持时才叠加 blur + 半透明） */

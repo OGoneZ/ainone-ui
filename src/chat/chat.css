@@ -3,11 +3,13 @@
 /* —— 聊天面板 —— */
 .chat {
   /* F-15-1（DEC-41）：消息区独占整高，底部用 padding 预留悬浮 dock 空间。
-   * F-16-3（DEC-50）：--dock-h 由 ResizeObserver 实测注入（panel.style），
-   * 随条带增减动态变化；120px 仅是变量未注入前的兜底。 */
+   * F-16-3（DEC-50）：--dock-h 由 ResizeObserver 实测注入（panel.style）。
+   * P18：兜底从 120px 提到 200px——非激活窗格 --dock-h 未注入/为 0 期间
+   * （display:none 不可测），200px 覆盖 badge+输入行的常见高度，宁可多留白
+   * 也不遮挡；激活窗格 observer 会立刻覆盖为实测值。 */
   flex: 1;
   overflow-y: auto;
-  padding-bottom: calc(var(--dock-h, 120px) + 8px);
+  padding-bottom: calc(var(--dock-h, 200px) + 12px);
   border-radius: var(--radius-sm);
   padding-top: 12px;
   padding-left: 12px;
@@ -27,7 +29,8 @@
   bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(100% - 24px, 860px);
+  /* F-18-1：加宽到 1080px（超宽屏下更接近全宽的 VS Code 输入体感） */
+  width: min(100% - 24px, 1080px);
   display: flex;
   flex-direction: column;
   gap: 4px;

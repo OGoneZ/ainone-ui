@@ -3,12 +3,12 @@
 // 自 ChatPanel 拆出（P13 C3b）：菜单键盘导航 / IME 防护（M4）/ 菜单互斥（M3）逻辑
 // 逐字随迁，行为不变。
 
-import { useState, type FormEvent, type KeyboardEvent, type ChangeEvent, type RefObject } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type ChangeEvent, type RefObject } from "react";
 import { isSlashInput, completeCommand, filterCommands } from "@/chat/logic/slash";
 import { detectAtToken, applyAtToken } from "@/chat/logic/atFile";
 import type { CommandWord } from "@/store/sessionStore";
 import { VoiceInput } from "./VoiceInput";
-import { SendIcon, StopIcon } from "@/components/ui/icons";
+import { SendIcon, StopIcon, ExpandIcon, ShrinkIcon } from "@/components/ui/icons";
 
 export interface AtToken {
   query: string;
@@ -67,10 +67,20 @@ export function Composer({
   const [slashClosed, setSlashClosed] = useState(false);
   const [slashIdx, setSlashIdx] = useState(-1);
   const [atIdx, setAtIdx] = useState(0);
+  // F-18-2：输入框全屏编辑态
+  const [expanded, setExpanded] = useState(false);
   const slashOpen = isSlashInput(input) && !slashClosed;
   const slashMatches = slashOpen ? filterCommands(commands, input) : [];
   const slashHighlight = slashIdx >= 0 && slashIdx < slashMatches.length ? slashIdx : 0;
   const atHighlight = atIdx >= 0 && atIdx < atMatches.length ? atIdx : 0;
+
+  // F-18-1：textarea 高度自适应（随内容增长，上限 8 行；全屏态交给 CSS 不在此限）
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el || expanded) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 8 * 22)}px`;
+  }, [input, expanded, textareaRef]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -175,6 +185,13 @@ export function Composer({
         return;
       }
     }
+    // F-18-2：全屏编辑态 Esc 退出（在菜单 Esc 判定之后，菜单优先关闭）
+    if (e.key === "Escape" && expanded) {
+      e.preventDefault();
+      setExpanded(false);
+      return;
+    }
+    // F-18-3：Enter 发送 / Shift+Enter 换行（默认行为）
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       onSubmit();
@@ -182,12 +199,26 @@ export function Composer({
   }
 
   return (
-    <form className="row" onSubmit={submit}>
+    <form className={expanded ? "row composer-expanded" : "row"} onSubmit={submit}>
       <button type="button" className="attach-btn" aria-label="添加文件" title="添加文件" onClick={onPickFiles}>
         ＋
       </button>
       <VoiceInput onTranscribed={onVoice} />
       <div className="input-wrap">
+        {expanded && (
+          <div className="composer-expand-head">
+            <span>编辑消息（Shift+Enter 换行，Enter 发送）</span>
+            <button
+              type="button"
+              aria-label="退出全屏编辑"
+              title="收起（Esc）"
+              className="msg-action-btn"
+              onClick={() => setExpanded(false)}
+            >
+              <ShrinkIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+            </button>
+          </div>
+        )}
         {slashOpen && slashMatches.length > 0 && (
           <div className="slash-menu" ref={slashMenuRef}>
             {slashMatches.map((w, i) => (
@@ -244,6 +275,18 @@ export function Composer({
           rows={1}
         />
       </div>
+      {/* F-18-2：全屏编辑开关（收起态显示展开钮；展开态由头部收起钮负责） */}
+      {!expanded && (
+        <button
+          type="button"
+          aria-label="全屏编辑"
+          title="全屏编辑长消息"
+          className="msg-action-btn composer-expand-btn"
+          onClick={() => setExpanded(true)}
+        >
+          <ExpandIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+        </button>
+      )}
       <button
         type="submit"
         disabled={starting}
