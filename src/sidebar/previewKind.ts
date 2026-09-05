@@ -25,7 +25,7 @@ const BINARY_EXTS = new Set([
   "so", "dylib", "dll", "class", "jar", "pyc", "o", "a", "lockb",
 ]);
 
-/** 扩展名 → shiki 语言 id（预览常用白名单，按需扩充） */
+/** 扩展名 → shiki 语言 id（预览常用白名单，按需扩充；值必须能被 LANG_LOADERS 加载） */
 const CODE_LANGS: Record<string, string> = {
   ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
   py: "python", rb: "ruby", rs: "rust", go: "go", java: "java", kt: "kotlin", c: "c", h: "c",
@@ -33,11 +33,10 @@ const CODE_LANGS: Record<string, string> = {
   json: "json", jsonc: "json", json5: "json", toml: "toml", yaml: "yaml", yml: "yaml",
   xml: "xml", html: "html", htm: "html", css: "css", scss: "scss", less: "less",
   sh: "shellscript", bash: "shellscript", zsh: "shellscript",
-  sql: "sql", graphql: "graphql", proto: "proto",
-  vue: "vue", svelte: "svelte", astro: "astro",
-  lua: "lua", pl: "perl", r: "r", dart: "dart", ex: "elixir", erl: "erlang",
-  hs: "haskell", ml: "ocaml", clj: "clojure", scala: "scala", zig: "zig",
-  vim: "viml", dockerfile: "dockerfile", makefile: "makefile",
+  sql: "sql",
+  vue: "vue", svelte: "svelte",
+  lua: "lua", zig: "zig",
+  dockerfile: "dockerfile", makefile: "makefile",
 };
 
 /** 取小写扩展名（无点返回 ""） */

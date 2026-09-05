@@ -35,6 +35,7 @@ type LoadState =
 let highlighterPromise: Promise<Awaited<ReturnType<typeof createHighlighterCore>>> | null = null;
 const loadedLangs = new Set<string>();
 
+// 预载语言（静态 import：vite 可静态分析，进预打包缓存）
 const COMMON_LANGS = [
   import("shiki/langs/typescript.mjs"), import("shiki/langs/tsx.mjs"),
   import("shiki/langs/javascript.mjs"), import("shiki/langs/jsx.mjs"),
@@ -45,6 +46,45 @@ const COMMON_LANGS = [
   import("shiki/langs/bash.mjs"), import("shiki/langs/markdown.mjs"),
   import("shiki/langs/sql.mjs"),
 ];
+// P16a 修复：动态模板 import + @vite-ignore 在浏览器里按相对 URL 解析（拿到
+// SPA fallback 的 HTML → SyntaxError → 全部降级纯文本）。改为静态注册表：
+// 每种语言一个可被 vite 改写的静态 import，白名单外语言不加载（降级纯文本）。
+const LANG_LOADERS: Record<string, () => Promise<{ default: unknown }>> = {
+  typescript: () => import("shiki/langs/typescript.mjs"),
+  tsx: () => import("shiki/langs/tsx.mjs"),
+  javascript: () => import("shiki/langs/javascript.mjs"),
+  jsx: () => import("shiki/langs/jsx.mjs"),
+  python: () => import("shiki/langs/python.mjs"),
+  rust: () => import("shiki/langs/rust.mjs"),
+  go: () => import("shiki/langs/go.mjs"),
+  json: () => import("shiki/langs/json.mjs"),
+  yaml: () => import("shiki/langs/yaml.mjs"),
+  toml: () => import("shiki/langs/toml.mjs"),
+  css: () => import("shiki/langs/css.mjs"),
+  html: () => import("shiki/langs/html.mjs"),
+  bash: () => import("shiki/langs/bash.mjs"),
+  shellscript: () => import("shiki/langs/shellscript.mjs"),
+  markdown: () => import("shiki/langs/markdown.mjs"),
+  sql: () => import("shiki/langs/sql.mjs"),
+  xml: () => import("shiki/langs/xml.mjs"),
+  scss: () => import("shiki/langs/scss.mjs"),
+  less: () => import("shiki/langs/less.mjs"),
+  c: () => import("shiki/langs/c.mjs"),
+  cpp: () => import("shiki/langs/cpp.mjs"),
+  java: () => import("shiki/langs/java.mjs"),
+  kotlin: () => import("shiki/langs/kotlin.mjs"),
+  ruby: () => import("shiki/langs/ruby.mjs"),
+  csharp: () => import("shiki/langs/csharp.mjs"),
+  swift: () => import("shiki/langs/swift.mjs"),
+  php: () => import("shiki/langs/php.mjs"),
+  vue: () => import("shiki/langs/vue.mjs"),
+  svelte: () => import("shiki/langs/svelte.mjs"),
+  dockerfile: () => import("shiki/langs/dockerfile.mjs"),
+  makefile: () => import("shiki/langs/makefile.mjs"),
+  graphql: () => import("shiki/langs/graphql.mjs"),
+  lua: () => import("shiki/langs/lua.mjs"),
+  zig: () => import("shiki/langs/zig.mjs"),
+};
 
 async function getHighlighter(lang: string) {
   if (!highlighterPromise) {
@@ -56,9 +96,11 @@ async function getHighlighter(lang: string) {
   }
   const hl = await highlighterPromise;
   if (!loadedLangs.has(lang)) {
+    const load = LANG_LOADERS[lang];
+    if (!load) return null; // 白名单外语言 → 降级纯文本
     try {
-      const mod = await import(/* @vite-ignore */ `shiki/langs/${lang}.mjs`);
-      await hl.loadLanguage(mod.default);
+      const mod = await load();
+      await hl.loadLanguage(mod.default as never);
       loadedLangs.add(lang);
     } catch (e) {
       logger.warn("preview", "shiki-lang-load-fail", { lang, e: String(e) });
