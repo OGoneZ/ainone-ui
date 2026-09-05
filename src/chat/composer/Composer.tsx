@@ -4,6 +4,7 @@
 // 逐字随迁，行为不变。
 
 import { useEffect, useState, type FormEvent, type KeyboardEvent, type ChangeEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { isSlashInput, completeCommand, filterCommands } from "@/chat/logic/slash";
 import { detectAtToken, applyAtToken } from "@/chat/logic/atFile";
 import type { CommandWord } from "@/store/sessionStore";
@@ -198,27 +199,69 @@ export function Composer({
     }
   }
 
+  // F-19-2：全屏编辑用 Portal 渲染到 body——祖先 .composer-dock 有
+  // transform（居中偏移），按 CSS 规范 transform 非 none 的元素是 fixed
+  // 后代的包含块，form 的 fixed 定位会被锁死在 dock 内（实测「坍塌」根因）。
+  if (expanded) {
+    return createPortal(
+      <form className="row composer-expanded" onSubmit={submit}>
+        <div className="composer-expand-head">
+          <span>编辑消息（Shift+Enter 换行，Enter 发送）</span>
+          <button
+            type="button"
+            aria-label="退出全屏编辑"
+            title="收起（Esc）"
+            className="msg-action-btn"
+            onClick={() => setExpanded(false)}
+          >
+            <ShrinkIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+          </button>
+        </div>
+        <textarea
+          ref={textareaRef}
+          autoFocus
+          aria-label="消息输入"
+          value={input}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder={busy ? "运行中，输入将打断当前 turn…" : "输入消息…"}
+          disabled={starting}
+          rows={1}
+        />
+        <div className="composer-expand-actions">
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={!busy}
+            aria-label="停止"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+            style={{ backgroundColor: "var(--bg-2)", color: busy ? "var(--danger)" : "var(--text-secondary)" }}
+          >
+            <StopIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+          </button>
+          <button
+            type="submit"
+            disabled={starting}
+            aria-label="发送"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full px-4"
+            style={{ backgroundColor: "var(--primary)", color: "var(--primary-foreground)" }}
+          >
+            <SendIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+            发送
+          </button>
+        </div>
+      </form>,
+      document.body,
+    );
+  }
+
   return (
-    <form className={expanded ? "row composer-expanded" : "row"} onSubmit={submit}>
+    <form className="row" onSubmit={submit}>
       <button type="button" className="attach-btn" aria-label="添加文件" title="添加文件" onClick={onPickFiles}>
         ＋
       </button>
       <VoiceInput onTranscribed={onVoice} />
       <div className="input-wrap">
-        {expanded && (
-          <div className="composer-expand-head">
-            <span>编辑消息（Shift+Enter 换行，Enter 发送）</span>
-            <button
-              type="button"
-              aria-label="退出全屏编辑"
-              title="收起（Esc）"
-              className="msg-action-btn"
-              onClick={() => setExpanded(false)}
-            >
-              <ShrinkIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
-            </button>
-          </div>
-        )}
         {slashOpen && slashMatches.length > 0 && (
           <div className="slash-menu" ref={slashMenuRef}>
             {slashMatches.map((w, i) => (

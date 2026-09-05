@@ -214,23 +214,28 @@
   background: var(--bg-1);
 }
 
-/* —— F-18-2 全屏编辑态：.row 撑满 panel（fixed 定位盖住整个窗格）—— */
+/* —— F-19-2 全屏编辑态：Portal 渲染到 body（祖先有 transform，
+ *  fixed 会被锁进 dock 的包含块 → 必须脱离）—— */
 .composer-expanded {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
-  width: 100%;
+  width: 100vw;
   max-width: none;
   margin: 0;
   border-radius: 0;
   background: var(--bg-1);
   box-shadow: none;
-  padding: 16px;
+  padding: 60px 24px 20px;
+  display: flex;
+  flex-direction: column;
   align-items: stretch;
+  gap: 10px;
 }
 
 .composer-expanded textarea {
   flex: 1;
+  min-height: 0;
   max-height: none;
   font-size: 1.05em;
   resize: none;
@@ -238,13 +243,21 @@
 
 .composer-expand-head {
   position: absolute;
-  top: 6px;
-  right: 12px;
+  top: 14px;
+  left: 24px;
+  right: 24px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
+}
+
+.composer-expand-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* 展开开关钮（收起态）：竖排底部对齐与发送/停止一致 */
