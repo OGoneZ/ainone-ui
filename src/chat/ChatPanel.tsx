@@ -170,6 +170,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [files, setFiles] = useState<FileRef[]>([]);
   // P16 F-16-1 文件预览浮层：当前预览的绝对路径（null=关闭）
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  // 稳定引用：FilePreview 已 memo，内联箭头会击穿（P16a）
+  const closePreview = useCallback(() => setPreviewPath(null), []);
   // F-8-3 拖拽悬停高亮
   const [dragging, setDragging] = useState(false);
   // F-8-6 回溯：待确认的目标消息下标（null = 无）
@@ -970,9 +972,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   return (
     <div className="panel" ref={panelRef} data-dragging={dragging ? "true" : "false"}>
       {/* P16 F-16-1 文件预览浮层（DEC-48）：窗格内右侧 overlay，非模态 */}
-      {previewPath && (
-        <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
-      )}
+      {previewPath && <FilePreview path={previewPath} onClose={closePreview} />}
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}

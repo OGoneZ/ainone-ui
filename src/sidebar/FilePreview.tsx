@@ -5,7 +5,7 @@
 // 关闭：× / Esc；非模态（左侧消息区仍可滚动）。
 // P16a：右上角全屏切换；左缘拖拽手柄调宽（280px~80% 窗宽，非全屏态生效）。
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -110,6 +110,12 @@ async function getHighlighter(lang: string) {
   return hl;
 }
 
+// P16a 修 md 预览卡顿：plugins/shikiTheme 必须是模块级常量——
+// 内联对象每次渲染都是新引用，会击穿 Streamdown 的 memo，导致 ChatPanel
+// 流式期间的高频重渲染每次都驱动 md 文档全量重 reconcile（肉眼可见卡顿）。
+const MD_PLUGINS = { code, math };
+const SHIKI_THEMES: [string, string] = ["github-light", "github-dark"];
+
 /** 跟随 App 的 root data-theme（自持 matchMedia 会与 App 的 auto/light/dark 设置不一致） */
 function subscribeRootTheme(onChange: () => void) {
   const obs = new MutationObserver(onChange);
@@ -117,7 +123,7 @@ function subscribeRootTheme(onChange: () => void) {
   return () => obs.disconnect();
 }
 
-export function FilePreview({ path, onClose }: Props) {
+function FilePreviewImpl({ path, onClose }: Props) {
   const kind: PreviewKind = useMemo(() => resolvePreviewKind(path), [path]);
   const [state, setState] = useState<LoadState>({ t: "loading" });
   const [content, setContent] = useState("");
@@ -301,11 +307,7 @@ export function FilePreview({ path, onClose }: Props) {
 
         {state.t === "ready" && kind === "markdown" && (
           <div className="filepreview-md">
-            <Streamdown
-              mode="static"
-              plugins={{ code, math }}
-              shikiTheme={["github-light", "github-dark"]}
-            >
+            <Streamdown mode="static" plugins={MD_PLUGINS} shikiTheme={SHIKI_THEMES}>
               {content}
             </Streamdown>
           </div>
@@ -346,3 +348,5 @@ function escapeHtml(s: string): string {
 function previewDefaultWidth(): number {
   return Math.min(Math.floor(window.innerWidth / 2), 720);
 }
+
+export const FilePreview = memo(FilePreviewImpl);
