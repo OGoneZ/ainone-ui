@@ -23,15 +23,18 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  GitFork,
   GripVertical,
   Loader2,
   MessageSquare,
   MessageSquarePlus,
+  Mic,
   Pencil,
   Plus,
   Settings,
   Square,
   Terminal,
+  Undo2,
   User,
   Wrench,
   X,
@@ -69,3 +72,6 @@ export const CheckIcon = Check;
 export const GripVerticalIcon = GripVertical; // 拖拽手柄
 export const EditIcon = Pencil; // F-12-1 编辑重试
 export const CommentIcon = MessageSquarePlus; // F-12-5 diff 行内评论
+export const ForkIcon = GitFork; // F-15-4 分叉（icon-only 化）
+export const RewindIcon = Undo2; // F-15-4 回溯（icon-only 化）
+export const MicIcon = Mic; // F-15-5 语音输入（去 emoji）

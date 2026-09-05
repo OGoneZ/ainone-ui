@@ -17,6 +17,8 @@ import {
   ChevronRightIcon,
   CopyIcon,
   EditIcon,
+  ForkIcon,
+  RewindIcon,
   ToolIcon,
 } from "@/components/ui/icons";
 import { toast } from "sonner";
@@ -50,33 +52,32 @@ export const MessageLine = memo(function MessageLine({
 }) {
   if (msg.role === "user") {
     return (
-      <div className="group flex justify-end my-1.5">
+      <div className="group flex flex-col items-end my-1.5">
         <div className="user-bubble max-w-[75%] px-3.5 py-2.5" style={{ backgroundColor: "var(--message-user-bg)", color: "#fff", borderRadius: "var(--radius-lg)", borderBottomRightRadius: "4px" }}>
           <span className="whitespace-pre-wrap break-words">{msg.text}</span>
         </div>
-        {/* hover 操作行：F-12-1 编辑 + F-8-6 回溯 */}
-        <div className="ml-2 self-center flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        {/* F-15-4：编辑/回溯移到气泡下方 hover 浮现的 icon-only 小钮行（DEC-44） */}
+        <div className="mt-0.5 mr-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           {onEdit && (
             <button
               type="button"
               aria-label="编辑并重发"
-              className="rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
-              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              title="编辑并重发"
+              className="msg-action-btn"
               onClick={onEdit}
             >
-              <EditIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
-              编辑
+              <EditIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
             </button>
           )}
           {onRewind && (
             <button
               type="button"
               aria-label="回溯到这里"
-              className="rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
-              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              title="回溯到这里"
+              className="msg-action-btn"
               onClick={onRewind}
             >
-              ↩ 回溯
+              <RewindIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
             </button>
           )}
         </div>
@@ -104,24 +105,24 @@ export const MessageLine = memo(function MessageLine({
             <ActivityGroupCard key={i} item={item} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
           ),
         )}
-        {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制） */}
+        {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {onFork && (
             <button
               type="button"
               aria-label="从这里分叉"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
-              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+              title="从这里分叉"
+              className="msg-action-btn"
               onClick={onFork}
             >
-              ⑂ 分叉
+              <ForkIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
             </button>
           )}
           <button
             type="button"
             aria-label="复制回复"
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
-            style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+            title="复制回复"
+            className="msg-action-btn"
             onClick={() => {
               const text = msg.blocks
                 .map((b) => (b.kind === "text" ? b.text : b.kind === "thought" ? b.text : ""))
@@ -134,7 +135,6 @@ export const MessageLine = memo(function MessageLine({
             }}
           >
             <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
-            复制
           </button>
         </div>
       </div>

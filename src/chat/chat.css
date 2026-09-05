@@ -168,6 +168,27 @@
 /* ======================= P9 · F-9-2 会话内搜索已移除（F-15-2 DEC-42）：
  * 全局搜索（Ctrl+F，GlobalSearchDialog）覆盖该需求，会话内条带删除。 */
 
+/* —— F-15-4 消息操作 icon-only 小圆钮（DEC-44）：hover 消息浮现，
+ * 28px 触达区，aria-label/title 承载语义 —— */
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.msg-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* ======================= P9 · F-9-3 命令队列 ======================= */
 .queue-panel {
   margin: 4px 2px;

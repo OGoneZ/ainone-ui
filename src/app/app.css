@@ -280,10 +280,13 @@ select {
   min-height: 0;
 }
 
-/* —— 原生表单控件（shadcn Button 之外的 input/textarea/button）—— */
+/* —— 原生表单控件（shadcn Button 之外的 input/textarea/button）——
+ * F-15-4：排除 Streamdown 渲染的按钮（data-streamdown 属性）——它们自带
+ * tailwind 尺寸类（p-1 icon-only），被这里的 padding/border 污染成超大盒子
+ * （代码块 copy/download 变「大盒子」的根因）。 */
 input,
 textarea,
-button {
+button:not([data-streamdown]):not([data-streamdown] *) {
   border-radius: var(--radius-sm);
   border: 1px solid var(--bg-3);
   padding: 0.6em 1em;
