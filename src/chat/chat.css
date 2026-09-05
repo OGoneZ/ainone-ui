@@ -165,56 +165,8 @@
   flex-shrink: 0;
 }
 
-/* ======================= P9 · F-9-2 会话内搜索 ======================= */
-.search-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 2px 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--bg-3);
-  border-radius: var(--radius);
-  background: var(--bg-1);
-}
-
-.search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 13px;
-  padding: 4px 0;
-}
-
-.search-input:focus {
-  outline: none;
-}
-
-.search-count {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.search-close {
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 2px;
-}
-
-.search-close:hover {
-  color: var(--text-primary);
-}
-
-/* 命中消息高亮 */
-[data-search-hit="true"] {
-  outline: 2px solid var(--primary);
-  outline-offset: -2px;
-  border-radius: var(--radius-sm);
-}
+/* ======================= P9 · F-9-2 会话内搜索已移除（F-15-2 DEC-42）：
+ * 全局搜索（Ctrl+F，GlobalSearchDialog）覆盖该需求，会话内条带删除。 */
 
 /* ======================= P9 · F-9-3 命令队列 ======================= */
 .queue-panel {

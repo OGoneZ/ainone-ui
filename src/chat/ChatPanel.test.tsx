@@ -337,7 +337,8 @@ describe("ChatPanel 交互行为", () => {
     expect(onFork).toHaveBeenCalledTimes(1);
   });
 
-  it("F-9-2 搜索：Cmd/Ctrl+F 唤起搜索条 → 输入关键词命中计数（AC-P9-5）", async () => {
+  // F-15-2（DEC-42）：会话内搜索条已移除，全局搜索（Ctrl+F）由 GlobalSearchDialog 承担。
+  it("F-15-2 Ctrl+Shift+F 不再唤起会话内搜索条", async () => {
     mockOpen.mockResolvedValue(
       fakeSession([
         { type: "agent_text", text: "这个文件包含安全漏洞" },
@@ -350,30 +351,7 @@ describe("ChatPanel 交互行为", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
     await screen.findByText(/安全漏洞/);
 
-    // 唤起搜索条
     await user.keyboard("{Meta>}{Shift>}f{/Shift}{/Meta}");
-    expect(screen.getByLabelText("搜索会话")).toBeInTheDocument();
-
-    // 输入关键词 → 命中计数 1 / 1
-    await user.type(screen.getByLabelText("搜索会话"), "安全漏洞");
-    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
-  });
-
-  it("F-9-2 搜索：无命中 → 显示「无结果」不崩溃（AC-P9-7）", async () => {
-    mockOpen.mockResolvedValue(
-      fakeSession([
-        { type: "agent_text", text: "普通回复" },
-        { type: "turn_stop", stopReason: "end_turn" },
-      ]),
-    );
-    render(<ChatPanel tabKey="k1" adapter={adapter} />);
-    const user = userEvent.setup();
-    await user.type(input(), "hi");
-    await user.click(screen.getByRole("button", { name: "发送" }));
-    await screen.findByText(/普通回复/);
-
-    await user.keyboard("{Meta>}{Shift>}f{/Shift}{/Meta}");
-    await user.type(screen.getByLabelText("搜索会话"), "不存在的内容");
-    expect(await screen.findByText("无结果")).toBeInTheDocument();
+    expect(screen.queryByLabelText("搜索会话")).not.toBeInTheDocument();
   });
 });

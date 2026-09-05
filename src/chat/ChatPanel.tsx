@@ -12,7 +12,6 @@ import { openSession, type AcpSession } from "@/acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
-import { SearchBar } from "@/chat/components/SearchBar";
 import { QuotePanel, AttachList, DiffCommentsBar, EditBanner } from "@/chat/components/PanelStrips";
 import { Composer } from "@/chat/composer/Composer";
 import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
@@ -20,7 +19,6 @@ import { UsageBar } from "@/chat/components/UsageBar";
 import { Welcome } from "@/chat/Welcome";
 import { MessageLine } from "@/chat/message/MessageLine";
 import { useTypewriter } from "@/chat/hooks/useTypewriter";
-import { useChatSearch } from "@/chat/hooks/useChatSearch";
 import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "@/ipc/sessions";
 import { parseLog, serializeMessages } from "@/acp/message-log";
@@ -234,20 +232,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     } catch {
       /* ignore */
     }
-    // F-9-2 搜索 + F-11-6 快问悬浮窗 Esc 关闭（会话内搜索已改绑 Ctrl+Shift+F，DEC-26）
+    // F-11-6 快问悬浮窗 Esc 关闭（F-15-2：会话内搜索已移除，全局搜索走 App 层 Ctrl+F）
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        setSearchOpen((v) => !v);
-      }
       if (e.key === "Escape") {
         if (editTargetRef.current) {
           cancelEdit();
         } else if (quickSelRef.current !== null) {
           setQuickSel(null);
           logger.debug("chat", "quick-pop-dismiss", { reason: "escape" });
-        } else if (searchOpenRef.current) {
-          closeSearchRef.current();
         }
       }
     };
@@ -851,18 +843,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     overscan: 8,
   });
 
-  // F-9-2 会话内搜索（状态机见 chat/hooks/useChatSearch.ts）
-  const {
-    searchOpen, setSearchOpen, searchKeyword, setSearchKeyword, setSearchIdx,
-    searchHits, searchCurIndex, searchIdx, nextHit, closeSearch, searchInputRef,
-  } = useChatSearch(messages, virtualizer);
-
-  // Esc 判定用的最新值镜像（keydown 闭包来自挂载帧；hook state 需逐帧同步）
-  const searchOpenRef = useRef(false);
-  searchOpenRef.current = searchOpen;
-  const closeSearchRef = useRef<() => void>(() => {});
-  closeSearchRef.current = closeSearch;
-
   // F-11-9 上一条指令回跳气泡
   const lastUserIdx = useMemo(() => lastUserIndex(messages), [messages]);
   const lastUserText = lastUserIdx >= 0 && messages[lastUserIdx].role === "user" ? messages[lastUserIdx].text : "";
@@ -909,23 +889,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
-      <SearchBar
-        keyword={searchKeyword}
-        onKeywordChange={(v) => {
-          setSearchKeyword(v);
-          setSearchIdx(0);
-        }}
-        countText={
-          searchKeyword.trim()
-            ? searchHits.length > 0
-              ? `${searchIdx % searchHits.length + 1} / ${searchHits.length}`
-              : "无结果"
-            : ""
-        }
-        inputRef={searchInputRef}
-        onHit={nextHit}
-        onClose={closeSearch}
-      />
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}
@@ -969,7 +932,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                 key={vi.key}
                 data-index={vi.index}
                 ref={virtualizer.measureElement}
-                data-search-hit={vi.index === searchCurIndex ? "true" : "false"}
                 data-flash={vi.index === lastPromptFlash ? "true" : "false"}
                 style={{
                   position: "absolute",
