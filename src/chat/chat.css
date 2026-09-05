@@ -19,29 +19,33 @@
   gap: 8px;
 }
 
-/* —— F-15-1 底部悬浮 dock（DEC-41）—— */
+/* —— F-15-1 底部悬浮 dock（DEC-41）——
+ * F-17-2：视觉收窄——不再通栏贴边，改为居中浮岛（max-width + 四向圆角 +
+ * 浮起阴影），消息从两侧与下方穿过；毛玻璃透明保持。 */
 .composer-dock {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100% - 24px, 860px);
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 4px 10px 10px;
+  padding: 6px 12px 10px;
   max-height: 72%;
   overflow-y: auto;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: var(--radius-lg);
   background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
   z-index: 10;
 }
 
 @supports (backdrop-filter: blur(1px)) {
   .composer-dock {
-    background: color-mix(in srgb, var(--bg-1) 86%, transparent);
+    background: color-mix(in srgb, var(--bg-1) 72%, transparent);
     backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
     -webkit-backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
-    border-top: 1px solid color-mix(in srgb, var(--bg-3) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bg-3) 70%, transparent);
   }
 }
 
@@ -194,8 +198,9 @@
    层级：高于 composer-dock（--z-float），低于弹层（--z-popover）。 */
 .queue-dock {
   position: absolute;
+  /* F-17-2：composer-dock 改居中浮岛后，队列徽标贴右缘（在浮岛外侧） */
   right: 12px;
-  bottom: 8px;
+  bottom: 18px;
   z-index: var(--z-float);
   display: flex;
   flex-direction: column;
