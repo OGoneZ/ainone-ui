@@ -951,7 +951,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const empty = messages.length === 0;
 
   // F-16-3（DEC-50）：dock 高度实测 → panel 级 CSS 变量 --dock-h，
-  // .chat 的 padding-bottom 引用它，末条消息不再被输入框遮挡
+  // .chat 的 padding-bottom 引用它，末条消息不再被输入框遮挡。
+  // P18 修复遮挡根因：flexlayout 非激活 tab 是 display:none → dock.offsetHeight=0，
+  // observer 会把 --dock-h 写成 0 → padding 塌陷只剩 8px。守卫：只写 >0 的值。
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -959,7 +961,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const dock = dockRef.current;
     if (!panel || !dock) return;
     const apply = () => {
-      panel.style.setProperty("--dock-h", `${dock.offsetHeight}px`);
+      if (dock.offsetHeight > 0) {
+        panel.style.setProperty("--dock-h", `${dock.offsetHeight}px`);
+      }
     };
     apply();
     const ro = new ResizeObserver(apply);
