@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { buildActivityGroups, type RenderItem } from "./activity";
 import type { BlockMsg } from "@/acp/message-log";
 
-const t = (id: string, status = "completed"): BlockMsg => ({
+const t = (id: string, status = "completed", ms?: number): BlockMsg => ({
   kind: "tool",
   toolCallId: id,
   title: `工具${id}`,
   status,
   content: [],
+  ...(ms !== undefined ? { ms } : {}),
 });
 const th = (text: string, ms?: number): BlockMsg => ({ kind: "thought", text, ...(ms !== undefined ? { ms } : {}) });
 const tx = (text: string): BlockMsg => ({ kind: "text", text });
@@ -32,6 +33,19 @@ describe("buildActivityGroups（F-12-3，DEC-36）", () => {
     expect(g.thoughts).toBe(2);
     expect(g.tools).toBe(2);
     expect(g.ms).toBe(2000);
+  });
+
+  it("F-16-2（DEC-49）：组耗时 = 思考 + 工具全段", () => {
+    const r = buildActivityGroups([th("想", 2000), t("a", "completed", 5000)]);
+    expect(r).toHaveLength(1);
+    const g = r[0] as Extract<RenderItem, { type: "activity_group" }>;
+    expect(g.ms).toBe(7000);
+  });
+
+  it("F-16-2：工具无 ms（旧日志/运行中）按 0 计不参与累加", () => {
+    const r = buildActivityGroups([t("a"), t("b", "completed", 1500)]);
+    const g = r[0] as Extract<RenderItem, { type: "activity_group" }>;
+    expect(g.ms).toBe(1500);
   });
 
   it("text 块截断分组", () => {

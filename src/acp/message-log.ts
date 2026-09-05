@@ -17,7 +17,17 @@ import type { ToolContent } from "./session-core";
 export type BlockMsg =
   | { kind: "text"; text: string }
   | { kind: "thought"; text: string; ms?: number }
-  | { kind: "tool"; toolCallId: string; title: string; status: string; content: ToolContent[] };
+  | {
+      kind: "tool";
+      toolCallId: string;
+      title: string;
+      status: string;
+      content: ToolContent[];
+      /** F-16-2（DEC-49）：工具耗时计时——startTs = tool_call 事件时间戳（写入即持久化）；
+       *  ms = 收尾时封口的耗时毫秒。旧日志缺省 → 按 0 计不参与累加。 */
+      startTs?: number;
+      ms?: number;
+    };
 
 export type ChatMsg =
   | { role: "user"; text: string }
@@ -46,7 +56,9 @@ function isBlock(o: unknown): o is BlockMsg {
       typeof b.toolCallId === "string" &&
       typeof b.title === "string" &&
       typeof b.status === "string" &&
-      isToolContent(b.content)
+      isToolContent(b.content) &&
+      (b.startTs === undefined || typeof b.startTs === "number") &&
+      (b.ms === undefined || typeof b.ms === "number")
     );
   return false;
 }
@@ -118,12 +130,14 @@ export function appendTool(blocks: BlockMsg[], tool: BlockMsg & { kind: "tool" }
   return [...blocks, tool];
 }
 
-/** 按 toolCallId 更新 tool block 的 status/content（找不到则原样返回） */
+/** 按 toolCallId 更新 tool block 的 status/content（找不到则原样返回）。
+ *  F-16-2（DEC-49）：status 进入终态（completed/error）且块带 startTs 时封口 ms = now - startTs。 */
 export function updateTool(
   blocks: BlockMsg[],
   toolCallId: string,
   status: string | null,
   content: ToolContent[],
+  now?: () => number,
 ): BlockMsg[] {
   const idx = blocks.findIndex(
     (b) => b.kind === "tool" && b.toolCallId === toolCallId,
@@ -132,10 +146,16 @@ export function updateTool(
   const copy = blocks.slice();
   const b = copy[idx];
   if (b.kind === "tool") {
+    const nextStatus = status ?? b.status;
+    const finished =
+      (nextStatus === "completed" || nextStatus === "error") &&
+      b.startTs !== undefined &&
+      b.ms === undefined;
     copy[idx] = {
       ...b,
-      status: status ?? b.status,
+      status: nextStatus,
       content: content.length > 0 ? content : b.content,
+      ...(finished && now ? { ms: Math.max(0, now() - b.startTs!) } : {}),
     };
   }
   return copy;

@@ -58,11 +58,14 @@ export function applyEvent(
           title: e.title,
           status: e.status ?? "pending",
           content: e.content,
+          // F-16-2（DEC-49）：记起始时间戳，收尾封口耗时
+          startTs: now(),
         }),
       };
     }
     case "tool_update":
-      return { ...acc, blocks: updateTool(acc.blocks, e.toolCallId, e.status ?? null, e.content) };
+      // now 注入：status 到终态时封口工具耗时 ms
+      return { ...acc, blocks: updateTool(acc.blocks, e.toolCallId, e.status ?? null, e.content, now) };
     case "turn_stop":
       return seal(acc, now);
     default:

@@ -31,7 +31,11 @@ export function buildActivityGroups(blocks: BlockMsg[]): RenderItem[] {
     if (group.length === 0) return;
     const thoughts = group.filter((b) => b.kind === "thought").length;
     const tools = group.filter((b) => b.kind === "tool").length;
-    const ms = group.reduce((s, b) => (b.kind === "thought" ? s + (b.ms ?? 0) : s), 0);
+    // F-16-2（DEC-49）：组耗时 = 思考 + 工具全段（thought.ms + tool.ms，缺省 0）
+    const ms = group.reduce(
+      (s, b) => (b.kind === "thought" || b.kind === "tool" ? s + (b.ms ?? 0) : s),
+      0,
+    );
     out.push({ type: "activity_group", thoughts, tools, ms, blocks: group });
     group = [];
   };

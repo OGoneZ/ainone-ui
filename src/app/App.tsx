@@ -3,7 +3,7 @@
 // 侧栏按工作区归集会话；工作区右键：新建会话 / 重命名 / 移除。
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Layout, Model, Actions, DockLocation, type TabNode } from "flexlayout-react";
+import { Layout, Model, Actions, DockLocation, type TabNode, type Node } from "flexlayout-react";
 import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "@/ipc/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "@/ipc/workspaces";
@@ -37,6 +37,7 @@ import {
   clearExternalDragPayload,
   payloadToTab,
 } from "@/app/logic/externalDrag";
+import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
@@ -180,6 +181,16 @@ function App() {
     syncFromModel();
   }
 
+  /** F-16-5（DEC-52）：分屏后对新增 tabset 所在层级的同向 row 均分权重，
+   *  连续 Ctrl+D 等分而非二分。align = "row"（左右）| "col"（上下） */
+  function equalizeAfterSplit(m: Model, orientation: "horz" | "vert") {
+    const active = m.getActiveTabset();
+    if (!active) return;
+    const eq = equalizeSplitFor(active as never, orientation);
+    if (!eq) return;
+    m.doAction(Actions.adjustWeights(eq.rowId, eq.weights));
+  }
+
   /** 分屏：Ctrl+D（左右）/ Ctrl+Shift+D（上下），新窗格 = 同 harness 同 cwd 新会话（DEC-23） */
   function splitCurrent(axis: "row" | "col") {
     const src = activeTab;
@@ -192,6 +203,7 @@ function App() {
       dir,
       activeKey,
     );
+    equalizeAfterSplit(getModel(), axis === "row" ? "horz" : "vert");
     logger.info("split", "split-pane", { axis, srcTabKey: activeKey, newTabKey: key });
   }
 
@@ -327,7 +339,9 @@ function App() {
   }
 
   /** F-15-3 flexlayout 外拖接入：返回 json 让 flexlayout 走原生 drop 预览，
-   *  落点（叠入 tabset / 边缘分屏）由其 drop 判定，行为与内部 tab 拖拽一致 */
+   *  落点（叠入 tabset / 边缘分屏）由其 drop 判定，行为与内部 tab 拖拽一致。
+   *  F-16-4（DEC-51）：拖到已有 session 窗格边缘 = 分屏、拖到中央/标题条 = 叠入，
+   *  与 VS Code 语义一致——flexlayout findDropTargetNode 原生提供，无需额外代码。 */
   function handleExternalDrag(_e: React.DragEvent<HTMLElement>) {
     const p = takeExternalDragPayload();
     if (!p) return undefined;
@@ -335,8 +349,14 @@ function App() {
     const tab = payloadToTab(p, key);
     return {
       json: tabToJson(tab),
-      onDrop: () => {
+      onDrop: (dropped?: Node) => {
         nextKey.current++;
+        // F-16-5（DEC-52）：落点确定后同向均分，避免连续拖入二分。
+        // dropped = 落进的新 tabset/落点节点，按其父 row 方向均分。
+        if (dropped) {
+          const dockOrientation = dropped.getParent()?.getOrientation().getName();
+          if (dockOrientation) equalizeSplitFor(dropped as never, dockOrientation);
+        }
         syncFromModel();
         logger.info("layout", "external-drop", { sessionId: p.sessionId, tabKey: key });
       },

@@ -56,6 +56,35 @@ describe("turn 事件累加（F-4-2 thinking 折叠）", () => {
     expect((acc.blocks[1] as { content: unknown[] }).content).toHaveLength(1);
   });
 
+  it("F-16-2（DEC-49）：工具收尾封口 ms = now - startTs", () => {
+    let t = 100;
+    const now = () => (t += 50);
+    let acc = newTurn();
+    acc = applyEvent(acc, tool("a"), now); // startTs = 150
+    expect((acc.blocks[0] as { startTs?: number }).startTs).toBe(150);
+    t += 400; // 模拟 400ms 后收尾 → now 返回 600
+    acc = applyEvent(
+      acc,
+      { type: "tool_update", toolCallId: "a", status: "completed", content: [] },
+      now,
+    );
+    const blk = acc.blocks[0] as { ms?: number };
+    expect(blk.ms).toBe(450);
+  });
+
+  it("F-16-2：非终态 update 不封口；error 也封口", () => {
+    let t = 0;
+    const now = () => (t += 10);
+    let acc = newTurn();
+    acc = applyEvent(acc, tool("a"), now); // startTs 10
+    acc = applyEvent(acc, { type: "tool_update", toolCallId: "a", status: "in_progress", content: [] }, now);
+    expect((acc.blocks[0] as { ms?: number }).ms).toBeUndefined();
+    t += 10; // 收尾时刻 = startTs + 20
+    acc = applyEvent(acc, { type: "tool_update", toolCallId: "a", status: "error", content: [] }, now);
+    const blk = acc.blocks[0] as { ms?: number };
+    expect(blk.ms).toBe(20);
+  });
+
   it("两段 thinking 各自独立封口（工具间穿插）", () => {
     let t = 0;
     const now = () => ++t;

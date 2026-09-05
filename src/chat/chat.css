@@ -2,12 +2,12 @@
 
 /* —— 聊天面板 —— */
 .chat {
-  /* F-15-1（DEC-41）：消息区独占整高，底部用 padding 预留悬浮 dock 空间，
-   * 消息滚动到末尾时不被输入区遮挡；dock 内条带数量可变，用固定预留 + dock
-   * 自身向上的自然生长（max-height 限制）兜底。 */
+  /* F-15-1（DEC-41）：消息区独占整高，底部用 padding 预留悬浮 dock 空间。
+   * F-16-3（DEC-50）：--dock-h 由 ResizeObserver 实测注入（panel.style），
+   * 随条带增减动态变化；120px 仅是变量未注入前的兜底。 */
   flex: 1;
   overflow-y: auto;
-  padding-bottom: 120px;
+  padding-bottom: calc(var(--dock-h, 120px) + 8px);
   border-radius: var(--radius-sm);
   padding-top: 12px;
   padding-left: 12px;
