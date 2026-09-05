@@ -23,10 +23,17 @@ mod workspaces;
 pub fn run() {
     // 日志：stdout（dev 终端）+ 日志目录（macOS ~/Library/Logs/com.zhubaoduo.ainone-ui/）
     // 到达 1MB 轮转并保留全部（KeepAll），级别过滤到 WARN 以上可用 level_for 单独调。
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    // 前端调试桥（P19c，仅 dev 且带 webdriver feature）：W3C WebDriver 服务内嵌
+    // 在应用里，AI agent 可经 HTTP 直接驱动 WebView（执行 JS / 截图 / 查元素）。
+    // dev：tauri.conf.json build.features 含 "webdriver"；打包用 tauri.dist.conf.json
+    // 覆盖（features 空）→ release 完全不含。README「前端调试」。
+    #[cfg(all(debug_assertions, feature = "webdriver"))]
+    let builder = builder.plugin(tauri_plugin_webdriver::init());
+    builder
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
