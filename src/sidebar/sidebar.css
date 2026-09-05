@@ -403,8 +403,15 @@ tree-row:hover .filetree-ref {
   flex-shrink: 0;
 }
 
-.filepreview-close {
+.filepreview-actions {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.filepreview-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;

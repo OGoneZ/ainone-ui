@@ -190,7 +190,13 @@ export function FilePreview({ path, onClose }: Props) {
               if (cancelled) return;
               if (!hl) return; // 降级：保持 pre 纯文本
               try {
-                setHtml(hl.codeToHtml(text, { lang, themes: { light: "github-light", dark: "github-dark" } }));
+                // tabindex:false：shiki 默认给 <pre> 加 tabindex=0 → 点击代码即聚焦，
+                // 重渲染时焦点 scrollIntoView 会把选区拉回文件头并闪烁（P16a 用户反馈）
+                setHtml(hl.codeToHtml(text, {
+                  lang,
+                  themes: { light: "github-light", dark: "github-dark" },
+                  tabindex: false,
+                }));
               } catch {
                 /* 保持纯文本 */
               }
@@ -233,20 +239,22 @@ export function FilePreview({ path, onClose }: Props) {
         <FileTextIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
         <span className="filepreview-title" title={path}>{title}</span>
         <span className="filepreview-kind">{kind}</span>
-        <button type="button" className="filepreview-close" aria-label="关闭预览" onClick={onClose}>
-          <XIcon style={{ width: 14, height: 14 }} />
-        </button>
-        {/* P16a：全屏钮贴在关闭钮左侧（flex 顺序：… × ⛶），图标复用 flexlayout session tab
-            的 Maximize/Restore 同款路径（四角括号），视觉与 session 全屏一致 */}
-        <button
-          type="button"
-          className="filepreview-close"
-          aria-label={fullscreen ? "退出全屏" : "全屏预览"}
-          title={fullscreen ? "退出全屏" : "全屏"}
-          onClick={() => setFullscreen((v) => !v)}
-        >
-          {fullscreen ? <FlexRestoreIcon /> : <FlexMaximizeIcon />}
-        </button>
+        {/* P16a：右侧按钮组（… [⛶ 全屏] [× 关闭]，⛶ 在 × 左侧）——
+            auto margin 只放在组上，避免两个按钮各吃一份 auto 被推开 */}
+        <span className="filepreview-actions">
+          <button
+            type="button"
+            className="filepreview-close"
+            aria-label={fullscreen ? "退出全屏" : "全屏预览"}
+            title={fullscreen ? "退出全屏" : "全屏"}
+            onClick={() => setFullscreen((v) => !v)}
+          >
+            {fullscreen ? <FlexRestoreIcon /> : <FlexMaximizeIcon />}
+          </button>
+          <button type="button" className="filepreview-close" aria-label="关闭预览" onClick={onClose}>
+            <XIcon style={{ width: 14, height: 14 }} />
+          </button>
+        </span>
       </div>
       <div className="filepreview-body">
         {state.t === "loading" && <div className="hint">加载中…</div>}
