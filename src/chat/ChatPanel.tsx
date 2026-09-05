@@ -1041,40 +1041,43 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         </Dialog>
       </div>
 
-      <div className="harness-badge inline-flex items-center gap-2">
-        <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
-        <span>正在和 {adapter.name} 对话</span>
-        {/* F-12-6a 上下文用量进度条（无 usage 数据不渲染） */}
-        <UsageBar usage={rt?.usage ?? null} />
-      </div>
+      {/* F-15-1 底部悬浮 dock（DEC-41）：composer 及其上方条带群整体悬浮，
+          .chat 独占整高，消息从浮层下方穿过——滚动到顶部输入区仍常驻可见 */}
+      <div className="composer-dock">
+        <div className="harness-badge inline-flex items-center gap-2">
+          <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
+          <span>正在和 {adapter.name} 对话</span>
+          {/* F-12-6a 上下文用量进度条（无 usage 数据不渲染） */}
+          <UsageBar usage={rt?.usage ?? null} />
+        </div>
 
-      {/* F-9-1 计划栏（输入框上方最上层，DEC-19） */}
-      <PlanBar tabKey={tabKey} />
+        {/* F-9-1 计划栏（输入框上方最上层，DEC-19） */}
+        <PlanBar tabKey={tabKey} />
 
-      <QuotePanel quotes={quotes} onSetQuestion={setQuoteQuestion} onRemove={removeQuote} onSend={sendQuotes} />
+        <QuotePanel quotes={quotes} onSetQuestion={setQuoteQuestion} onRemove={removeQuote} onSend={sendQuotes} />
 
-      <AttachList files={files} onRemove={removeFile} />
+        <AttachList files={files} onRemove={removeFile} />
 
-      {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
-      <CommandQueuePanel tabKey={tabKey} />
+        {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
+        <CommandQueuePanel tabKey={tabKey} />
 
-      {/* F-11-7：文件树移入 RightRail；通过 CustomEvent 接收其「引用」动作注入附件 */}
-      {/*（监听挂载在下方 useEffect） */}
+        {/* F-11-7：文件树移入 RightRail；通过 CustomEvent 接收其「引用」动作注入附件 */}
+        {/*（监听挂载在下方 useEffect） */}
 
-      <DiffCommentsBar count={diffComments.length} comments={diffComments} open={diffCommentsOpen} onToggle={() => setDiffCommentsOpen((v) => !v)} onRemove={removeDiffComment} onSend={sendDiffComments} />
+        <DiffCommentsBar count={diffComments.length} comments={diffComments} open={diffCommentsOpen} onToggle={() => setDiffCommentsOpen((v) => !v)} onRemove={removeDiffComment} onSend={sendDiffComments} />
 
-      {/* F-12-2 结构化提问卡：agent 请求输入时插入消息区与输入框之间 */}
-      {rt?.ask && (
-        <AskCard
-          questions={rt.ask.questions}
-          onAnswer={(answers) => askResolver.current?.(answers)}
-          onDecline={() => askResolver.current?.(null)}
-        />
-      )}
+        {/* F-12-2 结构化提问卡：agent 请求输入时插入消息区与输入框之间 */}
+        {rt?.ask && (
+          <AskCard
+            questions={rt.ask.questions}
+            onAnswer={(answers) => askResolver.current?.(answers)}
+            onDecline={() => askResolver.current?.(null)}
+          />
+        )}
 
-      <EditBanner target={editTarget} onCancel={cancelEdit} />
+        <EditBanner target={editTarget} onCancel={cancelEdit} />
 
-      <Composer
+        <Composer
         input={input}
         setInput={setInput}
         textareaRef={slashRef}
@@ -1097,7 +1100,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         onVoice={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))}
         onPickSlash={pickSlash}
         onPickAt={pickAt}
-      />
+        />
+      </div>
     </div>
   );
 }

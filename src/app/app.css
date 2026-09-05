@@ -270,6 +270,11 @@ select {
 
 .panel {
   flex: 1;
+  /* F-15-1：父容器 .flexlayout__tab 是 absolute 定位无高度约束，
+   * 仅 flex:1 会让 .panel 高度塌缩为内容高 → composer 跟随消息滚走。
+   * height:100% 补齐高度链（tab 本身铺满窗格）。 */
+  height: 100%;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
