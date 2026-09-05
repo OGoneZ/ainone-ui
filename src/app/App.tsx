@@ -29,6 +29,12 @@ import {
 } from "@/components/ui/context-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { resolveHistoryOpen, type Tab } from "@/app/logic/tabs";
+import {
+  setExternalDragPayload,
+  takeExternalDragPayload,
+  clearExternalDragPayload,
+  payloadToTab,
+} from "@/app/logic/externalDrag";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
@@ -293,6 +299,43 @@ function App() {
     }
   }
 
+  /** F-15-3 侧栏会话拖入布局：dragstart 暂存载荷（dataTransfer 通道留给
+   *  flexlayout 内部识别，见 externalDrag.ts 注释） */
+  function onSessionDragStart(e: React.DragEvent, h: SessionEntry) {
+    setExternalDragPayload({
+      sessionId: h.session_id,
+      adapterId: h.adapter_id,
+      title: h.title,
+      cwd: h.cwd ?? "",
+      workspaceId: h.workspace_id ?? null,
+    });
+    // 拖拽图像用会话行本身即可；effectAllowed move 表达「移动开新窗」语义
+    e.dataTransfer.effectAllowed = "copyMove";
+    e.dataTransfer.setData("text/plain", h.title);
+  }
+
+  function onSessionDragEnd() {
+    // drop 未发生（拖出窗口/取消）时兜底清理，防陈旧载荷挂到下次 drop
+    clearExternalDragPayload();
+  }
+
+  /** F-15-3 flexlayout 外拖接入：返回 json 让 flexlayout 走原生 drop 预览，
+   *  落点（叠入 tabset / 边缘分屏）由其 drop 判定，行为与内部 tab 拖拽一致 */
+  function handleExternalDrag(_e: React.DragEvent<HTMLElement>) {
+    const p = takeExternalDragPayload();
+    if (!p) return undefined;
+    const key = `tab-${nextKey.current}`;
+    const tab = payloadToTab(p, key);
+    return {
+      json: tabToJson(tab),
+      onDrop: () => {
+        nextKey.current++;
+        syncFromModel();
+        logger.info("layout", "external-drop", { sessionId: p.sessionId, tabKey: key });
+      },
+    };
+  }
+
   function deleteHistory(id: string) {
     sessionsRemove(id).then(reloadHistory);
   }
@@ -501,6 +544,10 @@ function App() {
                       <div
                         key={h.session_id}
                         className={`history-item status-${st} ${active ? "history-active" : ""}`}
+                        // F-15-3 拖入布局开 tab / 分屏（载荷走模块级暂存，DEC-43）
+                        draggable
+                        onDragStart={(e) => onSessionDragStart(e, h)}
+                        onDragEnd={onSessionDragEnd}
                       >
                         <SessionRowLeading adapter={hAdapter} st={st} />
                         {/* F-8-1 AC-P8-1：hover/聚焦显示 harness 名称 */}
@@ -544,6 +591,8 @@ function App() {
               model={getModel()}
               factory={factory}
               onModelChange={handleAction}
+              realtimeResize
+              onExternalDrag={handleExternalDrag}
             />
           </div>
           {/* F-11-7 右侧侧边栏：元数据 / 文件 双 tab（替换原独立 MetadataPanel） */}
