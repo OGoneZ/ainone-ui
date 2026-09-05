@@ -279,6 +279,24 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       setPreviewPath(path);
     };
     window.addEventListener("ainone:open-file", onOpenFile);
+    // P16 F-16-2 历史 tab：跳转到第 N 条用户消息 / 请求回溯（CustomEvent，active 守卫同 ref-file）
+    const onJumpMessage = (e: Event) => {
+      if (!(activeRef.current ?? true)) return;
+      const d = (e as CustomEvent<{ index?: number }>).detail;
+      if (typeof d?.index !== "number" || d.index < 0) return;
+      logger.info("history", "jump-recv", { index: d.index });
+      jumpToIndex(d.index);
+    };
+    const onRewindRequest = (e: Event) => {
+      if (!(activeRef.current ?? true)) return;
+      const d = (e as CustomEvent<{ index?: number }>).detail;
+      if (typeof d?.index !== "number" || d.index < 0) return;
+      logger.info("history", "rewind-recv", { index: d.index });
+      // 复用既有回溯链路：确认 Dialog + busy 保护（doRewind 内）
+      setRewindTarget(d.index);
+    };
+    window.addEventListener("ainone:jump-message", onJumpMessage);
+    window.addEventListener("ainone:rewind-request", onRewindRequest);
     // F-11-6 快问悬浮窗点外关闭：document mousedown + outside 判定（Esc 走 onKeyDown）
     const onDocMouseDown = (e: MouseEvent) => {
       if (quickSelRef.current === null) return;
@@ -309,6 +327,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("ainone:ref-file", onRefFile);
       window.removeEventListener("ainone:open-file", onOpenFile);
+      window.removeEventListener("ainone:jump-message", onJumpMessage);
+      window.removeEventListener("ainone:rewind-request", onRewindRequest);
       document.removeEventListener("mousedown", onDocMouseDown);
       unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
@@ -894,17 +914,22 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }, []);
   // L2：回跳目标消息短暂高亮（与搜索命中高亮同型，1.2s 后退场）
   const [lastPromptFlash, setLastPromptFlash] = useState(-1);
-  function jumpToLastPrompt() {
-    if (lastUserIdx < 0) return;
-    logger.debug("chat", "last-prompt-jump", { index: lastUserIdx });
-    virtualizer.scrollToIndex(lastUserIdx, { align: "start" });
+  // P16 F-16-2：通用跳转（双 rAF 校跳——远端未测量条目首跳按 estimateSize 漂移，
+  // 两帧后再跳一次；原逻辑在 jumpToLastPrompt 内联，抽出供历史锚点/回跳共用）
+  function jumpToIndex(index: number) {
+    virtualizer.scrollToIndex(index, { align: "start" });
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        virtualizer.scrollToIndex(lastUserIdx, { align: "start" });
-        setLastPromptFlash(lastUserIdx);
+        virtualizer.scrollToIndex(index, { align: "start" });
+        setLastPromptFlash(index);
         window.setTimeout(() => setLastPromptFlash(-1), 1200);
       }),
     );
+  }
+  function jumpToLastPrompt() {
+    if (lastUserIdx < 0) return;
+    logger.debug("chat", "last-prompt-jump", { index: lastUserIdx });
+    jumpToIndex(lastUserIdx);
   }
 
   const empty = messages.length === 0;

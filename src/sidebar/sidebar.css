@@ -447,3 +447,78 @@ tree-row:hover .filetree-ref {
   font-weight: var(--shiki-dark-font-weight) !important;
   text-decoration: var(--shiki-dark-text-decoration) !important;
 }
+
+/* —— P16 F-16-2 历史消息锚点（DEC-49）—— */
+.history-head {
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius);
+}
+
+.history-item:hover {
+  background: var(--bg-2);
+}
+
+.history-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 6px;
+  text-align: left;
+  border-radius: var(--radius);
+}
+
+.history-no {
+  font-size: 0.75em;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-preview {
+  font-size: 0.82em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.history-rewind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity var(--motion-fast);
+}
+
+.history-item:hover .history-rewind {
+  opacity: 1;
+}
+
+.history-rewind:hover {
+  background: var(--bg-3);
+  color: var(--text-primary);
+}
