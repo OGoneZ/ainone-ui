@@ -319,7 +319,10 @@ function App() {
   }
 
   /** F-15-3 侧栏会话拖入布局：dragstart 暂存载荷（dataTransfer 通道留给
-   *  flexlayout 内部识别，见 externalDrag.ts 注释） */
+   *  flexlayout 内部识别，见 externalDrag.ts 注释）。
+   *  P17 排障：会话行内含 <button>（打开/删除）。WebKit（Tauri WebView）下
+   *  从 button 上按下拖动常常不会启动父级 draggable 的拖拽（实测无反应根因），
+   *  行内按钮已加 draggable={false}；dragend 兜底清载荷防泄漏。 */
   function onSessionDragStart(e: React.DragEvent, h: SessionEntry) {
     setExternalDragPayload({
       sessionId: h.session_id,
@@ -584,8 +587,11 @@ function App() {
                       >
                         <SessionRowLeading adapter={hAdapter} st={st} />
                         {/* F-8-1 AC-P8-1：hover/聚焦显示 harness 名称 */}
+                        {/* P17：行内按钮 draggable={false}——WebKit 下 button 会吞掉
+                            父级 draggable 的拖拽启动（拖拽分屏无反应的根因） */}
                         <button
                           className="history-open"
+                          draggable={false}
                           onClick={() => openFromHistory(h)}
                           title={hAdapter ? hAdapter.name : h.session_id}
                         >
@@ -593,6 +599,7 @@ function App() {
                         </button>
                         <button
                           className="history-del"
+                          draggable={false}
                           aria-label="删除会话"
                           onClick={() => deleteHistory(h.session_id)}
                         >
