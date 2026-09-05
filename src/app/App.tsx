@@ -109,6 +109,8 @@ function App() {
     return () => window.removeEventListener("ainone:open-settings", on);
   }, []);
   const nextKey = useRef(1);
+  // F-19-3 dragend 丢失兜底的查询宿主
+  const layoutHostRef = useRef<HTMLDivElement | null>(null);
   // F-10-3 flexlayout Model：布局 + tab 集合的单一真源（跨渲染稳定，重建会丢拖拽布局）
   const modelRef = useRef<Model | null>(null);
 
@@ -255,8 +257,28 @@ function App() {
   };
 
   // flexlayout 动作回调：任何模型变更（含用户关闭 tab / 拖拽 dock）→ 投影回 tabs
+  /** F-19-1：跨窗格拖动 tab（含 tabset 整体移动）后，所有「≥2 子节点的 row」
+   *  按子节点数均分——拖走方残缺的权重、接收方的二分切割一并归位（DEC-52 扩展：
+   *  等分不只发生在分屏动作后，布局任何变更后都保持等分栅格语义） */
+  function equalizeAllRows() {
+    const m = getModel();
+    const rows: { id: string; n: number }[] = [];
+    m.visitNodes((n: unknown) => {
+      const node = n as { getType(): string; getChildren(): { length: number }[]; getId(): string };
+      if (node.getType() === "row") {
+        const cn = node.getChildren().length;
+        if (cn >= 2) rows.push({ id: node.getId(), n: cn });
+      }
+    });
+    for (const r of rows) {
+      m.doAction(Actions.adjustWeights(r.id, Array(r.n).fill(100 / r.n)));
+    }
+  }
+
   function handleAction() {
     syncFromModel();
+    // 每次布局变更（拖动跨窗格/关闭 tab/拖入新 tab）后重排为等分栅格
+    equalizeAllRows();
   }
 
   useEffect(() => {
@@ -365,6 +387,39 @@ function App() {
       },
     };
   }
+
+  /** F-19-3：flexlayout dragend 丢失兜底。WKWebView 偶发不派发 dragend
+   *  （拖拽中源元素被 React 重渲染移除 / 系统取消），dragState 残留 →
+   *  drop 预览矩形常驻，像一层蓝色遮罩挡住整个窗格（用户实测复现）。
+   *  flexlayout 无对外清理接口，此处用 mouseup 兜底：拖拽结束后若预览
+   *  矩形仍显示（display 未被置回），直接隐藏其 DOM（引用保留，下次拖拽
+   *  positionElement 会重新赋样式，无副作用）。 */
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const onAnyEnd = () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        const host = layoutHostRef.current;
+        if (!host) return;
+        const outline = host.querySelector<HTMLElement>(".flexlayout__outline_rect");
+        if (outline && outline.style.visibility !== "hidden" && outline.style.display !== "none") {
+          outline.style.display = "none";
+          logger.warn("layout", "dragend-stall-fallback", {});
+        }
+        const dragRect = host.querySelector<HTMLElement>(".flexlayout__drag_rect");
+        if (dragRect) dragRect.style.display = "none";
+      }, 250);
+    };
+    window.addEventListener("mouseup", onAnyEnd, true);
+    window.addEventListener("dragend", onAnyEnd, true);
+    window.addEventListener("drop", onAnyEnd, true);
+    return () => {
+      window.removeEventListener("mouseup", onAnyEnd, true);
+      window.removeEventListener("dragend", onAnyEnd, true);
+      window.removeEventListener("drop", onAnyEnd, true);
+      if (t) clearTimeout(t);
+    };
+  }, []);
 
   function deleteHistory(id: string) {
     sessionsRemove(id).then(reloadHistory);
@@ -637,7 +692,7 @@ function App() {
 
         <section className="tabs-area">
           {/* F-10-3 flexlayout 分屏窗格：替换原 tabs-bar + tab-content 区域 */}
-          <div className="layout-host" data-dragging={false}>
+          <div className="layout-host" ref={layoutHostRef} data-dragging={false}>
             <Layout
               model={getModel()}
               factory={factory}
