@@ -401,13 +401,27 @@ function App() {
       t = setTimeout(() => {
         const host = layoutHostRef.current;
         if (!host) return;
+        // 遮罩本体：.flexlayout__layout_overlay（z1000 全窗格拦截层，挡一切点击）。
+        // flexlayout 在 dragend/pointerup 才把它 display:none；dragend 丢失 →
+        // 残留 flex → 症状「整个 session 区无法点击」。恢复只能靠它自己，
+        // 这里 display:none 后，下次拖拽 Overlay 组件重渲染 display 会回来 ✓
+        const overlay = host.querySelector<HTMLElement>(".flexlayout__layout_overlay");
+        if (overlay && overlay.style.display !== "none") {
+          overlay.style.display = "none";
+          logger.warn("layout", "dragend-stall-fallback", { layer: "overlay" });
+        }
+        // drop 预览矩形（蓝色框，pointer-events:none 不挡点击但视觉残留）
         const outline = host.querySelector<HTMLElement>(".flexlayout__outline_rect");
         if (outline && outline.style.visibility !== "hidden" && outline.style.display !== "none") {
           outline.style.display = "none";
-          logger.warn("layout", "dragend-stall-fallback", {});
+          logger.warn("layout", "dragend-stall-fallback", { layer: "outline" });
         }
         const dragRect = host.querySelector<HTMLElement>(".flexlayout__drag_rect");
         if (dragRect) dragRect.style.display = "none";
+        // 边缘 dock 提示块（同 outline，视觉残留）
+        host.querySelectorAll<HTMLElement>(".flexlayout__edge_rect").forEach((el) => {
+          el.style.display = "none";
+        });
       }, 250);
     };
     window.addEventListener("mouseup", onAnyEnd, true);
