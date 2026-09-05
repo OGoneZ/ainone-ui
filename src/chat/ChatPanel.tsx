@@ -897,8 +897,25 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const empty = messages.length === 0;
 
+  // F-16-3（DEC-50）：dock 高度实测 → panel 级 CSS 变量 --dock-h，
+  // .chat 的 padding-bottom 引用它，末条消息不再被输入框遮挡
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    const dock = dockRef.current;
+    if (!panel || !dock) return;
+    const apply = () => {
+      panel.style.setProperty("--dock-h", `${dock.offsetHeight}px`);
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(dock);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="panel" data-dragging={dragging ? "true" : "false"}>
+    <div className="panel" ref={panelRef} data-dragging={dragging ? "true" : "false"}>
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}
@@ -1014,8 +1031,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       </div>
 
       {/* F-15-1 底部悬浮 dock（DEC-41）：composer 及其上方条带群整体悬浮，
-          .chat 独占整高，消息从浮层下方穿过——滚动到顶部输入区仍常驻可见 */}
-      <div className="composer-dock">
+          .chat 独占整高，消息从浮层下方穿过——滚动到顶部输入区仍常驻可见。
+          F-16-3（DEC-50）：ResizeObserver 实测 dock 高度写入 --dock-h，
+          .chat 的 padding-bottom 动态跟随，条带增减不再遮挡末条消息。 */}
+      <div className="composer-dock" ref={dockRef}>
         <div className="harness-badge inline-flex items-center gap-2">
           <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={16} className="shrink-0" />
           <span>正在和 {adapter.name} 对话</span>
