@@ -777,7 +777,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   async function runPrompt(text: string) {
     // F-8-1：刷新最近交互时间戳（回收判定的数据源）
     lastActivityRef.current = Date.now();
-    patch(tabKey, { busy: true });
+    patch(tabKey, { busy: true, turnStartedAt: Date.now() });
     turnRef.current = newTurn();
     const p = (async () => {
       try {
@@ -841,7 +841,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         };
         useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
       } finally {
-        patch(tabKey, { busy: false });
+        patch(tabKey, { busy: false, turnStartedAt: undefined });
         runRef.current = null;
         // F-9-1 计划栏：turn 结束清除 plan，不悬挂下一轮（AC-P9-3）
         useSessionStore.getState().setPlan(tabKey, null);
@@ -1081,6 +1081,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   adapter={adapter}
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
+                  turnStartedAt={rt?.turnStartedAt}
                   onSelect={onSelectText}
                   onFork={onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}

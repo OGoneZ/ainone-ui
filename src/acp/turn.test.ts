@@ -60,9 +60,9 @@ describe("turn 事件累加（F-4-2 thinking 折叠）", () => {
     let t = 100;
     const now = () => (t += 50);
     let acc = newTurn();
-    acc = applyEvent(acc, tool("a"), now); // startTs = 150
-    expect((acc.blocks[0] as { startTs?: number }).startTs).toBe(150);
-    t += 400; // 模拟 400ms 后收尾 → now 返回 600
+    acc = applyEvent(acc, tool("a"), now); // turnStart = 150（首个事件），startTs = 200
+    expect((acc.blocks[0] as { startTs?: number }).startTs).toBe(200);
+    t += 400; // 模拟 400ms 后收尾 → now 返回 650
     acc = applyEvent(
       acc,
       { type: "tool_update", toolCallId: "a", status: "completed", content: [] },

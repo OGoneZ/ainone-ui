@@ -11,6 +11,7 @@ import type { AdapterWithStatus } from "@/ipc/adapters";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import type { RenderItem } from "@/chat/logic/activity";
 import { buildActivityGroups } from "@/chat/logic/activity";
+import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 import { aggregateFileChanges } from "@/chat/logic/fileChanges";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
@@ -30,6 +31,7 @@ export const MessageLine = memo(function MessageLine({
   adapter,
   busy,
   isLast,
+  turnStartedAt,
   onSelect,
   onFork,
   onRewind,
@@ -41,6 +43,8 @@ export const MessageLine = memo(function MessageLine({
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
+  /** P16b：turn 起点时间戳（store）——运行中末条消息显示实时总耗时 */
+  turnStartedAt?: number;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
   onRewind?: () => void;
@@ -105,6 +109,9 @@ export const MessageLine = memo(function MessageLine({
             <ActivityGroupCard key={i} item={item} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
           ),
         )}
+        {/* P16b：turn 总耗时——从首个事件到 turn 结束的墙钟秒，实时跳动；
+            与工具/思考结果无关（finally 清 turnStartedAt 停表） */}
+        {busy && isLast && turnStartedAt ? <TurnElapsed startTs={turnStartedAt} /> : null}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {onFork && (
@@ -256,6 +263,16 @@ function FileChangeRow({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** P16b turn 实时总耗时行：无论思考/工具处于什么状态，秒表一直走 */
+function TurnElapsed({ startTs }: { startTs: number }) {
+  const elapsed = useElapsedTicker(startTs);
+  return (
+    <div className="turn-elapsed" data-testid="turn-elapsed" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+      ⏱ 用时 {elapsed} 秒
     </div>
   );
 }

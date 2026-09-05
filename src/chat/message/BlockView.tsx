@@ -17,21 +17,22 @@ import {
   TerminalIcon,
   ToolIcon,
 } from "@/components/ui/icons";
+import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 
 function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
   const [open, setOpen] = useState(live);
-  const [elapsed, setElapsed] = useState(0);
+  const [thoughtStart, setThoughtStart] = useState<number | null>(null);
   useEffect(() => {
     // 流式结束（live true→false）自动折叠
     if (!live) setOpen(false);
   }, [live]);
-  // 实时计时（AC-P7-5-1）：思考中每秒跳动；reduced-motion 不影响计时（只关动画）
+  // 实时计时（AC-P7-5-1 / P16b）：思考中每秒跳动——起点在 live 起时落定，
+  // 用墙钟差而非 interval 计数（与总耗时同一时钟语义）
   useEffect(() => {
-    if (!live) return;
-    setElapsed(0);
-    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
-    return () => clearInterval(t);
-  }, [live]);
+    if (!live || thoughtStart !== null) return;
+    setThoughtStart(Date.now());
+  }, [live, thoughtStart]);
+  const elapsed = useElapsedTicker(thoughtStart ?? undefined);
   const isThinking = ms === undefined && live;
   const summary = ms !== undefined ? `已思考 ${(ms / 1000).toFixed(0)} 秒` : `思考中… ${elapsed}s`;
   return (
@@ -95,6 +96,8 @@ function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: bool
 function ToolBlock({
   title,
   status,
+  startTs,
+  ms,
   content,
   diffComments,
   onAddDiffComment,
@@ -102,11 +105,21 @@ function ToolBlock({
   toolCallId: string;
   title: string;
   status: string;
+  startTs?: number;
+  ms?: number;
   content: ToolContent[];
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // P16b：运行中（pending/in_progress）→ 实时秒表；终态 → 封口的 ms
+  const running = status === "pending" || status === "in_progress";
+  const elapsed = useElapsedTicker(running ? startTs : undefined);
+  const timeLabel = running
+    ? `${elapsed}s`
+    : ms !== undefined && ms > 0
+      ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+      : null;
   return (
     // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）
     <div className="tool" data-status={status}>
@@ -125,6 +138,7 @@ function ToolBlock({
           }}
         />
         <span>{title}</span>
+        {timeLabel && <span className="tool-elapsed">{timeLabel}</span>}
         <span className="status">{status}</span>
       </div>
       {open && content.length > 0 && (
@@ -194,6 +208,8 @@ export function BlockView({
           toolCallId={block.toolCallId}
           title={block.title}
           status={block.status}
+          startTs={block.startTs}
+          ms={block.ms}
           content={block.content}
           diffComments={diffComments}
           onAddDiffComment={onAddDiffComment}

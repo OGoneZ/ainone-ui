@@ -20,10 +20,12 @@ export interface TurnAccumulator {
   blocks: BlockMsg[];
   /** 进行中 thought 段的开始时间戳；0 = 无进行中 thought */
   thoughtStart: number;
+  /** P16b：turn 首个事件的时间戳（总耗时计时起点；0 = 尚无事件） */
+  turnStart: number;
 }
 
 export function newTurn(): TurnAccumulator {
-  return { blocks: [], thoughtStart: 0 };
+  return { blocks: [], thoughtStart: 0, turnStart: 0 };
 }
 
 function seal(acc: TurnAccumulator, now: () => number): TurnAccumulator {
@@ -31,6 +33,7 @@ function seal(acc: TurnAccumulator, now: () => number): TurnAccumulator {
   return {
     blocks: sealLastThought(acc.blocks, now() - acc.thoughtStart),
     thoughtStart: 0,
+    turnStart: acc.turnStart,
   };
 }
 
@@ -39,17 +42,19 @@ export function applyEvent(
   e: Outgoing,
   now: () => number,
 ): TurnAccumulator {
+  // P16b：turn 首个事件落定总耗时起点（后续事件不改）
+  const withStart = acc.turnStart === 0 ? { ...acc, turnStart: now() } : acc;
   switch (e.type) {
     case "agent_text": {
-      const s = seal(acc, now);
+      const s = seal(withStart, now);
       return { ...s, blocks: appendText(s.blocks, e.text) };
     }
     case "agent_thought": {
-      const start = acc.thoughtStart === 0 ? now() : acc.thoughtStart;
-      return { ...acc, thoughtStart: start, blocks: appendThought(acc.blocks, e.text) };
+      const start = withStart.thoughtStart === 0 ? now() : withStart.thoughtStart;
+      return { ...withStart, thoughtStart: start, blocks: appendThought(withStart.blocks, e.text) };
     }
     case "tool_call": {
-      const s = seal(acc, now);
+      const s = seal(withStart, now);
       return {
         ...s,
         blocks: appendTool(s.blocks, {
@@ -65,9 +70,9 @@ export function applyEvent(
     }
     case "tool_update":
       // now 注入：status 到终态时封口工具耗时 ms
-      return { ...acc, blocks: updateTool(acc.blocks, e.toolCallId, e.status ?? null, e.content, now) };
+      return { ...withStart, blocks: updateTool(withStart.blocks, e.toolCallId, e.status ?? null, e.content, now) };
     case "turn_stop":
-      return seal(acc, now);
+      return seal(withStart, now);
     default:
       // available_commands / error 不改变 turn 内容
       return acc;

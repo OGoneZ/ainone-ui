@@ -45,6 +45,9 @@ export interface RuntimeState {
   ask: AskState | null;
   /** F-15-6 元数据：会话 cwd 的当前 git 分支（非 git 仓库为 null） */
   branch: string | null;
+  /** P16b：当前 turn 的起点时间戳（ms，Date.now()）；0/undefined = 无进行中 turn。
+   *  总耗时 = now - turnStartedAt，与工具/思考结果无关的墙钟时间。 */
+  turnStartedAt?: number;
 }
 
 /** F-12-2 提问卡状态 */
