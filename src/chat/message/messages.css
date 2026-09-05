@@ -6,6 +6,8 @@
   border-radius: var(--radius-sm);
 }
 
+/* —— F-16-1 工具条中性化（DEC-48）：琥珀底与主题不搭 → 中性卡，
+ * 状态色只做点睛（运行中品牌色 / 完成 / 失败），不做底色 —— */
 .tool-head {
   cursor: pointer;
   padding: 6px 8px;
@@ -16,14 +18,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.85em;
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 14%, var(--bg-1));
+  color: var(--text-secondary);
+  background: var(--bg-2);
 }
 
 .tool-head .status {
   margin-left: auto;
-  color: var(--warning);
+  color: var(--text-secondary);
   font-size: 0.8em;
+}
+
+/* 状态点睛：按工具 status 着色（F-16-1） */
+.tool[data-status="in_progress"] .tool-head .status,
+.tool[data-status="pending"] .tool-head .status {
+  color: var(--primary);
+}
+
+.tool[data-status="completed"] .tool-head .status {
+  color: var(--success);
+}
+
+.tool[data-status="error"] .tool-head .status {
+  color: var(--danger);
 }
 
 .tool-body {
@@ -208,4 +224,3 @@
   font-size: 13px;
   cursor: pointer;
 }
-

@@ -108,7 +108,8 @@ function ToolBlock({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="tool">
+    // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）
+    <div className="tool" data-status={status}>
       <div className="tool-head" onClick={() => setOpen((v) => !v)} title={title}>
         <span className="caret inline-flex transition-transform" style={{ transform: open ? "rotate(90deg)" : "none", transitionDuration: "var(--motion-fast)" }}>
           <ChevronRightIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
