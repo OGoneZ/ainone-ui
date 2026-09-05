@@ -3,10 +3,12 @@
 // 命令 `git_current_branch(cwd)`：在 cwd 下执行 `git rev-parse --abbrev-ref HEAD`。
 // 非 git 仓库 / git 不存在 / detached HEAD → 结构化错误，前端映射为「—」。
 
+#[cfg(test)]
 use std::path::Path;
 use std::process::Command;
 
 /// 读 cwd 的当前分支名（纯函数便于测试：git 调用注入）。
+#[cfg(test)]
 pub(crate) fn current_branch(cwd: &str, mut git: impl FnMut(&str, &str) -> Result<String, String>) -> Result<String, String> {
     if !Path::new(cwd).is_dir() {
         return Err(format!("目录不存在: {cwd}"));

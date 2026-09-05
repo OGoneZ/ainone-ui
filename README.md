@@ -34,6 +34,62 @@ pnpm test:all    # 前端 + Rust cargo test + e2e 三件套
 
 完整的分层策略、mock 约定、防回归护栏见 **`TESTING.md`**——接手重构前必读。
 
+## 前端调试（AI agent 直连调试桥）
+
+应用内置一个**仅 dev 生效**的调试桥（`tauri-plugin-webdriver`，W3C WebDriver 内嵌服务），
+让 AI agent（或任意 HTTP 客户端）**直接驱动 WebView**：执行 JS、截图、查元素、读页面源码——
+无需人工复制错误信息。
+
+**生效条件**：`pnpm tauri dev`（`tauri.conf.json` 的 `build.features` 含 `"webdriver"`，仅 debug 构建）。
+**打包不含**：`pnpm tauri:build` 用 `tauri.dist.conf.json` 覆盖（features 为空），release 二进制完全不编译此插件。
+
+### 使用方式
+
+1. `pnpm tauri dev` 启动应用后，调试桥监听 `127.0.0.1:4445`（可用 `TAURI_WEBDRIVER_PORT` 环境变量改端口）
+2. 直接发 HTTP 请求驱动 WebView（POST body 为 WebDriver 协议格式）：
+
+```bash
+# 建会话（WebDriver 客户端均可：Selenium / WebdriverIO / 裸 curl）
+SID=$(curl -s -X POST http://127.0.0.1:4445/session \
+  -H 'Content-Type: application/json' \
+  -d '{"capabilities":{}}' | jq -r .value.sessionId)
+
+# 在 WebView 里执行任意 JS（查 DOM 状态 / 解卡 / 读取 store）
+curl -s -X POST http://127.0.0.1:4445/session/$SID/execute/sync \
+  -H 'Content-Type: application/json' \
+  -d '{"script":"return document.querySelector(\".flexlayout__layout_overlay\").style.display","args":[]}'
+
+# 截图（base64 PNG）
+curl -s http://127.0.0.1:4445/session/$SID/screenshot | jq -r .value | base64 -d > shot.png
+```
+
+3. 常用端点：`POST /session`（建会话）、`POST /session/{id}/execute/sync`（执行 JS）、
+   `GET /session/{id}/screenshot`（截图）、`GET /session/{id}/source`（页面源码）、
+   `POST /session/{id}/element`（查元素，支持 css/xpath）
+
+### 平台差异（为什么 macOS 需要这个桥）
+
+| 平台 | WebView | 外部直连调试 |
+| --- | --- | --- |
+| Windows | WebView2 | ✅ 原生支持 `--remote-debugging-port`（CDP） |
+| Linux | WebKitGTK | ✅ 原生支持 `WEBKIT_INSPECTOR_SERVER` |
+| macOS | WKWebView | ❌ Apple 不提供远程调试端口；**人工调试用 Cmd+Option+I 打开 Safari Web Inspector** |
+
+macOS 上 AI agent 无法直连 WebView，调试桥是唯一途径；人工调试时快捷键即可。
+
+### 卡死自救（历史遗留问题：flexlayout 拖拽遮罩残留）
+
+应用已内置自动恢复（mouseup 兜底隐藏残留遮罩）。若仍遇到「界面点不动」：
+
+```bash
+# 经调试桥远程解卡（或本地 Cmd+Option+I 在 Console 执行同样语句）
+curl -s -X POST http://127.0.0.1:4445/session/$SID/execute/sync \
+  -H 'Content-Type: application/json' \
+  -d '{"script":"document.querySelectorAll(\".flexlayout__layout_overlay,.flexlayout__outline_rect,.flexlayout__edge_rect\").forEach(e=>e.style.display=\"none\")","args":[]}'
+```
+
+后端日志：`~/Library/Logs/com.zhubaoduo.ainone-ui/ainone-ui.log`。
+
 ## 架构
 
 ```
