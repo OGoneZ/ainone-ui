@@ -1001,8 +1001,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   // F-16-3（DEC-50）：dock 高度实测 → panel 级 CSS 变量 --dock-h，
   // .chat 的 padding-bottom 引用它，末条消息不再被输入框遮挡。
-  // P18 修复遮挡根因：flexlayout 非激活 tab 是 display:none → dock.offsetHeight=0，
-  // observer 会把 --dock-h 写成 0 → padding 塌陷只剩 8px。守卫：只写 >0 的值。
+  // P18：非激活 tab display:none → offsetHeight=0，加 >0 守卫。
+  // P19：--dock-h 语义改为「dock 底部距 panel 顶部的总占位」（rect.height +
+  // bottom 偏移）——此前只算 offsetHeight，漏掉 bottom:10px 的偏移与 dock
+  // 内部条带展开后的实际高度，实测仍遮挡。
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1010,14 +1012,22 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const dock = dockRef.current;
     if (!panel || !dock) return;
     const apply = () => {
-      if (dock.offsetHeight > 0) {
-        panel.style.setProperty("--dock-h", `${dock.offsetHeight}px`);
-      }
+      const dockRect = dock.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      if (dockRect.height <= 0) return; // 非激活 tab（display:none）不写 0
+      const total = panelRect.bottom - dockRect.top;
+      if (total > 0) panel.style.setProperty("--dock-h", `${total}px`);
     };
     apply();
     const ro = new ResizeObserver(apply);
     ro.observe(dock);
-    return () => ro.disconnect();
+    // dock 的 transform 定位不触发自身 resize；panel 尺寸变化时总占位也要重算
+    const roPanel = new ResizeObserver(apply);
+    roPanel.observe(panel);
+    return () => {
+      ro.disconnect();
+      roPanel.disconnect();
+    };
   }, []);
 
   return (
