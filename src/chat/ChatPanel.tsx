@@ -11,6 +11,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "@/acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
+import { FilePreview } from "@/sidebar/FilePreview";
 import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
 import { QuotePanel, AttachList, DiffCommentsBar, EditBanner } from "@/chat/components/PanelStrips";
 import { Composer } from "@/chat/composer/Composer";
@@ -167,6 +168,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   quickSelRef.current = quickSel;
   // F-8-3 文件引用：待发送附件集（按钮选择 / 拖拽 同路径）
   const [files, setFiles] = useState<FileRef[]>([]);
+  // P16 F-16-1 文件预览浮层：当前预览的绝对路径（null=关闭）
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   // F-8-3 拖拽悬停高亮
   const [dragging, setDragging] = useState(false);
   // F-8-6 回溯：待确认的目标消息下标（null = 无）
@@ -268,6 +271,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       });
     };
     window.addEventListener("ainone:ref-file", onRefFile);
+    // P16 F-16-1 文件预览：RightRail 单击文件 → 打开窗格内预览浮层（active 守卫同 ref-file）
+    const onOpenFile = (e: Event) => {
+      if (!(activeRef.current ?? true)) return;
+      const path = (e as CustomEvent<string>).detail;
+      if (typeof path !== "string") return;
+      setPreviewPath(path);
+    };
+    window.addEventListener("ainone:open-file", onOpenFile);
     // F-11-6 快问悬浮窗点外关闭：document mousedown + outside 判定（Esc 走 onKeyDown）
     const onDocMouseDown = (e: MouseEvent) => {
       if (quickSelRef.current === null) return;
@@ -297,6 +308,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("ainone:ref-file", onRefFile);
+      window.removeEventListener("ainone:open-file", onOpenFile);
       document.removeEventListener("mousedown", onDocMouseDown);
       unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
@@ -899,6 +911,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
+      {/* P16 F-16-1 文件预览浮层（DEC-48）：窗格内右侧 overlay，非模态 */}
+      {previewPath && (
+        <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
+      )}
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}

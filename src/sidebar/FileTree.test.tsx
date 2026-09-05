@@ -26,7 +26,7 @@ describe("FileTree", () => {
       { name: "README.md", is_dir: false },
     ]);
     const onRef = vi.fn();
-    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} />);
+    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} onOpenFile={vi.fn()} />);
     const user = userEvent.setup();
 
     // 展开「文件」
@@ -40,7 +40,7 @@ describe("FileTree", () => {
       if (p === "/a/b") return [{ name: "src", is_dir: true }];
       return [{ name: "index.ts", is_dir: false }];
     });
-    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={() => {}} />);
+    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={() => {}} onOpenFile={vi.fn()} />);
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: /文件/ }));
@@ -55,7 +55,7 @@ describe("FileTree", () => {
   it("点文件 → onRefFile 回调绝对路径（AC-P9-16）", async () => {
     mockList.mockResolvedValue([{ name: "app.ts", is_dir: false }]);
     const onRef = vi.fn();
-    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} />);
+    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} onOpenFile={vi.fn()} />);
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: /文件/ }));
@@ -66,10 +66,42 @@ describe("FileTree", () => {
   it("modifiedPaths 命中 → 文件带「M」徽标（AC-P9-17）", async () => {
     mockList.mockResolvedValue([{ name: "app.ts", is_dir: false }]);
     render(
-      <FileTree cwd="/a/b" modifiedPaths={new Set(["/a/b/app.ts"])} onRefFile={() => {}} />,
+      <FileTree cwd="/a/b" modifiedPaths={new Set(["/a/b/app.ts"])} onRefFile={() => {}} onOpenFile={vi.fn()} />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /文件/ }));
     expect(await screen.findByText("M")).toBeInTheDocument();
+  });
+});
+
+describe("FileTree · P16 F-16-1 单击预览（DEC-48）", () => {
+  it("单击文件行 → onOpenFile 回调绝对路径；单击目录行不触发", async () => {
+    mockList.mockResolvedValue([
+      { name: "src", is_dir: true },
+      { name: "app.ts", is_dir: false },
+    ]);
+    const onOpen = vi.fn();
+    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={vi.fn()} onOpenFile={onOpen} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /文件/ }));
+
+    await user.click(await screen.findByText("app.ts"));
+    expect(onOpen).toHaveBeenCalledWith("/a/b/app.ts");
+
+    // 目录行展开行为不受影响（且不触发 onOpenFile）
+    await user.click(screen.getByText("src"));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("「引用」按钮仍走 onRefFile，不触发预览", async () => {
+    mockList.mockResolvedValue([{ name: "app.ts", is_dir: false }]);
+    const onOpen = vi.fn();
+    const onRef = vi.fn();
+    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} onOpenFile={onOpen} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /文件/ }));
+    await user.click(await screen.findByRole("button", { name: "引用 app.ts" }));
+    expect(onRef).toHaveBeenCalledWith("/a/b/app.ts");
+    expect(onOpen).not.toHaveBeenCalled();
   });
 });

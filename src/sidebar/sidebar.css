@@ -326,3 +326,124 @@ tree-row:hover .filetree-ref {
 .meta-embedded .meta-list {
   margin: 0;
 }
+
+/* —— P16 F-16-1 文件预览浮层（DEC-48）—— */
+/* 窗格内右侧 overlay：与 .composer-dock 同层（.panel 内 absolute），左侧消息区仍可滚动 */
+.filepreview {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(50%, 720px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border-left: 1px solid var(--bg-3);
+  z-index: var(--z-float);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .filepreview {
+    background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+    backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--blur-panel)) saturate(1.4);
+  }
+}
+
+.filepreview-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--bg-3);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.filepreview-title {
+  font-size: 0.85em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.filepreview-kind {
+  font-size: 0.7em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.filepreview-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.filepreview-close:hover {
+  background: var(--bg-2);
+  color: var(--text-primary);
+}
+
+.filepreview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.filepreview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+.filepreview-code pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius);
+  font-size: 0.8em;
+  line-height: 1.5;
+  overflow: auto;
+  background: var(--bg-2);
+}
+
+.filepreview-plain {
+  margin: 0;
+  font-size: 0.8em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
+.filepreview-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20vh;
+  color: var(--text-secondary);
+  font-size: 0.9em;
+}
+
+/* shiki 双主题：跟随 data-theme 切换（同 Streamdown shikiTheme 惯例） */
+.filepreview-code[data-theme="dark"] .shiki,
+.filepreview-code[data-theme="dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}

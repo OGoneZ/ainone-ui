@@ -1,7 +1,8 @@
 // 工作区文件树组件（P9 · F-9-4）：侧栏「文件」区，懒加载子目录。
 //
 // 展现当前会话 cwd 单层目录列表；目录点击展开时才调 workspace_list_dir 拉子项。
-// 文件节点 hover 提供「引用到输入框」（@file:/abs/path，与 P8 F-8-3 同路径）。
+// 文件节点 hover 提供「引用到输入框」（@file:/abs/path，与 P8 F-8-3 同路径）；
+// 单击文件行本体 → 打开软件内预览（P16 F-16-1，DEC-48）。
 // 最近改动文件加「M」徽标（复用 tool_call diff 的 path 集合，不做 fs watch）。
 
 import { useEffect, useState } from "react";
@@ -15,9 +16,11 @@ interface Props {
   modifiedPaths: Set<string>;
   /** 点文件 → 引用到输入框（绝对路径） */
   onRefFile: (path: string) => void;
+  /** 单击文件行 → 软件内预览（P16 F-16-1） */
+  onOpenFile: (path: string) => void;
 }
 
-export function FileTree({ cwd, modifiedPaths, onRefFile }: Props) {
+export function FileTree({ cwd, modifiedPaths, onRefFile, onOpenFile }: Props) {
   const [nodes, setNodes] = useState<Record<string, DirEntry[]>>({});
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -82,6 +85,7 @@ export function FileTree({ cwd, modifiedPaths, onRefFile }: Props) {
               modified={modifiedPaths}
               onToggleDir={toggleDir}
               onRefFile={onRefFile}
+              onOpenFile={onOpenFile}
             />
           ))}
         </div>
@@ -98,6 +102,7 @@ function FileRow({
   depth,
   onToggleDir,
   onRefFile,
+  onOpenFile,
 }: {
   entrance: DirEntry;
   fullPath: string;
@@ -106,6 +111,7 @@ function FileRow({
   depth: number;
   onToggleDir: (dir: string) => void;
   onRefFile: (path: string) => void;
+  onOpenFile: (path: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const isDir = entrance.is_dir;
@@ -121,6 +127,9 @@ function FileRow({
           if (isDir) {
             setOpen((v) => !v);
             onToggleDir(fullPath);
+          } else {
+            // P16 F-16-1：单击文件行 → 预览（「引用」按钮 stopPropagation 不受影响）
+            onOpenFile(fullPath);
           }
         }}
       >
@@ -157,6 +166,7 @@ function FileRow({
               modified={modified}
               onToggleDir={onToggleDir}
               onRefFile={onRefFile}
+              onOpenFile={onOpenFile}
             />
           ))}
         </div>

@@ -139,6 +139,11 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) 
                 logger.info("fs", "ref-file", { path });
                 window.dispatchEvent(new CustomEvent("ainone:ref-file", { detail: path }));
               }}
+              onOpenFile={(path) => {
+                // P16 F-16-1：单击文件 → 软件内预览（CustomEvent 与 ChatPanel 解耦，同 ref-file 模式）
+                logger.info("preview", "open-file", { path });
+                window.dispatchEvent(new CustomEvent("ainone:open-file", { detail: path }));
+              }}
             />
           </div>
         )}
