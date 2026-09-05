@@ -43,6 +43,8 @@ export interface RuntimeState {
   plan: { content: string; status: string; priority?: string }[] | null;
   /** F-12-2 结构化提问：当前等待回答的提问卡（null = 无） */
   ask: AskState | null;
+  /** F-15-6 元数据：会话 cwd 的当前 git 分支（非 git 仓库为 null） */
+  branch: string | null;
 }
 
 /** F-12-2 提问卡状态 */
@@ -65,6 +67,8 @@ interface SessionStore {
   setUsage: (key: string, usage: { used: number; size: number; cost: number | null }) => void;
   /** 更新采集到的 provider 路由（F-8-4） */
   setMeta: (key: string, meta: { apiType?: string; baseUrl?: string } | null) => void;
+  /** 更新会话 cwd 的 git 分支（F-15-6） */
+  setBranch: (key: string, branch: string | null) => void;
   /** 更新当前 turn 的 plan（F-9-1 全量替换） */
   setPlan: (key: string, plan: { content: string; status: string; priority?: string }[] | null) => void;
   /** 整体覆盖消息列表（用于 readLog 回填） */
@@ -102,6 +106,7 @@ export const useSessionStore = create<SessionStore>()(
                 meta: null,
                 plan: null,
                 ask: null,
+                branch: null,
               },
             },
           };
@@ -119,6 +124,13 @@ export const useSessionStore = create<SessionStore>()(
           const cur = s.runtime[key];
           if (!cur) return {};
           return { runtime: { ...s.runtime, [key]: { ...cur, meta } } };
+        }),
+
+      setBranch: (key, branch) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          return { runtime: { ...s.runtime, [key]: { ...cur, branch } } };
         }),
 
       setPlan: (key, plan) =>

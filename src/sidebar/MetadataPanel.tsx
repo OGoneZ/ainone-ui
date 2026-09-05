@@ -4,14 +4,18 @@
 //   - 上下文占用 / token / 成本 → usage_update（store.runtime[t].usage）
 //   - apiType / baseUrl → providers/list（store.runtime[t].meta）
 //   - sessionId / cwd / 模型（--model）→ 会话与 adapter 配置（DEC-13）
+//   - git 分支 → git_current_branch（P15 F-15-6，ChatPanel 挂载时采集）
 //
-// 默认折叠，展开状态持久化到 localStorage（AC-P8-21）。
+// F-15-6：session ID / 工作区 cwd / 分支 / baseUrl / 模型 点击复制，
+// toast「已复制」反馈；非 git 仓库分支显示「—」不可复制。
 
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/store/sessionStore";
 import { usagePercent } from "@/acp/metadata";
 import { extractModel } from "@/acp/metadata";
-import { ChevronRightIcon, CloseIcon } from "@/components/ui/icons";
+import { ChevronRightIcon, CloseIcon, CopyIcon } from "@/components/ui/icons";
+import { toast } from "sonner";
+import { logger } from "@/lib/logger";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 
 interface Props {
@@ -28,6 +32,7 @@ const STORAGE_KEY = "ainone-metadata-open";
 export function MetadataPanel({ tabKey, adapter, sessionId, cwd, embedded = false }: Props) {
   const usage = useSessionStore((s) => s.runtime[tabKey]?.usage ?? null);
   const meta = useSessionStore((s) => s.runtime[tabKey]?.meta ?? null);
+  const branch = useSessionStore((s) => s.runtime[tabKey]?.branch ?? null);
 
   const [open, setOpen] = useState<boolean>(() => localStorage.getItem(STORAGE_KEY) === "1");
   useEffect(() => {
@@ -42,7 +47,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd, embedded = fals
     return (
       <div className="meta-embedded">
         <dl className="meta-list">
-          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} />
+          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} />
         </dl>
       </div>
     );
@@ -77,9 +82,42 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd, embedded = fals
       </div>
 
       <dl className="meta-list">
-        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} />
+        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} />
       </dl>
     </aside>
+  );
+}
+
+/** F-15-6 可复制条目：点击复制值 + 已复制 toast */
+function CopyableItem({ label, value }: { label: string; value: string | null | undefined }) {
+  const display = value ?? "—";
+  const copyable = Boolean(value);
+  return (
+    <div className="meta-item">
+      <dt>{label}</dt>
+      <dd>
+        <button
+          type="button"
+          className={copyable ? "meta-copy-btn" : "meta-copy-btn meta-copy-disabled"}
+          disabled={!copyable}
+          title={copyable ? `点击复制${label}` : undefined}
+          aria-label={`复制${label}`}
+          onClick={() => {
+            if (!value) return;
+            navigator.clipboard?.writeText(value).then(
+              () => {
+                logger.debug("meta", "copy", { label });
+                toast.success(`已复制${label}`);
+              },
+              () => toast.error("复制失败"),
+            );
+          }}
+        >
+          <span className="meta-mono">{display}</span>
+          {copyable && <CopyIcon style={{ width: 12, height: 12, strokeWidth: 1.75, flexShrink: 0 }} />}
+        </button>
+      </dd>
+    </div>
   );
 }
 
@@ -92,6 +130,7 @@ function MetaItems({
   sessionId,
   cwd,
   adapterName,
+  branch,
 }: {
   usage: { used: number; size: number; cost: number | null } | null;
   meta: { apiType?: string; baseUrl?: string } | null;
@@ -100,6 +139,7 @@ function MetaItems({
   sessionId: string | null;
   cwd?: string;
   adapterName: string;
+  branch: string | null;
 }) {
   return (
     <>
@@ -136,15 +176,9 @@ function MetaItems({
           </dd>
         </div>
 
-        <div className="meta-item">
-          <dt>session ID</dt>
-          <dd className="meta-mono" title={sessionId ?? ""}>{sessionId ?? "（新建会话，发送后生成）"}</dd>
-        </div>
-
-        <div className="meta-item">
-          <dt>工作区 cwd</dt>
-          <dd className="meta-mono" title={cwd ?? ""}>{cwd ?? "—"}</dd>
-        </div>
+        <CopyableItem label="session ID" value={sessionId} />
+        <CopyableItem label="工作区" value={cwd} />
+        <CopyableItem label="分支" value={branch} />
 
         <div className="meta-item">
           <dt>harness / apiType</dt>
@@ -154,15 +188,8 @@ function MetaItems({
           </dd>
         </div>
 
-        <div className="meta-item">
-          <dt>baseUrl</dt>
-          <dd className="meta-mono" title={meta?.baseUrl ?? ""}>{meta?.baseUrl ?? "—"}</dd>
-        </div>
-
-        <div className="meta-item">
-          <dt>模型</dt>
-          <dd className="meta-mono">{model ?? "（未配置 --model）"}</dd>
-        </div>
+        <CopyableItem label="baseUrl" value={meta?.baseUrl ?? null} />
+        <CopyableItem label="模型" value={model} />
     </>
   );
 }

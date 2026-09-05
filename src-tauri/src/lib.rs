@@ -14,6 +14,7 @@ mod connector;
 mod env_path;
 mod fs;
 mod fslist;
+mod gitmeta;
 mod quickask;
 mod sessions;
 mod workspaces;
@@ -74,6 +75,7 @@ pub fn run() {
             workspaces::workspaces_upsert,
             workspaces::workspaces_remove,
             fslist::workspace_list_dir,
+            gitmeta::git_current_branch,
             quickask::quick_ask,
             quickask::quickask_config_get,
             quickask::quickask_config_save,

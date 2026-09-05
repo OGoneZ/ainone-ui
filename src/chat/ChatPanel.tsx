@@ -30,6 +30,7 @@ import {
   applyAtToken,
 } from "../chat/logic/atFile";
 import { workspaceListDir } from "@/ipc/fslist";
+import { gitCurrentBranch } from "@/ipc/gitmeta";
 import { filterExcluded } from "@/lib/fileTree";
 import { composeQuotedPrompt, type Quote } from "../chat/logic/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../chat/logic/fileRef";
@@ -188,6 +189,15 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
     ensure(tabKey, adapter.id);
+    // F-15-6：拉取会话 cwd 的 git 分支（非 git 仓库 → null，侧栏显示「—」）
+    gitCurrentBranch(workspaceCwd)
+      .then((branch) => {
+        if (branch) {
+          logger.debug("meta", "branch", { branch });
+          useSessionStore.getState().setBranch(tabKey, branch);
+        }
+      })
+      .catch(() => {});
     if (resumeSessionId) {
       logRead(resumeSessionId)
         .then((raw) => {

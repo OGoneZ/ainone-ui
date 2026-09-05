@@ -85,6 +85,39 @@
   word-break: break-all;
 }
 
+/* F-15-6 可复制条目：整条可点，hover 提示；禁用态（无值）还原纯文本 */
+.meta-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: inherit;
+  font-size: 12px;
+  font-family: inherit;
+  transition: background var(--motion-fast) var(--ease-out-soft);
+}
+
+.meta-copy-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.meta-copy-btn:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.meta-copy-btn .meta-mono {
+  flex: 1;
+  min-width: 0;
+}
+
 .meta-cost {
   margin-left: 6px;
   color: var(--success);
@@ -293,4 +326,3 @@ tree-row:hover .filetree-ref {
 .meta-embedded .meta-list {
   margin: 0;
 }
-
