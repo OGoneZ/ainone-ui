@@ -297,13 +297,15 @@ select {
   min-height: 0;
 }
 
-/* —— 原生表单控件（shadcn Button 之外的 input/textarea/button）——
- * F-15-4：排除 Streamdown 渲染的按钮（data-streamdown 属性）——它们自带
- * tailwind 尺寸类（p-1 icon-only），被这里的 padding/border 污染成超大盒子
- * （代码块 copy/download 变「大盒子」的根因）。 */
+/* —— 原生表单控件与模态文字按钮 ——
+ * F-15-4 修订（P15 修复）：裸 button 全局规则曾把 Streamdown 代码块按钮、
+ * 侧栏小钮、元数据复制钮等 icon-only 按钮全部污染成「大盒子」，:not() 排除
+ * 打地鼠修不完——根因是全局规则本身越界。现收紧到两类真实依赖：
+ *   1) input/textarea（表单输入，无专属类）
+ *   2) .modal-actions button / .adapter-row button（设置/新建弹层的文字按钮）
+ * 其余按钮一律自持样式（专属类或 inline style），shadcn Button 走 tailwind 类。 */
 input,
-textarea,
-button:not([data-streamdown]):not([data-streamdown] *) {
+textarea {
   border-radius: var(--radius-sm);
   border: 1px solid var(--bg-3);
   padding: 0.6em 1em;
@@ -311,6 +313,24 @@ button:not([data-streamdown]):not([data-streamdown] *) {
   font-family: inherit;
   color: var(--text-primary);
   background-color: var(--bg-1);
+}
+
+.modal-actions button,
+.adapter-row button,
+.ns-new-ws {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  padding: 0.45em 0.9em;
+  font-size: 0.9em;
+  font-family: inherit;
+  color: var(--text-primary);
+  background-color: var(--bg-1);
+}
+
+.modal-actions button:hover:not(:disabled),
+.adapter-row button:hover:not(:disabled),
+.ns-new-ws:hover:not(:disabled) {
+  border-color: var(--primary);
 }
 
 textarea {
@@ -326,10 +346,6 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-button:hover:not(:disabled) {
-  border-color: var(--primary);
 }
 
 /* —— 新建会话弹层表单 —— */
