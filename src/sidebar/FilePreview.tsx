@@ -35,17 +35,9 @@ type LoadState =
 let highlighterPromise: Promise<Awaited<ReturnType<typeof createHighlighterCore>>> | null = null;
 const loadedLangs = new Set<string>();
 
-// 预载语言（静态 import：vite 可静态分析，进预打包缓存）
-const COMMON_LANGS = [
-  import("shiki/langs/typescript.mjs"), import("shiki/langs/tsx.mjs"),
-  import("shiki/langs/javascript.mjs"), import("shiki/langs/jsx.mjs"),
-  import("shiki/langs/python.mjs"), import("shiki/langs/rust.mjs"),
-  import("shiki/langs/go.mjs"), import("shiki/langs/json.mjs"),
-  import("shiki/langs/yaml.mjs"), import("shiki/langs/toml.mjs"),
-  import("shiki/langs/css.mjs"), import("shiki/langs/html.mjs"),
-  import("shiki/langs/bash.mjs"), import("shiki/langs/markdown.mjs"),
-  import("shiki/langs/sql.mjs"),
-];
+// 高亮预算：超过此长度的代码文件不再 token 化（shiki codeToHtml 同步阻塞主线程，
+// 200KB 源码 ≈ 1s 冻结 + 4MB HTML 注入；点击后「没反应」即此）。降级纯文本。
+const HIGHLIGHT_BUDGET = 256_000;
 // P16a 修复：动态模板 import + @vite-ignore 在浏览器里按相对 URL 解析（拿到
 // SPA fallback 的 HTML → SyntaxError → 全部降级纯文本）。改为静态注册表：
 // 每种语言一个可被 vite 改写的静态 import，白名单外语言不加载（降级纯文本）。
@@ -86,11 +78,14 @@ const LANG_LOADERS: Record<string, () => Promise<{ default: unknown }>> = {
   zig: () => import("shiki/langs/zig.mjs"),
 };
 
+// P16a：highlighter 单例只预载主题+引擎（轻）；语言全部走按需 loadLanguage——
+// 原实现构造时并行编译 15 种语言语法（数百 KB TextMate JSON → 正则），
+// 首次打开任意代码文件都要等这一整包，表现为「点了没反应，过一会儿才出来」。
 async function getHighlighter(lang: string) {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
       themes: [import("shiki/themes/github-light.mjs"), import("shiki/themes/github-dark.mjs")],
-      langs: COMMON_LANGS,
+      langs: [],
       engine: createJavaScriptRegexEngine(),
     });
   }
@@ -191,9 +186,12 @@ function FilePreviewImpl({ path, onClose }: Props) {
           logger.info("preview", "too-large", { path, len: text.length });
           return;
         }
+        // 点击即响应：先以纯文本 ready（body 立刻有内容可滚动），高亮异步就绪后
+        // 由 codeRef effect 无缝替换——原实现等 getHighlighter 完成才 ready，
+        // 首开（构建 highlighter + token 化）期间 UI 无任何反馈
         setContent(text);
         setState({ t: "ready" });
-        if (kind === "code") {
+        if (kind === "code" && text.length <= HIGHLIGHT_BUDGET) {
           const lang = shikiLangFor(path);
           if (lang) {
             getHighlighter(lang).then((hl) => {
@@ -202,6 +200,7 @@ function FilePreviewImpl({ path, onClose }: Props) {
               try {
                 // tabindex:false：shiki 默认给 <pre> 加 tabindex=0 → 点击代码即聚焦，
                 // 重渲染时焦点 scrollIntoView 会把选区拉回文件头并闪烁（P16a 用户反馈）
+                logger.info("preview", "highlight-done", { path, len: text.length });
                 setHtml(hl.codeToHtml(text, {
                   lang,
                   themes: { light: "github-light", dark: "github-dark" },
