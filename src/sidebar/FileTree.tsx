@@ -1,6 +1,7 @@
 // 工作区文件树组件（P9 · F-9-4）：侧栏「文件」区，懒加载子目录。
 //
-// 展现当前会话 cwd 单层目录列表；目录点击展开时才调 workspace_list_dir 拉子项。
+// 直接展示当前 cwd 目录列表（P16a：去掉「文件」折叠头——tab 本身就是「文件」，
+// 进入即见内容，无需二次展开）；目录点击展开时才调 workspace_list_dir 拉子项。
 // 文件节点 hover 提供「引用到输入框」（@file:/abs/path，与 P8 F-8-3 同路径）；
 // 单击文件行本体 → 打开软件内预览（P16 F-16-1，DEC-48）。
 // 最近改动文件加「M」徽标（复用 tool_call diff 的 path 集合，不做 fs watch）。
@@ -8,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { workspaceListDir, type DirEntry } from "@/ipc/fslist";
 import { filterExcluded, joinDirPath } from "@/lib/fileTree";
-import { ChevronRightIcon, FileTextIcon, WorkspaceIcon } from "@/components/ui/icons";
+import { FileTextIcon, WorkspaceIcon } from "@/components/ui/icons";
 
 interface Props {
   cwd?: string;
@@ -22,7 +23,6 @@ interface Props {
 
 export function FileTree({ cwd, modifiedPaths, onRefFile, onOpenFile }: Props) {
   const [nodes, setNodes] = useState<Record<string, DirEntry[]>>({});
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -63,33 +63,23 @@ export function FileTree({ cwd, modifiedPaths, onRefFile, onOpenFile }: Props) {
 
   return (
     <div className="filetree">
-      <button type="button" className="filetree-head" onClick={() => setOpen((v) => !v)}>
-        <span
-          className="inline-flex transition-transform"
-          style={{ transform: open ? "rotate(90deg)" : "none", transitionDuration: "var(--motion-fast)" }}
-        >
-          <ChevronRightIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
-        </span>
-        <span>文件</span>
-      </button>
-      {open && (
-        <div className="filetree-body">
-          {loading && baseEntries.length === 0 && <div className="hint">加载中…</div>}
-          {baseEntries.map((e) => (
-            <FileRow
-              key={`${cwd}/${e.name}`}
-              depth={0}
-              entrance={e}
-              fullPath={joinDirPath(cwd ?? "", e.name)}
-              nodes={nodes}
-              modified={modifiedPaths}
-              onToggleDir={toggleDir}
-              onRefFile={onRefFile}
-              onOpenFile={onOpenFile}
-            />
-          ))}
-        </div>
-      )}
+      <div className="filetree-body">
+        {!cwd && <div className="hint">无工作区</div>}
+        {cwd && loading && baseEntries.length === 0 && <div className="hint">加载中…</div>}
+        {baseEntries.map((e) => (
+          <FileRow
+            key={`${cwd}/${e.name}`}
+            depth={0}
+            entrance={e}
+            fullPath={joinDirPath(cwd ?? "", e.name)}
+            nodes={nodes}
+            modified={modifiedPaths}
+            onToggleDir={toggleDir}
+            onRefFile={onRefFile}
+            onOpenFile={onOpenFile}
+          />
+        ))}
+      </div>
     </div>
   );
 }

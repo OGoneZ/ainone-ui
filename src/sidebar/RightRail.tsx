@@ -140,7 +140,7 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) 
           »
         </button>
       </div>
-      <div className="rail-body" role="tabpanel">
+      <div className={`rail-body ${state.tab === "files" ? "rail-body-noscroll" : ""}`} role="tabpanel">
         {state.tab === "meta" ? (
           <MetadataPanel
             tabKey={tabKey}

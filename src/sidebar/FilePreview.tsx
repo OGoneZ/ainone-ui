@@ -3,8 +3,9 @@
 // markdown → Streamdown（static）；image → asset protocol；code → shiki 双主题；
 // text → pre 纯文本；binary / 超限 → 占位 + 系统应用打开（plugin-opener）。
 // 关闭：× / Esc；非模态（左侧消息区仍可滚动）。
+// P16a：右上角全屏切换；左缘拖拽手柄调宽（280px~80% 窗宽，非全屏态生效）。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -13,7 +14,7 @@ import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
-import { XIcon, FileTextIcon } from "lucide-react";
+import { XIcon, FileTextIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
 import { resolvePreviewKind, shikiLangFor, PREVIEW_TEXT_LIMIT, type PreviewKind } from "./previewKind";
 import { logger } from "@/lib/logger";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,10 @@ export function FilePreview({ path, onClose }: Props) {
   const [content, setContent] = useState("");
   const [html, setHtml] = useState("");
   const [isDark, setIsDark] = useState(false);
+  // P16a：全屏态 + 拖宽（px，null=默认 min(50%,720px)）
+  const [fullscreen, setFullscreen] = useState(false);
+  const [width, setWidth] = useState<number | null>(null);
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   useEffect(() => {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
@@ -81,14 +86,34 @@ export function FilePreview({ path, onClose }: Props) {
     return () => mql.removeEventListener("change", fn);
   }, []);
 
-  // Esc 关闭
+  // Esc 关闭（全屏态先退全屏）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (fullscreen) setFullscreen(false);
+        else onClose();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, fullscreen]);
+
+  // P16a：左缘拖拽手柄——向左拖增宽；280px ~ 80% 窗宽夹取
+  function onDragHandleDown(e: React.PointerEvent) {
+    if (fullscreen) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startW: width ?? previewDefaultWidth() };
+  }
+  function onDragHandleMove(e: React.PointerEvent) {
+    const d = dragRef.current;
+    if (!d) return;
+    const maxW = Math.floor(window.innerWidth * 0.8);
+    setWidth(Math.min(maxW, Math.max(280, d.startW + (d.startX - e.clientX))));
+  }
+  function onDragHandleUp() {
+    dragRef.current = null;
+  }
 
   // 按类型加载
   useEffect(() => {
@@ -145,11 +170,35 @@ export function FilePreview({ path, onClose }: Props) {
   const title = path.split("/").pop() ?? path;
 
   return (
-    <div className="filepreview" data-testid="file-preview">
+    <div
+      className={`filepreview ${fullscreen ? "fullscreen" : ""}`}
+      data-testid="file-preview"
+      style={width !== null && !fullscreen ? { width } : undefined}
+    >
+      {/* P16a：左缘拖拽手柄（全屏态隐藏） */}
+      {!fullscreen && (
+        <div
+          className="filepreview-resize"
+          onPointerDown={onDragHandleDown}
+          onPointerMove={onDragHandleMove}
+          onPointerUp={onDragHandleUp}
+          role="separator"
+          aria-label="拖拽调整预览宽度"
+        />
+      )}
       <div className="filepreview-head">
         <FileTextIcon style={{ width: 14, height: 14, flexShrink: 0 }} />
         <span className="filepreview-title" title={path}>{title}</span>
         <span className="filepreview-kind">{kind}</span>
+        <button
+          type="button"
+          className="filepreview-close"
+          aria-label={fullscreen ? "退出全屏" : "全屏预览"}
+          title={fullscreen ? "退出全屏" : "全屏"}
+          onClick={() => setFullscreen((v) => !v)}
+        >
+          {fullscreen ? <Minimize2Icon style={{ width: 14, height: 14 }} /> : <Maximize2Icon style={{ width: 14, height: 14 }} />}
+        </button>
         <button type="button" className="filepreview-close" aria-label="关闭预览" onClick={onClose}>
           <XIcon style={{ width: 14, height: 14 }} />
         </button>
@@ -219,4 +268,9 @@ export function FilePreview({ path, onClose }: Props) {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** 拖宽起点：默认宽 min(50%, 720px) 的像素值 */
+function previewDefaultWidth(): number {
+  return Math.min(Math.floor(window.innerWidth / 2), 720);
 }

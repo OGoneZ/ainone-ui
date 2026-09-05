@@ -89,6 +89,30 @@ describe("FilePreview（DEC-48）", () => {
     await waitFor(() => expect(screen.getByText(/读取失败/)).toBeInTheDocument());
   });
 
+  it("全屏按钮切换 → aria-label 变化；全屏态无拖拽手柄；Esc 先退全屏", async () => {
+    mockRead.mockResolvedValue("hello");
+    const onClose = vi.fn();
+    render(<FilePreview path="/w/a.txt" onClose={onClose} />);
+    await waitFor(() => expect(screen.getByText("a.txt")).toBeInTheDocument());
+
+    // 手柄存在（非全屏态）
+    expect(screen.getByRole("separator", { name: "拖拽调整预览宽度" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "全屏预览" }));
+    expect(screen.getByRole("button", { name: "退出全屏" })).toBeInTheDocument();
+    // 全屏态隐藏拖拽手柄
+    expect(screen.queryByRole("separator", { name: "拖拽调整预览宽度" })).not.toBeInTheDocument();
+
+    // Esc 第一击退全屏（不关闭）
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "全屏预览" })).toBeInTheDocument();
+
+    // Esc 第二击关闭
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("Esc 关闭", async () => {
     mockRead.mockResolvedValue("hi");
     const onClose = vi.fn();

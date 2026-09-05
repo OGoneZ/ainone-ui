@@ -29,8 +29,7 @@ describe("FileTree", () => {
     render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} onOpenFile={vi.fn()} />);
     const user = userEvent.setup();
 
-    // 展开「文件」
-    await user.click(screen.getByRole("button", { name: /文件/ }));
+    // P16a：进入文件 tab 即显示内容（无折叠头）
     expect(await screen.findByText("src")).toBeInTheDocument();
     expect(screen.getByText("README.md")).toBeInTheDocument();
   });
@@ -43,7 +42,6 @@ describe("FileTree", () => {
     render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={() => {}} onOpenFile={vi.fn()} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: /文件/ }));
     await user.click(await screen.findByText("src"));
     expect(await screen.findByText("index.ts")).toBeInTheDocument();
 
@@ -58,7 +56,6 @@ describe("FileTree", () => {
     render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} onOpenFile={vi.fn()} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: /文件/ }));
     await user.click(await screen.findByRole("button", { name: "引用 app.ts" }));
     expect(onRef).toHaveBeenCalledWith("/a/b/app.ts");
   });
@@ -69,8 +66,21 @@ describe("FileTree", () => {
       <FileTree cwd="/a/b" modifiedPaths={new Set(["/a/b/app.ts"])} onRefFile={() => {}} onOpenFile={vi.fn()} />,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /文件/ }));
     expect(await screen.findByText("M")).toBeInTheDocument();
+  });
+});
+
+describe("FileTree · P16a 无折叠头直接展示", () => {
+  it("挂载即显示 cwd 内容，不存在「文件」折叠头按钮", async () => {
+    mockList.mockResolvedValue([{ name: "README.md", is_dir: false }]);
+    render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={vi.fn()} onOpenFile={vi.fn()} />);
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /文件/ })).not.toBeInTheDocument();
+  });
+
+  it("无 cwd → 空态提示", () => {
+    render(<FileTree modifiedPaths={new Set()} onRefFile={vi.fn()} onOpenFile={vi.fn()} />);
+    expect(screen.getByText("无工作区")).toBeInTheDocument();
   });
 });
 
@@ -83,7 +93,6 @@ describe("FileTree · P16 F-16-1 单击预览（DEC-48）", () => {
     const onOpen = vi.fn();
     render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={vi.fn()} onOpenFile={onOpen} />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /文件/ }));
 
     await user.click(await screen.findByText("app.ts"));
     expect(onOpen).toHaveBeenCalledWith("/a/b/app.ts");
@@ -99,7 +108,6 @@ describe("FileTree · P16 F-16-1 单击预览（DEC-48）", () => {
     const onRef = vi.fn();
     render(<FileTree cwd="/a/b" modifiedPaths={new Set()} onRefFile={onRef} onOpenFile={onOpen} />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /文件/ }));
     await user.click(await screen.findByRole("button", { name: "引用 app.ts" }));
     expect(onRef).toHaveBeenCalledWith("/a/b/app.ts");
     expect(onOpen).not.toHaveBeenCalled();
