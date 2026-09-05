@@ -68,8 +68,7 @@ describe("VoiceInput", () => {
     expect(screen.getByRole("button", { name: "停止录音" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "停止录音" }));
-    // 转写后回填
-    expect(await screen.findByText("🎤 语音")).toBeInTheDocument();
+    // 转写后回填（F-15-5：按钮已 icon-only，断言麦克风图标按钮回归）
     await screen.findByRole("button", { name: "语音输入" });
     expect(onTranscribed).toHaveBeenCalledWith("这是转写文本");
   });

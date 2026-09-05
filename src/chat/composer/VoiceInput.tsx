@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { asrTranscribe } from "@/ipc/asr";
 import { logger } from "@/lib/logger";
+import { MicIcon, StopIcon } from "@/components/ui/icons";
 import { toast } from "sonner";
 
 interface Props {
@@ -85,10 +86,13 @@ export function VoiceInput({ onTranscribed }: Props) {
   }
 
   return (
+    // F-15-5（DEC-45）：icon-only 圆钮（与发送/停止同规格），去 emoji 与大字；
+    // 语义走 aria-label/title，录音态秒数用小徽标。
     <button
       type="button"
       aria-label={state === "recording" ? "停止录音" : "语音输入"}
-      className="voice-btn inline-flex h-9 px-2.5 shrink-0 items-center justify-center gap-1 rounded-full text-xs"
+      title={state === "recording" ? `停止录音（${seconds}s）` : "语音输入"}
+      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
       style={{
         backgroundColor: state === "recording" ? "var(--danger)" : "var(--bg-2)",
         color: state === "recording" ? "#fff" : "var(--text-secondary)",
@@ -97,11 +101,22 @@ export function VoiceInput({ onTranscribed }: Props) {
       onClick={state === "recording" ? stop : start}
     >
       {state === "recording" ? (
-        <>🔴 {seconds}s</>
+        <>
+          <StopIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+          <span
+            aria-hidden="true"
+            className="voice-seconds"
+            style={{ fontSize: 10, marginLeft: 2, color: "#fff" }}
+          >
+            {seconds}s
+          </span>
+        </>
       ) : state === "transcribing" ? (
-        <>转写中…</>
+        <span aria-label="转写中" style={{ fontSize: 12 }}>
+          …
+        </span>
       ) : (
-        <>🎤 语音</>
+        <MicIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
       )}
     </button>
   );
