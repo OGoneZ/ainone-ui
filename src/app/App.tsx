@@ -20,6 +20,8 @@ import {
   CloseIcon,
   PlusIcon,
   SettingsIcon,
+  SidebarCollapseIcon,
+  SidebarExpandIcon,
 } from "@/components/ui/icons";
 import {
   ContextMenu,
@@ -82,6 +84,11 @@ function App() {
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   // 主题：light / dark / auto（默认 auto 跟随系统）
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
+  // F-15-7 左侧栏开合（持久化 localStorage，RightRail 同款交互）
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem("ainone-sidebar-open") !== "0");
+  useEffect(() => {
+    localStorage.setItem("ainone-sidebar-open", sidebarOpen ? "1" : "0");
+  }, [sidebarOpen]);
   // F-11-2 全局 session 搜索弹层
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   // M12：系统明暗实时快照（auto 主题的 Toaster 也跟随）
@@ -467,13 +474,19 @@ function App() {
       </div>
 
       <div className="workspace">
-        <aside className="sidebar">
-          <div className="sidebar-head">
-            <h3>工作区</h3>
-            <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
-              <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-            </button>
-          </div>
+        {sidebarOpen ? (
+          <aside className="sidebar">
+            <div className="sidebar-head">
+              <h3>工作区</h3>
+              <div className="sidebar-head-actions">
+                <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
+                  <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                </button>
+                <button className="add-ws sidebar-collapse" title="收起侧栏" aria-label="收起侧栏" onClick={() => setSidebarOpen(false)}>
+                  <SidebarCollapseIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                </button>
+              </div>
+            </div>
           {groups.map((g) => {
             const wsKey = g.workspace?.id ?? "__ungrouped__";
             const hasWorkspace = Boolean(g.workspace);
@@ -582,7 +595,18 @@ function App() {
                 onAction={() => setNewSession({ open: true })}
               />
             )}
-        </aside>
+          </aside>
+        ) : (
+          // F-15-7 折叠态：细栏杆（展开 + 新建两个图标位）
+          <aside className="sidebar sidebar-collapsed">
+            <button className="add-ws" title="展开侧栏" aria-label="展开侧栏" onClick={() => setSidebarOpen(true)}>
+              <SidebarExpandIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+            </button>
+            <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
+              <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+            </button>
+          </aside>
+        )}
 
         <section className="tabs-area">
           {/* F-10-3 flexlayout 分屏窗格：替换原 tabs-bar + tab-content 区域 */}

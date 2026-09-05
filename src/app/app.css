@@ -105,6 +105,23 @@ select {
   opacity: 0.8;
 }
 
+/* F-15-7 侧栏头部动作组（新建 + 收起并排） */
+.sidebar-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* F-15-7 折叠态：28px 细栏杆（RightRail-collapsed 同款交互） */
+.sidebar-collapsed {
+  width: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
 /* —— 工作区分组 —— */
 .ws-group {
   margin-bottom: 10px;
