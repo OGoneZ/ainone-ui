@@ -39,3 +39,21 @@ export function next(items: QueueItem[]): DequeueResult {
   if (items.length === 0) return null;
   return { item: items[0], items: items.slice(1) };
 }
+
+/**
+ * 合并（P16 · F-16-3，DEC-50）：拖拽条目 A 到条目 B 上 → 两文本按原队列顺序
+ * 空行拼接，位置取两者较前者。找不到 id 时原样返回（不静默变形）。
+ */
+export function mergeItems(items: QueueItem[], dragId: string, overId: string): QueueItem[] {
+  const from = items.findIndex((i) => i.id === dragId);
+  const to = items.findIndex((i) => i.id === overId);
+  if (from < 0 || to < 0 || from === to) return items;
+  const [first, second] = from < to ? [items[from], items[to]] : [items[to], items[from]];
+  const merged: QueueItem = {
+    id: from < to ? dragId : overId, // 保留较前条目的 id（保持身份连续）
+    text: `${first.text}\n\n${second.text}`,
+  };
+  const copy = items.filter((i) => i.id !== dragId && i.id !== overId);
+  copy.splice(Math.min(from, to), 0, merged);
+  return copy;
+}

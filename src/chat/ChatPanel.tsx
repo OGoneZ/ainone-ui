@@ -12,7 +12,7 @@ import { openSession, type AcpSession } from "@/acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { FilePreview } from "@/sidebar/FilePreview";
-import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
+import { QueueDock } from "@/chat/components/QueueDock";
 import { QuotePanel, AttachList, DiffCommentsBar, EditBanner } from "@/chat/components/PanelStrips";
 import { Composer } from "@/chat/composer/Composer";
 import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
@@ -485,16 +485,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     setAtMenu(null);
     setFiles([]);
     if (files.length > 0) logger.info("chat", "send-with-files", { count: files.length });
-    appendUser(tabKey, full);
 
-    // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
-    // M2：先赋值再 stop——stop() 返回后 finally 可能立即消费 pendingTextRef，
-    // 后赋值会丢消息并让队列错误前进
+    // P16 F-16-3（DEC-50）：busy 时不再 steering 打断——入队等待（运行中不能覆盖
+    // 前一条消息）；队列消费时机不变（turn_stop 非 cancelled/user 自动 dequeue）。
+    // steering 能力保留在队列条目「立即发」（sendNowSteer）。
     if (busy) {
-      pendingTextRef.current = full;
-      await stop();
+      const ok = enqueueCommand(full);
+      if (ok) toast.success(`已加入队列（第 ${(useQueueStore.getState().queues[tabKey] ?? []).length} 位）`);
       return;
     }
+    appendUser(tabKey, full);
     await runPrompt(full);
   }
 
@@ -511,6 +511,23 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       toast.warning("命令队列已满（10 条），请先消费或删除");
     }
     return ok;
+  }
+
+  // P16 F-16-3（DEC-50）：「立即发」——打断当前 turn 并把该条作为 steering 立即发出。
+  // M2 顺序保持：先赋值 pendingTextRef 再 stop（stop 返回后 finally 立即消费 ref）；
+  // 该条先从队列移除，避免 finally 消费队列时重复发送。
+  async function sendNowSteer(text: string) {
+    const q = useQueueStore.getState().queues[tabKey] ?? [];
+    const entry = q.find((i) => i.text === text);
+    if (entry) useQueueStore.getState().remove(tabKey, entry.id);
+    logger.info("queue", "steer-from-queue", { id: entry?.id, busy });
+    if (busy) {
+      pendingTextRef.current = text;
+      await stop();
+      return;
+    }
+    appendUser(tabKey, text);
+    await runPrompt(text);
   }
 
   // —— F-8-3 文件引用：按钮选择 / 拖拽 同一条「待发送附件」路径 ——
@@ -539,11 +556,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   // 建议 prompt 直接发送（F-6-3，不经输入框）
   function sendSuggestion(text: string) {
-    appendUser(tabKey, text);
+    // P16（DEC-50）：busy → 入队不打断（与 submit 同语义）
     if (busy) {
-      pendingTextRef.current = text;
+      enqueueCommand(text);
       return;
     }
+    appendUser(tabKey, text);
     void runPrompt(text);
   }
 
@@ -562,14 +580,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const text = composeQuotedPrompt(quotes);
     setQuotes([]);
     logger.info("chat", "annotate-send", { quoteCount: quotes.length });
-    appendUser(tabKey, text);
-    // 与 steering 兼容：运行中发送 → 打断当前 turn 后新发起（复用打断队列）。
-    // M2：先赋值再 stop（同 submit——stop 后 finally 可能立即消费 ref）
+    // P16（DEC-50）：busy → 入队不打断（与 submit 同语义）
     if (busy) {
-      pendingTextRef.current = text;
-      void stop();
+      enqueueCommand(text);
       return;
     }
+    appendUser(tabKey, text);
     void runPrompt(text);
   }
 
@@ -865,12 +881,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     setDiffComments([]);
     setDiffCommentsOpen(false);
     logger.info("chat", "diff-comment-send", { count: diffComments.length });
-    appendUser(tabKey, text);
+    // P16（DEC-50）：busy → 入队不打断（与 submit 同语义）
     if (busy) {
-      pendingTextRef.current = text;
-      void stop();
+      enqueueCommand(text);
       return;
     }
+    appendUser(tabKey, text);
     void runPrompt(text);
   }
 
@@ -1071,9 +1087,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
         <AttachList files={files} onRemove={removeFile} />
 
-        {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
-        <CommandQueuePanel tabKey={tabKey} />
-
         {/* F-11-7：文件树移入 RightRail；通过 CustomEvent 接收其「引用」动作注入附件 */}
         {/*（监听挂载在下方 useEffect） */}
 
@@ -1115,6 +1128,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         onPickAt={pickAt}
         />
       </div>
+
+      {/* P16 F-16-3 队列悬浮 Dock（DEC-50）：右下角浮层，z 高于 composer-dock。
+          「立即发」= steering 语义（M2：先赋值 pendingTextRef 再 stop，见 sendNowSteer） */}
+      <QueueDock
+        tabKey={tabKey}
+        busy={busy}
+        onSendNow={sendNowSteer}
+      />
     </div>
   );
 }
