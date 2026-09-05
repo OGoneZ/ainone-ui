@@ -11,7 +11,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "@/acp/session";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
-import { CommandQueuePanel } from "@/chat/components/CommandQueuePanel";
+import { FilePreview } from "@/sidebar/FilePreview";
+import { QueueDock } from "@/chat/components/QueueDock";
 import { QuotePanel, AttachList, DiffCommentsBar, EditBanner } from "@/chat/components/PanelStrips";
 import { Composer } from "@/chat/composer/Composer";
 import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
@@ -167,6 +168,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   quickSelRef.current = quickSel;
   // F-8-3 文件引用：待发送附件集（按钮选择 / 拖拽 同路径）
   const [files, setFiles] = useState<FileRef[]>([]);
+  // P16 F-16-1 文件预览浮层：当前预览的绝对路径（null=关闭）
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   // F-8-3 拖拽悬停高亮
   const [dragging, setDragging] = useState(false);
   // F-8-6 回溯：待确认的目标消息下标（null = 无）
@@ -268,6 +271,32 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       });
     };
     window.addEventListener("ainone:ref-file", onRefFile);
+    // P16 F-16-1 文件预览：RightRail 单击文件 → 打开窗格内预览浮层（active 守卫同 ref-file）
+    const onOpenFile = (e: Event) => {
+      if (!(activeRef.current ?? true)) return;
+      const path = (e as CustomEvent<string>).detail;
+      if (typeof path !== "string") return;
+      setPreviewPath(path);
+    };
+    window.addEventListener("ainone:open-file", onOpenFile);
+    // P16 F-16-2 历史 tab：跳转到第 N 条用户消息 / 请求回溯（CustomEvent，active 守卫同 ref-file）
+    const onJumpMessage = (e: Event) => {
+      if (!(activeRef.current ?? true)) return;
+      const d = (e as CustomEvent<{ index?: number }>).detail;
+      if (typeof d?.index !== "number" || d.index < 0) return;
+      logger.info("history", "jump-recv", { index: d.index });
+      jumpToIndex(d.index);
+    };
+    const onRewindRequest = (e: Event) => {
+      if (!(activeRef.current ?? true)) return;
+      const d = (e as CustomEvent<{ index?: number }>).detail;
+      if (typeof d?.index !== "number" || d.index < 0) return;
+      logger.info("history", "rewind-recv", { index: d.index });
+      // 复用既有回溯链路：确认 Dialog + busy 保护（doRewind 内）
+      setRewindTarget(d.index);
+    };
+    window.addEventListener("ainone:jump-message", onJumpMessage);
+    window.addEventListener("ainone:rewind-request", onRewindRequest);
     // F-11-6 快问悬浮窗点外关闭：document mousedown + outside 判定（Esc 走 onKeyDown）
     const onDocMouseDown = (e: MouseEvent) => {
       if (quickSelRef.current === null) return;
@@ -297,6 +326,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("ainone:ref-file", onRefFile);
+      window.removeEventListener("ainone:open-file", onOpenFile);
+      window.removeEventListener("ainone:jump-message", onJumpMessage);
+      window.removeEventListener("ainone:rewind-request", onRewindRequest);
       document.removeEventListener("mousedown", onDocMouseDown);
       unlisten?.();
       sessionRef.current?.dispose().catch(() => {});
@@ -453,16 +485,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     setAtMenu(null);
     setFiles([]);
     if (files.length > 0) logger.info("chat", "send-with-files", { count: files.length });
-    appendUser(tabKey, full);
 
-    // steering：运行中发消息 → 取消当前 turn，把新消息排队，turn 结束后自动续跑
-    // M2：先赋值再 stop——stop() 返回后 finally 可能立即消费 pendingTextRef，
-    // 后赋值会丢消息并让队列错误前进
+    // P16 F-16-3（DEC-50）：busy 时不再 steering 打断——入队等待（运行中不能覆盖
+    // 前一条消息）；队列消费时机不变（turn_stop 非 cancelled/user 自动 dequeue）。
+    // steering 能力保留在队列条目「立即发」（sendNowSteer）。
     if (busy) {
-      pendingTextRef.current = full;
-      await stop();
+      const ok = enqueueCommand(full);
+      if (ok) toast.success(`已加入队列（第 ${(useQueueStore.getState().queues[tabKey] ?? []).length} 位）`);
       return;
     }
+    appendUser(tabKey, full);
     await runPrompt(full);
   }
 
@@ -479,6 +511,23 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       toast.warning("命令队列已满（10 条），请先消费或删除");
     }
     return ok;
+  }
+
+  // P16 F-16-3（DEC-50）：「立即发」——打断当前 turn 并把该条作为 steering 立即发出。
+  // M2 顺序保持：先赋值 pendingTextRef 再 stop（stop 返回后 finally 立即消费 ref）；
+  // 该条先从队列移除，避免 finally 消费队列时重复发送。
+  async function sendNowSteer(text: string) {
+    const q = useQueueStore.getState().queues[tabKey] ?? [];
+    const entry = q.find((i) => i.text === text);
+    if (entry) useQueueStore.getState().remove(tabKey, entry.id);
+    logger.info("queue", "steer-from-queue", { id: entry?.id, busy });
+    if (busy) {
+      pendingTextRef.current = text;
+      await stop();
+      return;
+    }
+    appendUser(tabKey, text);
+    await runPrompt(text);
   }
 
   // —— F-8-3 文件引用：按钮选择 / 拖拽 同一条「待发送附件」路径 ——
@@ -507,11 +556,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   // 建议 prompt 直接发送（F-6-3，不经输入框）
   function sendSuggestion(text: string) {
-    appendUser(tabKey, text);
+    // P16（DEC-50）：busy → 入队不打断（与 submit 同语义）
     if (busy) {
-      pendingTextRef.current = text;
+      enqueueCommand(text);
       return;
     }
+    appendUser(tabKey, text);
     void runPrompt(text);
   }
 
@@ -530,14 +580,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const text = composeQuotedPrompt(quotes);
     setQuotes([]);
     logger.info("chat", "annotate-send", { quoteCount: quotes.length });
-    appendUser(tabKey, text);
-    // 与 steering 兼容：运行中发送 → 打断当前 turn 后新发起（复用打断队列）。
-    // M2：先赋值再 stop（同 submit——stop 后 finally 可能立即消费 ref）
+    // P16（DEC-50）：busy → 入队不打断（与 submit 同语义）
     if (busy) {
-      pendingTextRef.current = text;
-      void stop();
+      enqueueCommand(text);
       return;
     }
+    appendUser(tabKey, text);
     void runPrompt(text);
   }
 
@@ -833,12 +881,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     setDiffComments([]);
     setDiffCommentsOpen(false);
     logger.info("chat", "diff-comment-send", { count: diffComments.length });
-    appendUser(tabKey, text);
+    // P16（DEC-50）：busy → 入队不打断（与 submit 同语义）
     if (busy) {
-      pendingTextRef.current = text;
-      void stop();
+      enqueueCommand(text);
       return;
     }
+    appendUser(tabKey, text);
     void runPrompt(text);
   }
 
@@ -882,23 +930,32 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }, []);
   // L2：回跳目标消息短暂高亮（与搜索命中高亮同型，1.2s 后退场）
   const [lastPromptFlash, setLastPromptFlash] = useState(-1);
-  function jumpToLastPrompt() {
-    if (lastUserIdx < 0) return;
-    logger.debug("chat", "last-prompt-jump", { index: lastUserIdx });
-    virtualizer.scrollToIndex(lastUserIdx, { align: "start" });
+  // P16 F-16-2：通用跳转（双 rAF 校跳——远端未测量条目首跳按 estimateSize 漂移，
+  // 两帧后再跳一次；原逻辑在 jumpToLastPrompt 内联，抽出供历史锚点/回跳共用）
+  function jumpToIndex(index: number) {
+    virtualizer.scrollToIndex(index, { align: "start" });
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        virtualizer.scrollToIndex(lastUserIdx, { align: "start" });
-        setLastPromptFlash(lastUserIdx);
+        virtualizer.scrollToIndex(index, { align: "start" });
+        setLastPromptFlash(index);
         window.setTimeout(() => setLastPromptFlash(-1), 1200);
       }),
     );
+  }
+  function jumpToLastPrompt() {
+    if (lastUserIdx < 0) return;
+    logger.debug("chat", "last-prompt-jump", { index: lastUserIdx });
+    jumpToIndex(lastUserIdx);
   }
 
   const empty = messages.length === 0;
 
   return (
     <div className="panel" data-dragging={dragging ? "true" : "false"}>
+      {/* P16 F-16-1 文件预览浮层（DEC-48）：窗格内右侧 overlay，非模态 */}
+      {previewPath && (
+        <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
+      )}
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}
@@ -1030,9 +1087,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
         <AttachList files={files} onRemove={removeFile} />
 
-        {/* F-9-3 命令队列面板（计划栏之下，DEC-19） */}
-        <CommandQueuePanel tabKey={tabKey} />
-
         {/* F-11-7：文件树移入 RightRail；通过 CustomEvent 接收其「引用」动作注入附件 */}
         {/*（监听挂载在下方 useEffect） */}
 
@@ -1074,6 +1128,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         onPickAt={pickAt}
         />
       </div>
+
+      {/* P16 F-16-3 队列悬浮 Dock（DEC-50）：右下角浮层，z 高于 composer-dock。
+          「立即发」= steering 语义（M2：先赋值 pendingTextRef 再 stop，见 sendNowSteer） */}
+      <QueueDock
+        tabKey={tabKey}
+        busy={busy}
+        onSendNow={sendNowSteer}
+      />
     </div>
   );
 }

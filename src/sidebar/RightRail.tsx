@@ -1,20 +1,21 @@
-// 右侧侧边栏（P11 · F-11-7，AionUi 风格）：元数据 / 文件 双 tab 单容器。
+// 右侧侧边栏（P11 · F-11-7，AionUi 风格）：元数据 / 文件 / 历史 三 tab 单容器。
 //
 // 开合 + 激活 tab 持久化 localStorage（key: ainone-rightrail）。
 // 折叠态收为细栏杆（竖排 tab 名），点击展开；无会话时不渲染（由 App 控制）。
-// 文件树「引用」通过 CustomEvent("ainone:ref-file") 交给 ChatPanel 注入附件，
+// 文件树「引用」/「预览」、历史「跳转/回溯」均通过 CustomEvent 交给 ChatPanel，
 // 避免 Rail 与 ChatPanel 强耦合（flexlayout 分屏下两者是兄弟节点）。
 
 import { useEffect, useMemo, useState } from "react";
 import { MetadataPanel } from "./MetadataPanel";
 import { FileTree } from "./FileTree";
+import { HistoryPanel } from "./HistoryPanel";
 import { collectModifiedPaths } from "@/lib/fileTree";
 import type { ChatMsg } from "@/acp/message-log";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import { logger } from "@/lib/logger";
 import "@/sidebar/sidebar.css";
 
-export type RailTab = "meta" | "files";
+export type RailTab = "meta" | "files" | "history";
 
 interface Props {
   tabKey: string;
@@ -37,9 +38,10 @@ function loadState(): RailState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const o = JSON.parse(raw);
+      const tab: RailTab = o.tab === "files" ? "files" : o.tab === "history" ? "history" : "meta";
       return {
         open: Boolean(o.open),
-        tab: o.tab === "files" ? "files" : "meta",
+        tab,
       };
     }
   } catch {
@@ -86,6 +88,14 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) 
         >
           文件
         </button>
+        <button
+          type="button"
+          className="rail-tab-btn vertical"
+          aria-label="展开历史消息"
+          onClick={() => switchTab("history")}
+        >
+          历史
+        </button>
       </aside>
     );
   }
@@ -113,6 +123,15 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) 
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={state.tab === "history"}
+          className={state.tab === "history" ? "rail-tab-btn active" : "rail-tab-btn"}
+          onClick={() => switchTab("history")}
+        >
+          历史
+        </button>
+        <button
+          type="button"
           className="rail-collapse"
           aria-label="折叠侧边栏"
           title="折叠"
@@ -130,7 +149,7 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) 
             cwd={cwd}
             embedded
           />
-        ) : (
+        ) : state.tab === "files" ? (
           <div className="rail-files">
             <FileTree
               cwd={cwd}
@@ -139,8 +158,16 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) 
                 logger.info("fs", "ref-file", { path });
                 window.dispatchEvent(new CustomEvent("ainone:ref-file", { detail: path }));
               }}
+              onOpenFile={(path) => {
+                // P16 F-16-1：单击文件 → 软件内预览（CustomEvent 与 ChatPanel 解耦，同 ref-file 模式）
+                logger.info("preview", "open-file", { path });
+                window.dispatchEvent(new CustomEvent("ainone:open-file", { detail: path }));
+              }}
             />
           </div>
+        ) : (
+          // P16 F-16-2：历史消息锚点（DEC-49）
+          <HistoryPanel messages={messages} />
         )}
       </div>
     </aside>

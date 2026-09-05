@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { QueueItem } from "@/lib/queue";
+import { mergeItems } from "@/lib/queue";
 
 interface QueueStore {
   /** tabKey → 待执行指令队列 */
@@ -20,6 +21,8 @@ interface QueueStore {
   move: (key: string, id: string, delta: number) => void;
   /** 拖拽重排：把 fromId 移到 toId 的位置（之后） */
   reorder: (key: string, fromId: string, toId: string) => void;
+  /** 拖拽合并（P16 F-16-3）：dragId 合入 overId → 文本按原顺序拼接，位置取较前者 */
+  merge: (key: string, dragId: string, overId: string) => void;
   /** 消费队首，返回被消费的指令（空队列返回 null） */
   dequeue: (key: string) => QueueItem | null;
   /** 清空某 tabKey 队列 */
@@ -75,6 +78,15 @@ export const useQueueStore = create<QueueStore>()(
           const [moved] = arr.splice(from, 1);
           arr.splice(to, 0, moved);
           return { queues: { ...s.queues, [key]: arr } };
+        }),
+
+      // P16 F-16-3（DEC-50）：合并逻辑收在 lib 纯函数 mergeItems，store 只做编排
+      merge: (key, dragId, overId) =>
+        set((s) => {
+          const arr = s.queues[key] ?? [];
+          const merged = mergeItems(arr, dragId, overId);
+          if (merged === arr) return {};
+          return { queues: { ...s.queues, [key]: merged } };
         }),
 
       dequeue: (key) => {

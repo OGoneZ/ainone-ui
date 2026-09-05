@@ -189,47 +189,108 @@
   color: var(--text-primary);
 }
 
-/* ======================= P9 · F-9-3 命令队列 ======================= */
-.queue-panel {
-  margin: 4px 2px;
+/* ======================= P16 · F-16-3 队列悬浮 Dock（DEC-50） ======================= */
+/* 右下角浮层：替代原 P9 静态条带（.queue-panel 系已随 CommandQueuePanel 删除）。
+   层级：高于 composer-dock（--z-float），低于弹层（--z-popover）。 */
+.queue-dock {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  z-index: var(--z-float);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.queue-dock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-full);
+  background: var(--bg-1);
+  color: var(--text-primary);
+  font-size: 0.8em;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+
+.queue-dock-badge:hover {
+  border-color: var(--primary);
+}
+
+/* busy 且队列待消费 → 徽标呼吸提示（消费会自动发生） */
+.queue-dock-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  animation: queue-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes queue-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.queue-dock-card {
+  margin-bottom: 6px;
+  width: min(320px, 80%);
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
   border: 1px solid var(--bg-3);
   border-radius: var(--radius);
   background: var(--bg-1);
+  box-shadow: var(--shadow-lg);
 }
 
-.queue-head {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.queue-summary {
-  font-weight: 500;
-}
-
-.queue-list {
-  margin: 0;
-  padding: 0 10px 8px;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.queue-item {
+.queue-dock-item {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 5px 6px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
 }
 
-.queue-grip {
+.queue-dock-item.ghost {
+  opacity: 0.35;
+}
+
+.queue-dock-item.dragging {
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary);
+}
+
+/* 合并候选：脉冲边框（悬停 600ms 后触发，DEC-50） */
+.queue-dock-item.candidate {
+  border-color: var(--primary);
+  animation: queue-candidate 0.8s ease-in-out infinite;
+}
+
+@keyframes queue-candidate {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 45%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 45%, transparent); }
+}
+
+/* 吸入动画：overlay 向目标收缩 + 淡出（transform 由内联样式驱动起点，CSS 过渡收尾） */
+.queue-dock-item.merge-sink {
+  transition: transform 320ms ease-in, opacity 320ms ease-in;
+  transform: scale(0.35);
+  opacity: 0;
+}
+
+.queue-dock-item.merging {
+  opacity: 0.4;
+}
+
+.queue-dock-grip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -239,21 +300,30 @@
   flex-shrink: 0;
 }
 
-.queue-grip:hover {
+.queue-dock-grip:hover {
   color: var(--text-secondary);
 }
 
-.queue-grip-dragging {
-  opacity: 0.4;
+.queue-dock-order {
+  font-size: 0.72em;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
-.queue-drop-target {
-  outline: 2px dashed var(--primary);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
+.queue-dock-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 0.82em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  padding: 0;
 }
 
-.queue-input {
+.queue-dock-input {
   flex: 1;
   min-width: 0;
   font-size: 12px;
@@ -264,28 +334,20 @@
   color: var(--text-primary);
 }
 
-.queue-move {
-  border: none;
-  background: transparent;
+.queue-dock-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   color: var(--text-secondary);
-  cursor: pointer;
-  padding: 2px 4px;
+  flex-shrink: 0;
 }
 
-.queue-move:hover {
-  color: var(--primary);
-}
-
-.queue-remove {
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 2px;
-}
-
-.queue-remove:hover {
-  color: var(--danger);
+.queue-dock-act:hover {
+  background: var(--bg-2);
+  color: var(--text-primary);
 }
 
 /* ======================= P11 · F-11-9 上一条指令回跳气泡 ======================= */
