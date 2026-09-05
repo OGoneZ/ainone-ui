@@ -27,7 +27,8 @@
   bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(100% - 24px, 860px);
+  /* F-18-1：加宽到 1080px（超宽屏下更接近全宽的 VS Code 输入体感） */
+  width: min(100% - 24px, 1080px);
   display: flex;
   flex-direction: column;
   gap: 4px;

@@ -26,9 +26,11 @@ import {
   GitFork,
   GripVertical,
   Loader2,
+  Maximize2,
   MessageSquare,
   MessageSquarePlus,
   Mic,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -79,3 +81,5 @@ export const RewindIcon = Undo2; // F-15-4 回溯（icon-only 化）
 export const MicIcon = Mic; // F-15-5 语音输入（去 emoji）
 export const SidebarCollapseIcon = PanelLeftClose; // F-15-7 左侧栏收缩
 export const SidebarExpandIcon = PanelLeftOpen; // F-15-7 左侧栏展开
+export const ExpandIcon = Maximize2; // F-18-2 输入框全屏编辑
+export const ShrinkIcon = Minimize2; // F-18-2 退出全屏编辑
