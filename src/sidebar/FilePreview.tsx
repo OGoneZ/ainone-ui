@@ -5,7 +5,7 @@
 // 关闭：× / Esc；非模态（左侧消息区仍可滚动）。
 // P16a：右上角全屏切换；左缘拖拽手柄调宽（280px~80% 窗宽，非全屏态生效）。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -110,24 +110,28 @@ async function getHighlighter(lang: string) {
   return hl;
 }
 
+/** 跟随 App 的 root data-theme（自持 matchMedia 会与 App 的 auto/light/dark 设置不一致） */
+function subscribeRootTheme(onChange: () => void) {
+  const obs = new MutationObserver(onChange);
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => obs.disconnect();
+}
+
 export function FilePreview({ path, onClose }: Props) {
   const kind: PreviewKind = useMemo(() => resolvePreviewKind(path), [path]);
   const [state, setState] = useState<LoadState>({ t: "loading" });
   const [content, setContent] = useState("");
   const [html, setHtml] = useState("");
-  const [isDark, setIsDark] = useState(false);
+  const isDark = useSyncExternalStore(
+    subscribeRootTheme,
+    () => document.documentElement.getAttribute("data-theme") === "dark",
+  );
   // P16a：全屏态 + 拖宽（px，null=默认 min(50%,720px)）
   const [fullscreen, setFullscreen] = useState(false);
   const [width, setWidth] = useState<number | null>(null);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
-
-  useEffect(() => {
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDark(mql.matches);
-    const fn = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mql.addEventListener("change", fn);
-    return () => mql.removeEventListener("change", fn);
-  }, []);
+  // P16a 修闪烁：code 容器走 ref 手动注入（详见 codeRef effect 注释）
+  const codeRef = useRef<HTMLDivElement | null>(null);
 
   // Esc 关闭（全屏态先退全屏）
   useEffect(() => {
@@ -216,6 +220,20 @@ export function FilePreview({ path, onClose }: Props) {
     };
   }, [path, kind]);
 
+  // P16a 修闪烁：code 容器手动注入 innerHTML。
+  // 原实现走 dangerouslySetInnerHTML——ChatPanel 流式期间高频重渲染，该通道
+  // 在 WKWebView 上反复清空选区（闪烁）。改为：React 不托管该子树，仅在
+  // html 真正变化时写一次 DOM；正在拖选时 DOM 不动 → 选区稳定。
+  useEffect(() => {
+    const el = codeRef.current;
+    if (!el) return;
+    const next = html || `<pre>${escapeHtml(content)}</pre>`;
+    if (el.dataset.rendered !== next) {
+      el.innerHTML = next;
+      el.dataset.rendered = next;
+    }
+  }, [html, content, state.t, kind]);
+
   const title = path.split("/").pop() ?? path;
 
   return (
@@ -295,9 +313,10 @@ export function FilePreview({ path, onClose }: Props) {
 
         {state.t === "ready" && kind === "code" && (
           <div
+            ref={codeRef}
             className="filepreview-code"
-            // shiki codeToHtml 输出受信主题模板包裹的转义代码，非用户可控 HTML
-            dangerouslySetInnerHTML={{ __html: html || `<pre>${escapeHtml(content)}</pre>` }}
+            // shiki codeToHtml 输出受信主题模板包裹的转义代码，非用户可控 HTML；
+            // 注入逻辑见上方 effect（手动 innerHTML，修选区闪烁）
             data-theme={isDark ? "dark" : "light"}
           />
         )}
