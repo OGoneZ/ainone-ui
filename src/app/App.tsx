@@ -748,7 +748,7 @@ function App() {
           <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           新建会话
         </button>
-        {/* P22 打赏入口（设置左侧） */}
+        {/* P22 打赏入口（右上角，设置左侧） */}
         <button className="donate-btn inline-flex items-center gap-1.5" onClick={() => setDonateOpen(true)}>
           <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           打赏作者

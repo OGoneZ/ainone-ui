@@ -586,10 +586,11 @@ tree-row:hover .filetree-ref {
   color: var(--text-primary);
 }
 
-/* ======================= F-21-6 右栏拖宽把手（左缘 6px 热区） ======================= */
+/* ======================= F-21-6 右栏拖宽把手（左缘 8px 热区） ======================= */
+/* 贴内缘定位（left:0）：.rightrail overflow:hidden 会裁掉越界部分（p22b 实测同左栏） */
 .rightrail > .sidebar-resize-handle.handle-left {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
+  left: 0;
 }
