@@ -74,10 +74,11 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) { setRecording(null); onClose(); } }}>
-      <DialogContent className="max-w-[640px] shortcuts-modal">
+      <DialogContent className="shortcuts-modal">
         <DialogHeader>
           <DialogTitle>快捷键</DialogTitle>
         </DialogHeader>
+        {/* 宽度足够（≥860px 视口）时按分组拆两列，免长滚动 */}
         <div className="shortcuts-list" ref={contentRef}>
           {groups.map((scope) => {
             const items = defs.filter((d) => d.scope === scope);

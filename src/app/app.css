@@ -664,6 +664,12 @@ button:disabled {
   padding-right: 4px;
 }
 
+/* 设置弹窗加宽（tailwind v4 中 sm:max-w-lg 会覆盖无变体 arbitrary 类，
+   宽度上限走 CSS 专规则而非 max-w-[860px]） */
+.settings-modal {
+  max-width: min(860px, calc(100vw - 2rem)) !important;
+}
+
 .settings-section {
   display: flex;
   flex-direction: column;
@@ -949,6 +955,30 @@ button:not(:disabled):active {
 }
 
 /* —— P25 快捷键帮助弹窗 —— */
+/* 宽度上限写 CSS 专规则（tailwind v4 中 sm:max-w-lg 变体规则排在无变体 arbitrary 类之后，
+   max-w-[920px] 会被覆盖成 512px）；容器查询：弹窗宽度足够时按分组拆两列，窄视口回退单列 */
+.shortcuts-modal {
+  container: shortcuts-modal / inline-size;
+  max-width: min(920px, calc(100vw - 2rem)) !important;
+}
+
+.shortcuts-modal .shortcuts-list {
+  max-height: 66vh;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@container shortcuts-modal (min-width: 860px) {
+  .shortcuts-modal .shortcuts-list {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 28px;
+  }
+}
+
+/* 非 shortcuts 弹窗（若有复用）保持原 flex 单列语义 */
 .shortcuts-list {
   max-height: 55vh;
   overflow-y: auto;

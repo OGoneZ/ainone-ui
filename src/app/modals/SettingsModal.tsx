@@ -205,7 +205,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-[720px] settings-modal">
+      <DialogContent className="settings-modal">
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
         </DialogHeader>
