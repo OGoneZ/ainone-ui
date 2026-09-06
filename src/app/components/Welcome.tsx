@@ -35,7 +35,7 @@ function ShortcutHint({ shortcutId, action }: { shortcutId: "app.new-session" | 
 
 export function Welcome() {
   return (
-    <div className="welcome">
+    <div className="welcome-empty">
       <div className="welcome-logo-row">
         <LogoMark />
         <div className="welcome-brand">

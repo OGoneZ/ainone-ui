@@ -378,8 +378,11 @@ select {
   min-height: 0;
 }
 
-/* —— 欢迎页（空态）：无任何 tab 时铺满 layout-host —— */
-.welcome {
+/* —— 欢迎页（空态）：无任何 tab 时铺满 layout-host ——
+ * 类名用 welcome-empty 而非 .welcome：chat/Welcome.tsx（会话内欢迎页）已占用
+ * .welcome，两处共名会互相污染样式（空态页的 pointer-events:none 曾压死
+ * 会话内建议 prompt 的点击）。 */
+.welcome-empty {
   position: absolute;
   inset: 0;
   /* 必须显式提层：.flexlayout__layout 同为 absolute 且带不透明背景
