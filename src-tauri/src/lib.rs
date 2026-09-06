@@ -95,7 +95,7 @@ pub fn run() {
             asr::asr_transcribe,
             asr::asr_config_get,
             asr::asr_config_save,
-            terminal::terminal_default_shell,
+            terminal::terminal_default_shell_with_path,
             terminal::terminal_track,
             terminal::terminal_untrack,
         ])

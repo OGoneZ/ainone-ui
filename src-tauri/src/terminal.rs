@@ -5,7 +5,7 @@
 // 前端经 `plugin:pty|<cmd>` 直接 invoke（capability 放行 pty:default）。
 //
 // 本模块只补两件插件不管的事：
-//   1. terminal_default_shell —— 默认 shell 探测（$SHELL，兜底 /bin/zsh），
+//   1. terminal_default_shell_with_path —— 默认 shell 探测（$SHELL，兜底 /bin/zsh），
 //      供前端 spawn 入参；语义对齐 env_path.rs 的 login shell 用法。
 //   2. 进程登记表 + 退出清理 —— 应用退出时 kill 全部 PTY 子进程，防 shell
 //      残留（agent.rs on_exit_cleanup 的终端版）。插件不暴露其进程表，
@@ -18,11 +18,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
-/// 默认 shell 探测：$SHELL 优先（空串视为未设），兜底 /bin/zsh。
-/// args 恒为 ["-l"]（login shell——桌面应用不经 login，终端里的 PATH/profile
-/// 靠它补齐；env PATH 另由前端 spawn 时注入增强 PATH）。
+/// 默认 shell 探测 + 增强 PATH 一并返回：$SHELL 优先（空串视为未设），兜底
+/// /bin/zsh；args 恒为 ["-l"]（login shell——桌面应用不经 login，终端里的
+/// profile/PATH 靠它补齐）。PATH 用 enhanced_path()（增强目录在前、进程 PATH
+/// 在后，env_path.rs 唯一事实源），前端 spawn 时作为 env 注入，与 harness
+/// 子进程同等可达 node/bun/omp 等用户工具。
 #[tauri::command]
-pub fn terminal_default_shell() -> Result<ShellSpec, String> {
+pub fn terminal_default_shell_with_path() -> Result<ShellSpec, String> {
     let program = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
@@ -30,6 +32,7 @@ pub fn terminal_default_shell() -> Result<ShellSpec, String> {
     Ok(ShellSpec {
         program,
         args: vec!["-l".to_string()],
+        path: crate::env_path::enhanced_path(),
     })
 }
 
@@ -37,6 +40,7 @@ pub fn terminal_default_shell() -> Result<ShellSpec, String> {
 pub struct ShellSpec {
     pub program: String,
     pub args: Vec<String>,
+    pub path: String,
 }
 
 pub struct TerminalStore(pub Mutex<HashMap<u32, ()>>);
@@ -111,12 +115,12 @@ mod tests {
     fn default_shell_prefers_env() {
         // 有 SHELL 且非空 → 原样采用 + login 参数
         std::env::set_var("SHELL", "/bin/bash");
-        let spec = terminal_default_shell().unwrap();
+        let spec = terminal_default_shell_with_path().unwrap();
         assert_eq!(spec.program, "/bin/bash");
         assert_eq!(spec.args, vec!["-l".to_string()]);
         // 空串 → 兜底 zsh
         std::env::set_var("SHELL", "");
-        let spec = terminal_default_shell().unwrap();
+        let spec = terminal_default_shell_with_path().unwrap();
         assert_eq!(spec.program, "/bin/zsh");
         std::env::remove_var("SHELL");
     }
@@ -125,7 +129,7 @@ mod tests {
     fn default_shell_falls_back_to_zsh() {
         // SHELL 未设（上一个测试已 remove）→ 兜底
         std::env::remove_var("SHELL");
-        let spec = terminal_default_shell().unwrap();
+        let spec = terminal_default_shell_with_path().unwrap();
         assert_eq!(spec.program, "/bin/zsh");
     }
 }
