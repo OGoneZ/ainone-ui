@@ -320,6 +320,14 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     ...(loadError !== undefined ? { loadError } : {}),
     async prompt(text, onOutgoing) {
       console.info("[acp] session/prompt 开始 sessionId=", sessionId);
+      // prompt 入口丢弃滞留 update：上一 turn 250ms 有界补派发的漏网尾巴
+      //（迟到 tool_call_update/usage 等）若被本 turn 消费会错误归属（迟到
+      // agent_text 混进新 turn）。丢弃代价可接受：usage 下一 turn 会重报，
+      // tool 状态视觉停在非终态；available_commands_update 不经队列不受影响
+      while (updateQueue.length) {
+        const dropped = updateQueue.shift()!;
+        console.warn("[acp] prompt 入口丢弃滞留 update:", dropped.update.sessionUpdate);
+      }
       const promptPromise = connection.agent.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [{ type: "text", text }],
