@@ -108,8 +108,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [startError, setStartError] = useState<string | null>(null);
   // F-8-2 批注：已收集的多段批注（原文 + 疑问）
   const [quotes, setQuotes] = useState<Quote[]>([]);
-  // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
-  const [historyDegraded, setHistoryDegraded] = useState(false);
+  // 恢复会话但日志缺失/损坏时的降级提示（F-4-3 → P24f 三态化）：
+  // "ok" = 正常；"log-missing" = 日志空/损坏但模型上下文已恢复（仅影响回看）；
+  // "context-lost" = 恢复链降级 new，模型上下文已丢失（降级 toast 在 ensureSession）
+  const [historyState, setHistoryState] = useState<"ok" | "log-missing" | "context-lost">("ok");
   const slashRef = useRef<HTMLTextAreaElement | null>(null);
 
   // F-11-3 @ 文件联想：null = 未展开；展开时为 token 信息
@@ -230,10 +232,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             setMessages(tabKey, msgs);
             persistedRef.current = msgs.length;
           } else {
-            setHistoryDegraded(true);
+            setHistoryState("log-missing");
           }
         })
-        .catch(() => setHistoryDegraded(true));
+        .catch(() => setHistoryState("log-missing"));
     }
     // F-8-7 快问：读配置判定入口是否可用（未配置则禁用）
     quickAskConfigGet()
@@ -548,6 +550,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         const reason = s.loadError ?? "session/load 失败";
         logger.warn("session", "resume 降级 new", { requested: resumeId, reason });
         patch(tabKey, { degraded: { reason } });
+        // 横幅三态：context-lost 优先于 log-missing（若日志也空，两个洞叠加时
+        // 显示更严重的 context-lost 文案）
+        setHistoryState("context-lost");
         toast.error("未能恢复模型上下文，已新建会话继续");
       }
       if (hadSession) {
@@ -592,9 +597,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         newLen: full.length,
       });
       useSessionStore.getState().setMessages(tabKey, truncated);
-      persistedRef.current = truncated.length;
+      // P24f（隐藏 bug 修复）：编辑重发的文本此前从未落盘——旧实现把「替换后
+      // 的列表长度」当游标 + 截日志保留 N 行（旧行是旧文本），编辑后的新文本
+      // 永远写不进日志。改为：游标/截断都停在编辑目标之前（保留 target.index
+      // 行），runPrompt 的 persistUserMessage 会把编辑后文本作为新行追加
+      persistedRef.current = target.index;
       // H7：同 doRewind——await 截断完成，避免与新消息 append 竞态
-      await truncateAndDetach(truncated.length);
+      await truncateAndDetach(target.index);
       setInput("");
       setAtMenu(null);
       setFiles([]);
@@ -878,6 +887,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const p = (async () => {
       try {
         const session = await ensureSession();
+        // P24f（洞 A）：user 消息即时落盘——先日志后索引。旧时序里 user 消息
+        // 要等整个 turn 结束才随 persistNew 落盘，期间强退 → 索引指向从未创建
+        // 的日志文件 →「历史消息未找到」横幅。落点选在 ensureSession 之后、
+        // session.prompt 之前（单一咽喉点，覆盖 submit/队列/steer/quotes 全部路径）
+        await persistUserMessage();
         if (!promptedOnce.current) {
           promptedOnce.current = true;
           onFirstPrompt?.(text, session.sessionId);
@@ -1008,7 +1022,27 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     if (msgs.length <= count) return;
     const lines = serializeMessages(msgs.slice(count));
     persistedRef.current = msgs.length;
-    logAppend(sid, lines).catch(() => {});
+    logAppend(sid, lines).catch((e) => {
+      // P24f：失败不再静默——日志是唯一事实源，写失败必须留痕
+      logger.error("chat", "logAppend 失败", { sid, lines: lines.length, error: String(e) });
+    });
+  }
+
+  // —— P24f（洞 A）：user 消息即时落盘（turn 开始时调用）——
+  // 语义：若游标下一条是 user 消息则立刻写盘并推进游标；失败 logger.error 显式留痕
+  //（不中断 turn——消息已在 store，下轮 persistNew 仍会尝试写全量增量）
+  async function persistUserMessage() {
+    const sid = logSidRef.current ?? sessionRef.current?.sessionId;
+    if (!sid) return;
+    const msgs = useSessionStore.getState().runtime[tabKey]?.messages ?? [];
+    const next = msgs[persistedRef.current];
+    if (!next || next.role !== "user") return;
+    try {
+      await logAppend(sid, serializeMessages([next]));
+      persistedRef.current += 1;
+    } catch (e) {
+      logger.error("chat", "user 消息落盘失败", { sid, error: String(e) });
+    }
   }
 
   async function stop() {
@@ -1194,9 +1228,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             </button>
           </div>
         )}
-        {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
-        {empty && historyDegraded && (
-          <div className="hint degraded">⚠️ 上下文已恢复，历史消息未找到</div>
+        {empty && historyState === "ok" && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
+        {empty && historyState === "log-missing" && (
+          // P24f（洞 B）：文案准确化——session/load 成功时模型上下文其实完好，
+          // 只是本地日志缺失（旧文案「上下文已恢复，历史消息未找到」暗示上下文丢失，误导）
+          <div className="hint degraded">⚠️ 模型上下文已恢复；本地历史消息缺失，仅影响回看</div>
+        )}
+        {empty && historyState === "context-lost" && (
+          <div className="hint degraded">⚠️ 未能恢复模型上下文，已新建会话；上方历史仅为本地存档</div>
         )}
         <div
           style={{
