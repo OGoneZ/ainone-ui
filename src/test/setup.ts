@@ -31,3 +31,9 @@ if (typeof window !== "undefined" && !(window as any).ResizeObserver) {
     disconnect() {}
   };
 }
+
+// jsdom 缺 Element.scrollIntoView（cmdk 高亮项滚动跟随在 effect 里直调）。
+// 补一个无操作桩，P25 NewSessionModal cmdk 列表在组件测试里能挂载。
+if (typeof window !== "undefined" && !window.HTMLElement.prototype.scrollIntoView) {
+  window.HTMLElement.prototype.scrollIntoView = function () {};
+}

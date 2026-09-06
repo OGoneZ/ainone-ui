@@ -484,6 +484,40 @@ button:disabled {
   align-self: flex-start;
 }
 
+/* —— P25 新建会话弹层 cmdk 列表 —— */
+.ns-command-list {
+  max-height: 300px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+}
+
+.ns-item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ns-item-note {
+  font-size: 0.78em;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.ns-item-note.bad {
+  color: var(--danger, #dc2626);
+}
+
+/* 选中项的 ✓ 标记（与 aria-selected/cmdk 高亮区分：前者=业务选中，后者=键盘焦点） */
+.ns-item-check {
+  margin-left: auto;
+  color: var(--primary);
+  font-size: 0.85em;
+}
+
 /* —— 设置弹层（外壳已迁 shadcn Dialog，此处仅表单布局）—— */
 .modal-error {
   color: var(--danger);
