@@ -1,8 +1,8 @@
-// 新建会话弹层（F-5-2 + F-7-8）：先选 harness + 工作区（或未归组 / 新建工作区）。
-// 右键工作区「新建会话」时 presetWorkspaceId 预填，跳过工作区选择。
-// P7 外壳迁到 shadcn Dialog（受控 + Esc + 遮罩 + 进出场动画）。
-// P25 F-25-2：选择器改 cmdk 列表（↑↓ 连续导航，Enter 选中 / 「开始对话」项创建）；
-// 终端快捷卡移除（入口收敛到侧栏头部图标钮 + Ctrl+T）。
+// 新建会话弹层（F-5-2 + F-7-8）：两步向导——①选 harness → Enter 进下一步
+// ②选工作区 → Enter 确认创建。全程键盘可达（↑↓ 选择 + Enter 推进），
+// 鼠标点击同样有效（点选项=选中；第一步点「下一步」按钮 / 第二步点「开始对话」按钮）。
+// 右键工作区「新建会话」时 presetWorkspaceId 预填，直接落在第二步。
+// P7 外壳迁到 shadcn Dialog；P25 改 cmdk 列表；P26 改两步向导。
 
 import { useEffect, useState } from "react";
 import type { AdapterWithStatus } from "@/ipc/adapters";
@@ -37,12 +37,15 @@ export function NewSessionModal({
   const [adapterId, setAdapterId] = useState("");
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // P26 两步向导：harness=选框架；workspace=选目录（presetWorkspaceId 存在时直接进第二步）
+  const [step, setStep] = useState<"harness" | "workspace">("harness");
 
   useEffect(() => {
     if (!open) return;
     setAdapterId(adapters[0]?.id ?? "");
     setLocalWs(workspaces);
     setWorkspaceId(presetWorkspaceId !== undefined ? presetWorkspaceId : (workspaces[0]?.id ?? null));
+    setStep(presetWorkspaceId !== undefined ? "workspace" : "harness");
   }, [open, adapters, workspaces, presetWorkspaceId]);
 
   async function newWorkspace() {
@@ -82,81 +85,103 @@ export function NewSessionModal({
     onConfirm(adapterId, workspaceId, selected?.cwd);
   }
 
+  /** 第一步：Enter/点击「下一步」——选中当前高亮 harness 即推进 */
+  function goNext() {
+    if (!adapterId) return;
+    setStep("workspace");
+  }
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>新建会话</DialogTitle>
+          <DialogTitle>{step === "harness" ? "新建会话 · 选择 Harness" : "新建会话 · 选择工作目录"}</DialogTitle>
         </DialogHeader>
 
-        {/* P25：cmdk 单列表，harness / 工作区两段连续 ↑↓ 导航；
-            onSelect 只负责选中，「开始对话」项负责创建（回车直达）。 */}
-        <Command loop className="ns-command">
-          <CommandList className="ns-command-list">
-            <CommandGroup heading="harness">
-              {adapters.map((a) => (
+        {/* P26 两步向导：每步一个 cmdk 列表。↑↓ 导航（cmdk 自带）、
+            onSelect 选中当前项，「下一步/开始对话」项 Enter 推进；
+            第二步列表尾部保留「上一步」与「新建工作区」入口。 */}
+        {step === "harness" ? (
+          <Command loop className="ns-command">
+            <CommandList className="ns-command-list">
+              <CommandGroup heading={`harness（↑↓ 选择，Enter 下一步）`}>
+                {adapters.map((a) => (
+                  <CommandItem
+                    key={a.id}
+                    value={`harness-${a.id}`}
+                    disabled={!a.available}
+                    onSelect={() => {
+                      setAdapterId(a.id);
+                      // P26：Enter/点击 harness 项 = 选中并直接进下一步
+                      setStep("workspace");
+                    }}
+                    className={adapterId === a.id ? "ns-item ns-item-active" : "ns-item"}
+                  >
+                    <span className="ns-item-name">{a.name}</span>
+                    {!a.available && <span className="ns-item-note">未安装</span>}
+                    {adapterId === a.id && <span className="ns-item-check">✓</span>}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        ) : (
+          <Command loop className="ns-command">
+            <CommandList className="ns-command-list">
+              <CommandGroup heading={`工作区（↑↓ 选择，Enter 确认）`}>
                 <CommandItem
-                  key={a.id}
-                  value={`harness-${a.id}`}
-                  disabled={!a.available}
-                  onSelect={() => setAdapterId(a.id)}
-                  data-selected-adapter={adapterId === a.id ? "true" : undefined}
-                  className={adapterId === a.id ? "ns-item ns-item-active" : "ns-item"}
+                  value="ws-none"
+                  onSelect={() => setWorkspaceId(null)}
+                  className={workspaceId === null ? "ns-item ns-item-active" : "ns-item"}
                 >
-                  <span className="ns-item-name">{a.name}</span>
-                  {!a.available && <span className="ns-item-note">未安装</span>}
-                  {adapterId === a.id && <span className="ns-item-check">✓</span>}
+                  <span className="ns-item-name">未归组（默认目录）</span>
+                  {workspaceId === null && <span className="ns-item-check">✓</span>}
                 </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading="工作区">
-              <CommandItem
-                value="ws-none"
-                onSelect={() => setWorkspaceId(null)}
-                className={workspaceId === null ? "ns-item ns-item-active" : "ns-item"}
-              >
-                <span className="ns-item-name">未归组（默认目录）</span>
-                {workspaceId === null && <span className="ns-item-check">✓</span>}
-              </CommandItem>
-              {localWs.map((w) => (
+                {localWs.map((w) => (
+                  <CommandItem
+                    key={w.id}
+                    value={`ws-${w.id}`}
+                    onSelect={() => setWorkspaceId(w.id)}
+                    className={workspaceId === w.id ? "ns-item ns-item-active" : "ns-item"}
+                  >
+                    <span className="ns-item-name">{w.name}</span>
+                    <span className="ns-item-note">{w.cwd}</span>
+                    {workspaceId === w.id && <span className="ns-item-check">✓</span>}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+              <CommandSeparator />
+              <CommandGroup heading="操作">
                 <CommandItem
-                  key={w.id}
-                  value={`ws-${w.id}`}
-                  onSelect={() => setWorkspaceId(w.id)}
-                  className={workspaceId === w.id ? "ns-item ns-item-active" : "ns-item"}
+                  value="ns-new-ws"
+                  disabled={creating}
+                  onSelect={() => { void newWorkspace(); }}
                 >
-                  <span className="ns-item-name">{w.name}</span>
-                  <span className="ns-item-note">{w.cwd}</span>
-                  {workspaceId === w.id && <span className="ns-item-check">✓</span>}
+                  <span className="ns-item-name">{creating ? "创建中…" : "＋ 新建工作区（选目录）"}</span>
                 </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading="操作">
-              <CommandItem
-                value="ns-new-ws"
-                disabled={creating}
-                onSelect={() => { void newWorkspace(); }}
-              >
-                <span className="ns-item-name">{creating ? "创建中…" : "＋ 新建工作区（选目录）"}</span>
-              </CommandItem>
-              <CommandItem
-                value="ns-confirm"
-                disabled={!adapterId || creating}
-                onSelect={confirm}
-                data-testid="ns-confirm"
-              >
-                <span className="ns-item-name">开始对话</span>
-                {selectedAdapter && !selectedAdapter.available && (
-                  <span className="ns-item-note bad">未找到程序，开始前请先安装</span>
-                )}
-              </CommandItem>
-            </CommandGroup>
-          </CommandList>
-        </Command>
+                <CommandItem
+                  value="ns-back"
+                  onSelect={() => setStep("harness")}
+                >
+                  <span className="ns-item-name">← 上一步（重选 harness）</span>
+                </CommandItem>
+                <CommandItem
+                  value="ns-confirm"
+                  disabled={!adapterId || creating}
+                  onSelect={confirm}
+                  data-testid="ns-confirm"
+                >
+                  <span className="ns-item-name">开始对话</span>
+                  {selectedAdapter && !selectedAdapter.available && (
+                    <span className="ns-item-note bad">未找到程序，开始前请先安装</span>
+                  )}
+                </CommandItem>
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        )}
 
-        {selectedAdapter && !selectedAdapter.available && (
+        {step === "workspace" && selectedAdapter && !selectedAdapter.available && (
           <p className="ns-hint bad">
             {selectedAdapter.id === "claude-code"
               ? "Claude Code 连接器未找到——首次开始对话时将自动安装（需 bun/node 与网络），并使用已安装的 claude CLI。"
@@ -165,13 +190,15 @@ export function NewSessionModal({
         )}
 
         <div className="modal-actions">
-          <button
-            onClick={confirm}
-            disabled={!adapterId || creating}
-            data-testid="ns-confirm-btn"
-          >
-            开始对话
-          </button>
+          {step === "harness" ? (
+            <button onClick={goNext} disabled={!adapterId} data-testid="ns-next-btn">
+              下一步
+            </button>
+          ) : (
+            <button onClick={confirm} disabled={!adapterId || creating} data-testid="ns-confirm-btn">
+              开始对话
+            </button>
+          )}
           <button onClick={onClose}>取消</button>
         </div>
       </DialogContent>

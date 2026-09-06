@@ -96,11 +96,12 @@ describe("App 编排（工作区分组）", () => {
     const newBtn = await screen.findByRole("button", { name: "新建工作区" });
     await user.click(newBtn);
 
-    // 弹层出现
-    const modal = await screen.findByRole("heading", { name: "新建会话" });
+    // 弹层出现（P26 两步向导第一步标题）
+    const modal = await screen.findByRole("heading", { name: "新建会话 · 选择 Harness" });
     expect(modal).toBeInTheDocument();
 
-    // 默认 harness = 第一个（Oh My Pi），直接点开始对话（工作区默认第一个 dev）
+    // P26 两步：点 harness 项进第二步 → 默认工作区第一个（dev）→ 开始对话
+    await user.click(await screen.findByText("Oh My Pi"));
     await user.click(screen.getByRole("button", { name: "开始对话" }));
 
     // 生成 Tab（Tab 标题「新会话」）+ 聊天面板的 harness 徽标
@@ -159,7 +160,7 @@ describe("P25 App 全局快捷键", () => {
     render(<App />);
     await screen.findByText("dev");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, bubbles: true, cancelable: true }));
-    expect(await screen.findByRole("heading", { name: "新建会话" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "新建会话 · 选择 Harness" })).toBeInTheDocument();
   });
 
   it("Ctrl+T 新建终端 tab", async () => {
