@@ -104,8 +104,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // 应用退出时清理所有自管子进程（harness agent + 终端 PTY）
-            agent::handle_run_event(app, event);
-            terminal::on_exit_cleanup(app);
+            // 应用退出时清理所有自管子进程（harness agent + 终端 PTY）。
+            // RunEvent 非 Copy，先判 Exit 再分派给两个 handler。
+            let is_exit = matches!(event, tauri::RunEvent::Exit);
+            if is_exit {
+                agent::on_exit_cleanup(app);
+                terminal::on_exit_cleanup(app);
+            }
         });
 }

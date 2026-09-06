@@ -234,6 +234,14 @@ pub fn init_state(app: &mut tauri::App) {
 }
 
 /// RunEvent::Exit 接线（lib.rs 调用）：kill 全部登记的 PTY 子进程并清表。
+/// 注意必须由调用方过滤 RunEvent::Exit（对齐 agent.rs handle_run_event 模式），
+/// run 回调会对每个 RunEvent 变体（Ready/Resumed/Main…）触发，不过滤会误杀。
+pub fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
+    if let tauri::RunEvent::Exit = event {
+        on_exit_cleanup(app);
+    }
+}
+
 pub fn on_exit_cleanup(app: &AppHandle) {
     let state: tauri::State<'_, TerminalStore> = app.state();
     let mut map = match state.0.lock() {
