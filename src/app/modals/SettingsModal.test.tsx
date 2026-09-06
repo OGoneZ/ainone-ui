@@ -130,3 +130,27 @@ describe("SettingsModal 外观分区（P26 R3 主题自工具栏迁入）", () =
     expect(onThemeChange).toHaveBeenCalledWith("dark");
   });
 });
+
+describe("Dialog 点遮罩关闭（P26 WKWebView mousedown 兜底）", () => {
+  it("mousedown 落在 Content 外 → 合成 pointerdown 触发 Radix outside-close → onClose", async () => {
+    const onClose = vi.fn();
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={onClose} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    await screen.findByText("外观");
+    // 模拟 WKWebView 真实鼠标：只有 mousedown（无 pointerdown）落在 overlay（Content 外）
+    const overlay = document.querySelector("[data-slot='dialog-overlay']");
+    expect(overlay).not.toBeNull();
+    const target = overlay as EventTarget;
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    Object.defineProperty(down, "target", { value: target });
+    document.dispatchEvent(down);
+    // Radix Dialog deferPointerDownOutside=true：down 后等同一交互的 click 才 dismiss
+    const up = new MouseEvent("mouseup", { bubbles: true, cancelable: true });
+    Object.defineProperty(up, "target", { value: target });
+    document.dispatchEvent(up);
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    Object.defineProperty(click, "target", { value: target });
+    document.dispatchEvent(click);
+    expect(onClose).toHaveBeenCalled();
+  });
+});

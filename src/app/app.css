@@ -142,7 +142,8 @@ select {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 0 -10px -10px; /* 抵消 aside padding，让分隔线/背景通到边缘 */
+  /* P26 微调：与列表区之间留 8px 空隙（两个区域的视觉隔断，分隔线不再贴身） */
+  margin: 8px -10px -10px;
   padding: 6px 10px 8px;
   border-top: 1px solid var(--bg-3);
 }
@@ -168,7 +169,7 @@ select {
 }
 
 .sidebar-collapsed .sidebar-footer {
-  margin: auto -6px -6px; /* 折叠态 padding 6px 0，抵消后通到边缘 */
+  margin: auto -6px -6px; /* 折叠态 padding 6px 0，抵消后通到边缘；auto 顶推贴底自带空隙 */
   padding: 6px 0 4px;
   border-top: 1px solid var(--bg-3);
   align-items: center;
