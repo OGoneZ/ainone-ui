@@ -269,6 +269,7 @@
 }
 
 .queue-dock-item {
+  position: relative; /* F-21-3：插入指示线 ::before 的定位锚 */
   display: flex;
   align-items: center;
   gap: 6px;
@@ -298,7 +299,8 @@
   50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 45%, transparent); }
 }
 
-/* 吸入动画：overlay 向目标收缩 + 淡出（transform 由内联样式驱动起点，CSS 过渡收尾） */
+/* 吸入动画（F-21-3）：主路径由 Web Animations API 驱动 overlay 真实飞向目标中心
+   （QueueDock onDragEnd 内联 keyframes）；此处 merge-sink/merging 仅作无几何环境兜底。 */
 .queue-dock-item.merge-sink {
   transition: transform 320ms ease-in, opacity 320ms ease-in;
   transform: scale(0.35);
@@ -307,6 +309,27 @@
 
 .queue-dock-item.merging {
   opacity: 0.4;
+}
+
+/* 边缘带插入指示（F-21-3）：拖到条目上下边缘 = 排序落点预览，顶/底缘色条渐显 */
+.queue-dock-item.insert-over {
+  border-color: var(--primary);
+}
+.queue-dock-item.insert-over::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 1px;
+}
+
+/* 候选态语义图标（序号位被 MergeIcon 替换） */
+.queue-dock-merge-hint {
+  color: var(--primary);
+  flex-shrink: 0;
 }
 
 .queue-dock-grip {

@@ -2,7 +2,7 @@
 // 拖拽合并（P16 F-16-3，AC-P16-8）。
 
 import { describe, it, expect } from "vitest";
-import { enqueue, removeItem, reorder, next, mergeItems, QUEUE_CAPACITY, type QueueItem } from "./queue";
+import { enqueue, removeItem, reorder, next, mergeItems, isInCenterBand, QUEUE_CAPACITY, type QueueItem } from "./queue";
 
 const item = (id: string, text = id): QueueItem => ({ id, text });
 
@@ -96,5 +96,26 @@ describe("mergeItems（P16 F-16-3 拖拽合并，DEC-50）", () => {
   it("合并后长度减一（两条变一条，作为一次消息发送）", () => {
     const items = [item("a", "甲"), item("b", "乙")];
     expect(mergeItems(items, "a", "b")).toHaveLength(1);
+  });
+});
+
+describe("isInCenterBand（F-21-3 中心 50% 区合并判定）", () => {
+  // rect [100, 300]：中心 50% 带 = [150, 250]（x=100+0.25w ~ 100+0.75w）
+  const rect = { left: 100, width: 200 };
+  it("中心带 = 合并意图：x=200（中点）、x=150（左界）、x=250（右界）→ true", () => {
+    expect(isInCenterBand(200, rect)).toBe(true);
+    expect(isInCenterBand(150, rect)).toBe(true);
+    expect(isInCenterBand(250, rect)).toBe(true);
+  });
+  it("边缘带 = 排序意图：x=110（左 5%）、x=290（右 95%）→ false（防误触合并）", () => {
+    expect(isInCenterBand(110, rect)).toBe(false);
+    expect(isInCenterBand(290, rect)).toBe(false);
+  });
+  it("边界值外侧恰好排除：x=149.9 / x=250.1 → false", () => {
+    expect(isInCenterBand(149.9, rect)).toBe(false);
+    expect(isInCenterBand(250.1, rect)).toBe(false);
+  });
+  it("零宽 rect（布局未就绪）→ false（保守按排序处理）", () => {
+    expect(isInCenterBand(200, { left: 100, width: 0 })).toBe(false);
   });
 });
