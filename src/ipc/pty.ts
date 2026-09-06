@@ -1,23 +1,22 @@
 // 终端会话前端封装（P23）：PTY 胶水层。
 //
-// tauri-pty（tauri-plugin-pty 的官方 API 包）暴露 node-pty 形状的 IPty，
-// 本层在其上做三件归一化，TerminalPanel 只面向这里的薄接口：
-//   1. 默认 shell 解析 —— invoke terminal_default_shell（Rust 侧 $SHELL 兜底 /bin/zsh），
-//      并注入增强 PATH（env_path 增强目录 + 进程 PATH，与 harness 子进程行为一致）
-//   2. 生命周期登记 —— spawn 成功后 terminal_track 登记、kill/退出后 terminal_untrack，
-//      Rust 侧应用退出清理以登记表为事实源
-//   3. 数据形状 —— onData 的 Uint8Array 经 UTF-8 解码为 string（xterm.write 接受
-//      string/Uint8Array，这里统一 string 简化主题与缓冲处理；二进制图形序列
-//      允许有损，harness session 同样不支持）
+// p23g 重构（修复 P23-D1）：后端已改为 portable-pty + 自管读线程 + Channel 推送
+// （terminal.rs），本层从「tauri-pty 包的 read 轮询」切换到「Channel 事件」：
+//   - createTerminal → invoke terminal_spawn（program/args/env 来自 default shell
+//     spec，与 harness 子进程同等增强 PATH），返回 terminalId/pid
+//   - onData/onExit → 同一 Channel 的 data/exited 事件（对齐 bridge.ts 模式）
+//   - write/resize/kill → 自有命令，不再与读通道抢锁（P23-D1 根因已消除）
+// 数据形状：Channel 推 UTF-8 字节块，这里流式解码为 string（多字节跨 chunk 不断裂）。
 
-import { invoke } from "@tauri-apps/api/core";
-import { spawn as ptySpawn, type IPty } from "tauri-pty";
+import { invoke, Channel } from "@tauri-apps/api/core";
 
 export interface TerminalSession {
+  /** Rust 侧会话句柄（write/resize/kill 均以此为键） */
+  terminalId: number;
   pid: number;
   /** PTY 输出（UTF-8 解码后的字符串块） */
   onData: (cb: (data: string) => void) => void;
-  /** 子进程退出（exitCode 来自插件 exitstatus 阻塞 wait） */
+  /** shell 已退出（code 来自 Rust 读线程 wait()） */
   onExit: (cb: (code: number) => void) => void;
   write: (data: string) => void;
   resize: (cols: number, rows: number) => void;
@@ -30,21 +29,23 @@ export interface CreateTerminalOptions {
   rows?: number;
 }
 
-/** 增强 PATH 注入（对齐 agent.rs spawn env 语义）：桌面应用 PATH 常缺
- *  用户工具目录，终端里 node/bun/omp 等需与 agent 子进程同等可达。
- *  前端取进程 PATH 原样透传；Rust enhanced_path 不经 IPC 暴露，故由
- *  default_shell 命令一并返回（见 terminal.rs ShellSpec）。 */
+/** default shell spec（Rust terminal_default_shell_with_path 返回） */
 interface ShellSpec {
   program: string;
   args: string[];
   path: string;
 }
 
+/** Rust TerminalEvent 序列化后的形状（serde tag="event"） */
+type TerminalEvent =
+  | { event: "data"; payload: number[] }
+  | { event: "exited"; payload: { code: number } };
+
 async function defaultShellSpec(): Promise<ShellSpec> {
   try {
     return await invoke<ShellSpec>("terminal_default_shell_with_path");
   } catch {
-    // 旧后端 / 非 Tauri 环境（测试）兜底
+    // 非 Tauri 环境（测试）兜底
     return {
       program: "/bin/zsh",
       args: ["-l"],
@@ -57,32 +58,37 @@ async function defaultShellSpec(): Promise<ShellSpec> {
  *  spawn 失败（shell 不存在等）直接抛错，由调用方负责 UI 提示。 */
 export async function createTerminal(opts: CreateTerminalOptions = {}): Promise<TerminalSession> {
   const spec = await defaultShellSpec();
-  const pty: IPty = ptySpawn(spec.program, spec.args, {
-    cols: opts.cols ?? 80,
-    rows: opts.rows ?? 24,
-    cwd: opts.cwd && opts.cwd.length > 0 ? opts.cwd : undefined,
-    env: { PATH: spec.path },
-  });
 
-  // 生命周期登记（失败不影响会话本体，仅退出清理缺一条记录）
-  invoke("terminal_track", { pid: pty.pid }).catch(() => {});
-  const untrack = () => invoke("terminal_untrack", { pid: pty.pid }).catch(() => {});
-
-  const decoder = new TextDecoder("utf-8");
   const dataCbs = new Set<(data: string) => void>();
   const exitCbs = new Set<(code: number) => void>();
+  const decoder = new TextDecoder("utf-8");
 
-  const dataDispose = pty.onData((bytes) => {
-    const text = decoder.decode(bytes, { stream: true });
-    for (const cb of dataCbs) cb(text);
-  });
-  const exitDispose = pty.onExit(({ exitCode }) => {
-    untrack();
-    for (const cb of exitCbs) cb(exitCode);
+  const channel = new Channel<TerminalEvent>();
+  channel.onmessage = (msg) => {
+    switch (msg.event) {
+      case "data":
+        // payload 经 serde 是 number[]，流式解码保证多字节跨 chunk 不断裂
+        for (const cb of dataCbs) cb(decoder.decode(Uint8Array.from(msg.payload), { stream: true }));
+        break;
+      case "exited":
+        for (const cb of exitCbs) cb(msg.payload.code);
+        break;
+    }
+  };
+
+  const spawned = await invoke<{ terminal_id: number; pid: number }>("terminal_spawn", {
+    program: spec.program,
+    args: spec.args,
+    cwd: opts.cwd && opts.cwd.length > 0 ? opts.cwd : null,
+    env: { PATH: spec.path },
+    cols: opts.cols ?? 80,
+    rows: opts.rows ?? 24,
+    onEvent: channel,
   });
 
   return {
-    pid: pty.pid,
+    terminalId: spawned.terminal_id,
+    pid: spawned.pid,
     onData(cb) {
       dataCbs.add(cb);
     },
@@ -90,17 +96,16 @@ export async function createTerminal(opts: CreateTerminalOptions = {}): Promise<
       exitCbs.add(cb);
     },
     write(data) {
-      pty.write(data);
+      invoke("terminal_write", { terminalId: spawned.terminal_id, data }).catch(() => {});
     },
     resize(cols, rows) {
       // 行列合法才下发（xterm fit 在 0 尺寸容器时可能给出 0）
-      if (cols > 0 && rows > 0) pty.resize(cols, rows);
+      if (cols > 0 && rows > 0) {
+        invoke("terminal_resize", { terminalId: spawned.terminal_id, cols, rows }).catch(() => {});
+      }
     },
     kill() {
-      dataDispose.dispose();
-      exitDispose.dispose();
-      untrack();
-      pty.kill();
+      invoke("terminal_kill", { terminalId: spawned.terminal_id }).catch(() => {});
     },
   };
 }

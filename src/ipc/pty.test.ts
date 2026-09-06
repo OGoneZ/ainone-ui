@@ -1,102 +1,93 @@
-// pty.ts 胶水单测（P23）：mock 底层 tauri-pty 与 Tauri IPC，验证归一化行为。
+// pty.ts 胶水单测（P23，p23g 更新）：mock 底层 invoke/Channel，验证归一化行为。
 //
-// 意图（AC-P23-8）：终端生命周期三件套行为正确——
+// 意图（AC-P23-8 + P23-D1 修复回归）：终端生命周期与数据通道行为正确——
 //   1. spawn 参数来自 Rust default shell spec（program/args/path 注入）
-//   2. onData 的 Uint8Array 以 UTF-8 流式解码为 string（多字节跨 chunk 不断裂）
-//   3. kill/退出后 terminal_untrack 解除登记（Rust 退出清理事实源一致）
+//   2. Channel data 事件以 UTF-8 流式解码为 string（多字节跨 chunk 不断裂）
+//   3. kill/resize 走自有命令（terminal_write/resize/kill），不依赖插件轮询
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { spawnMock, eventHandlers, invokeMock } = vi.hoisted(() => {
-  const eventHandlers: { data: ((e: Uint8Array) => void)[]; exit: ((e: { exitCode: number }) => void)[] } = {
-    data: [],
-    exit: [],
-  };
+const { invokeMock, ChannelMock, channelInstances } = vi.hoisted(() => {
+  const channelInstances: { onmessage: ((msg: unknown) => void) | null }[] = [];
   return {
-    eventHandlers,
-    spawnMock: vi.fn(() => ({
-      pid: 4242,
-      onData: (cb: (e: Uint8Array) => void) => {
-        eventHandlers.data.push(cb);
-        return { dispose: () => {} };
-      },
-      onExit: (cb: (e: { exitCode: number }) => void) => {
-        eventHandlers.exit.push(cb);
-        return { dispose: () => {} };
-      },
-      write: vi.fn(),
-      resize: vi.fn(),
-      kill: vi.fn(),
-    })),
     invokeMock: vi.fn(),
+    ChannelMock: class {
+      onmessage: ((msg: unknown) => void) | null = null;
+      constructor() {
+        channelInstances.push(this);
+      }
+    },
+    channelInstances,
   };
 });
 
-vi.mock("tauri-pty", () => ({ spawn: spawnMock }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+  Channel: ChannelMock,
+}));
 
 import { createTerminal } from "./pty";
 
 beforeEach(() => {
-  eventHandlers.data = [];
-  eventHandlers.exit = [];
-  spawnMock.mockClear();
+  channelInstances.length = 0;
   invokeMock.mockReset();
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "terminal_default_shell_with_path") {
       return Promise.resolve({ program: "/bin/zsh", args: ["-l"], path: "/usr/bin:/bin" });
+    }
+    if (cmd === "terminal_spawn") {
+      return Promise.resolve({ terminal_id: 7, pid: 4242 });
     }
     return Promise.resolve(null);
   });
 });
 
 describe("createTerminal", () => {
-  it("spawn 参数来自 default shell spec 且 PATH 注入 env", async () => {
+  it("spawn 参数来自 default shell spec 且 PATH 注入 env，cwd 空串传 null", async () => {
     const t = await createTerminal({ cwd: "/tmp/w", cols: 100, rows: 30 });
+    expect(t.terminalId).toBe(7);
     expect(t.pid).toBe(4242);
-    expect(spawnMock).toHaveBeenCalledWith(
-      "/bin/zsh",
-      ["-l"],
-      expect.objectContaining({ cwd: "/tmp/w", cols: 100, rows: 30, env: { PATH: "/usr/bin:/bin" } }),
-    );
-    // spawn 成功即登记（Rust 退出清理事实源）
-    expect(invokeMock).toHaveBeenCalledWith("terminal_track", { pid: 4242 });
+    expect(invokeMock).toHaveBeenCalledWith("terminal_spawn", {
+      program: "/bin/zsh",
+      args: ["-l"],
+      cwd: "/tmp/w",
+      env: { PATH: "/usr/bin:/bin" },
+      cols: 100,
+      rows: 30,
+      onEvent: expect.anything(),
+    });
   });
 
-  it("onData 以 UTF-8 流式解码为 string（多字节跨 chunk 不断裂）", async () => {
+  it("Channel data 事件以 UTF-8 流式解码（多字节跨 chunk 不断裂）", async () => {
     const t = await createTerminal();
+    const ch = channelInstances[0];
     const got: string[] = [];
     t.onData((s) => got.push(s));
-    // 「中」的 UTF-8 = E4 B8 AD，拆两个 chunk
-    eventHandlers.data[0](new Uint8Array([0xe4, 0xb8]));
-    eventHandlers.data[0](new Uint8Array([0xad]));
+    // 「中」的 UTF-8 = E4 B8 AD，拆两个事件
+    ch.onmessage!({ event: "data", payload: [0xe4, 0xb8] });
+    ch.onmessage!({ event: "data", payload: [0xad] });
     expect(got.join("")).toBe("中");
   });
 
-  it("resize 忽略非法 0 尺寸（xterm fit 空容器给出 0）", async () => {
+  it("exited 事件触发 onExit 回调", async () => {
     const t = await createTerminal();
-    // 拿到底层 pty 实例的 resize 断言
-    const underlying = spawnMock.mock.results[0].value as { resize: ReturnType<typeof vi.fn> };
-    t.resize(0, 0);
-    t.resize(120, 40);
-    expect(underlying.resize).toHaveBeenCalledTimes(1);
-    expect(underlying.resize).toHaveBeenCalledWith(120, 40);
-  });
-
-  it("退出事件触发 onExit 并解除登记", async () => {
-    const t = await createTerminal();
+    const ch = channelInstances[0];
     const onExit = vi.fn();
     t.onExit(onExit);
-    eventHandlers.exit[0]({ exitCode: 3 });
+    ch.onmessage!({ event: "exited", payload: { code: 3 } });
     expect(onExit).toHaveBeenCalledWith(3);
-    expect(invokeMock).toHaveBeenCalledWith("terminal_untrack", { pid: 4242 });
   });
 
-  it("kill 解除登记并调用底层 kill", async () => {
+  it("write/resize/kill 走自有命令（terminal_write/resize/kill）", async () => {
     const t = await createTerminal();
-    const underlying = spawnMock.mock.results[0].value as { kill: ReturnType<typeof vi.fn> };
+    t.write("ls\r");
+    t.resize(120, 40);
+    t.resize(0, 0); // 0 尺寸不下发
     t.kill();
-    expect(underlying.kill).toHaveBeenCalled();
-    expect(invokeMock).toHaveBeenCalledWith("terminal_untrack", { pid: 4242 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(invokeMock).toHaveBeenCalledWith("terminal_write", { terminalId: 7, data: "ls\r" });
+    expect(invokeMock).toHaveBeenCalledWith("terminal_resize", { terminalId: 7, cols: 120, rows: 40 });
+    expect(invokeMock).not.toHaveBeenCalledWith("terminal_resize", expect.objectContaining({ cols: 0 }));
+    expect(invokeMock).toHaveBeenCalledWith("terminal_kill", { terminalId: 7 });
   });
 });
