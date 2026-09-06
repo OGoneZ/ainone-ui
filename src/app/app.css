@@ -382,6 +382,14 @@ select {
 .welcome {
   position: absolute;
   inset: 0;
+  /* 必须显式提层：.flexlayout__layout 同为 absolute 且带不透明背景
+   * （--flexlayout-color-background=--bg-base），DOM 顺序又在 Welcome 之后，
+   * 默认绘制顺序会把 Welcome 整个盖住（实测「欢迎页不显示」根因）。
+   * z-index:1 低于聚焦光晕(11)/浮层(20+)，不干扰正常层级阶梯。
+   * pointer-events 放行：空态下侧栏拖 session 落入主区开第一个 tab
+   * （F-15-3）仍由底层 flexlayout 接收 drop。 */
+  z-index: 1;
+  pointer-events: none;
   display: flex;
   flex-direction: column;
   align-items: center;
