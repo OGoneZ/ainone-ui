@@ -38,6 +38,9 @@ import { composeQuotedPrompt, type Quote } from "../chat/logic/quote";
 import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../chat/logic/fileRef";
 import { truncateToMessageIndex } from "@/acp/rewind";
 import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../chat/logic/lastPrompt";
+import { doublePress, userIndices, nextUserCursor, matchShortcut, type ShortcutId } from "@/app/logic/keymap";
+import { inEditable } from "@/app/logic/layout";
+import { useKeymapStore } from "@/store/keymapStore";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
 import { canFork } from "../chat/logic/capabilities";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
@@ -192,6 +195,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [files, setFiles] = useState<FileRef[]>([]);
   // P16 F-16-1 文件预览浮层：当前预览的绝对路径（null=关闭）
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  // P25：keydown 闭包来自挂载帧，previewPath 走 ref 镜像（同 editTargetRef 模式）
+  const previewPathRef = useRef<string | null>(null);
+  previewPathRef.current = previewPath;
   // 稳定引用：FilePreview 已 memo，内联箭头会击穿（P16a）
   const closePreview = useCallback(() => setPreviewPath(null), []);
   // F-8-3 拖拽悬停高亮
@@ -212,6 +218,22 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-12-1 Esc 判定用的最新值镜像（state 声明后同步）
   const editTargetRef = useRef<{ index: number; original: string } | null>(null);
   editTargetRef.current = editTarget;
+
+  // —— P25 键盘导航 ——
+  // 焦点域：composer=输入框（默认）| chat=聊天记录（↑↓/PgUp/PgDn/Home/End 滚动生效域）。
+  // Ctrl+L 切换；点击输入框/聊天区聚焦输入框（p20f 现状）时自动回 composer。
+  const [focusZone, setFocusZone] = useState<"composer" | "chat">("composer");
+  const focusZoneRef = useRef(focusZone);
+  focusZoneRef.current = focusZone;
+  // Alt+↑↓ 用户消息跳转游标（-1 = 尚未跳过）
+  const userCursorRef = useRef(-1);
+  // 双击 Esc 中断的上次时间戳
+  const lastEscRef = useRef(0);
+  // P25：语音开关注册（VoiceInput → Composer 透传；ref 持最新回调供快捷键触发）
+  const voiceToggleRef = useRef<(() => void) | null>(null);
+  const registerVoiceToggle = useCallback((fn: () => void) => {
+    voiceToggleRef.current = fn;
+  }, []);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -314,13 +336,33 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     host?.addEventListener("dragleave", onDragLeave);
     host?.addEventListener("drop", onDrop);
     // F-11-6 快问悬浮窗 Esc 关闭（F-15-2：会话内搜索已移除，全局搜索走 App 层 Ctrl+F）
+    // P25：双击 Esc 中断也在此层——单 Esc 已被上方编辑态/快问窗消费的场景不再触发中断
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (editTargetRef.current) {
           cancelEdit();
-        } else if (quickSelRef.current !== null) {
+          lastEscRef.current = 0; // 消费型 Esc 不参与双击
+          return;
+        }
+        if (quickSelRef.current !== null) {
           setQuickSel(null);
+          lastEscRef.current = 0;
           logger.debug("chat", "quick-pop-dismiss", { reason: "escape" });
+          return;
+        }
+        // P25 双击 Esc 中断：非激活窗格忽略；IME composing 忽略；非 busy 忽略；
+        // 预览浮层开着时单 Esc 先关预览（FilePreview 层），不进双击计数
+        if (!(activeRef.current ?? true)) return;
+        if (e.isComposing) return;
+        const isBusy = useSessionStore.getState().runtime[tabKey]?.busy ?? false;
+        if (!isBusy || previewPathRef.current) return;
+        const now = Date.now();
+        if (doublePress(now, lastEscRef.current, 500)) {
+          lastEscRef.current = 0;
+          logger.info("chat", "interrupt-double-esc", { tabKey });
+          void stop();
+        } else {
+          lastEscRef.current = now;
         }
       }
     };
@@ -1047,7 +1089,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   async function stop() {
-    if (!busy) return;
+    // P25：busy 走 store 快照而非闭包旧值（双击 Esc 快捷键与停止钮共用本函数）
+    if (!(useSessionStore.getState().runtime[tabKey]?.busy ?? false)) return;
     try {
       await sessionRef.current?.cancel();
     } catch {
@@ -1168,7 +1211,108 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     jumpToIndex(lastUserIdx);
   }
 
+  // —— P25 键盘导航动作 ——
+
+  /** 焦点域切换（Ctrl+L）：composer ↔ chat。→chat 时输入框 blur；→composer 时聚焦输入框 */
+  function toggleFocusZone() {
+    const next = focusZoneRef.current === "composer" ? "chat" : "composer";
+    setFocusZone(next);
+    focusZoneRef.current = next;
+    if (next === "chat") {
+      slashRef.current?.blur();
+      logger.debug("chat", "focus-zone", { zone: "chat" });
+    } else {
+      slashRef.current?.focus();
+      logger.debug("chat", "focus-zone", { zone: "composer" });
+    }
+  }
+
+  /** 聊天记录滚动（zone=chat 时 ↑↓/PgUp/PgDn/Home/End）；非激活 tab（display:none）守卫 */
+  function scrollChat(action: "line-up" | "line-down" | "page-up" | "page-down" | "top" | "bottom") {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const LINE = 40; // 一行 ≈ 40px（消息行高量级）
+    switch (action) {
+      case "line-up": el.scrollTop -= LINE; break;
+      case "line-down": el.scrollTop += LINE; break;
+      case "page-up": el.scrollTop -= el.clientHeight * 0.9; break;
+      case "page-down": el.scrollTop += el.clientHeight * 0.9; break;
+      case "top": el.scrollTop = 0; break;
+      case "bottom": el.scrollTop = el.scrollHeight; break;
+    }
+  }
+
+  /** Alt+↑/↓ 跳转上/下一条用户消息（复用 jumpToIndex 双 rAF 校跳 + flash 高亮）。
+   *  messages 从 store 快照读取——onPaneKey 监听闭包来自挂载帧，
+   *  直接引 messages 会拿到旧数组（同 editTargetRef 模式的理由）。 */
+  function jumpUserMessage(dir: 1 | -1) {
+    const msgs = useSessionStore.getState().runtime[tabKey]?.messages ?? [];
+    const idx = userIndices(msgs);
+    const target = nextUserCursor(idx, userCursorRef.current, dir);
+    if (target === null) return;
+    userCursorRef.current = target;
+    logger.debug("chat", "jump-user", { dir, index: target });
+    jumpToIndex(target);
+  }
+
   const empty = messages.length === 0;
+
+  // P25 pane 级快捷键：非激活窗格忽略；键位从 keymapStore 取。
+  // 分层守卫：
+  //   - chat.voice-toggle（Alt+\）：语音开关属于 composer 功能，输入框内也响应；
+  //   - chat.jump-prev/next-user：Alt+↑↓ 不覆盖（mac Option+↑↓ 是 textarea 词移动），
+  //     输入框内不响应（inEditable 豁免）；
+  //   - pane.scroll-*：仅 zone=chat 且焦点不在可编辑控件（xterm helper textarea
+  //     天然命中 inEditable → 裸键落回终端，符合预期）；
+  //   - pane.focus-zone（Ctrl+L）：组合键无字符输入，任何焦点下都响应。
+  const keymapDefs = useKeymapStore((s) => s.defs);
+  const keymapOverrides = useKeymapStore((s) => s.overrides);
+  useEffect(() => {
+    function onPaneKey(e: KeyboardEvent) {
+      if (!(activeRef.current ?? true)) return;
+      if (e.isComposing) return;
+      const match = (id: ShortcutId) => matchShortcut(e, keymapDefs, id, keymapOverrides);
+      if (match("pane.focus-zone")) {
+        e.preventDefault();
+        toggleFocusZone();
+        return;
+      }
+      if (match("chat.voice-toggle")) {
+        e.preventDefault();
+        voiceToggleRef.current?.();
+        return;
+      }
+      if (match("chat.jump-prev-user") || match("chat.jump-next-user")) {
+        if (inEditable(document.activeElement)) return;
+        e.preventDefault();
+        jumpUserMessage(match("chat.jump-next-user") ? 1 : -1);
+        return;
+      }
+      const scrollAction = match("pane.scroll-line-up")
+        ? ("line-up" as const)
+        : match("pane.scroll-line-down")
+          ? ("line-down" as const)
+          : match("pane.scroll-page-up")
+            ? ("page-up" as const)
+            : match("pane.scroll-page-down")
+              ? ("page-down" as const)
+              : match("pane.scroll-top")
+                ? ("top" as const)
+                : match("pane.scroll-bottom")
+                  ? ("bottom" as const)
+                  : null;
+      if (scrollAction) {
+        // 焦点域=chat 且焦点不在输入控件时才滚动；composer 域不拦截（光标自由移动）
+        if (focusZoneRef.current !== "chat") return;
+        if (inEditable(document.activeElement)) return;
+        e.preventDefault();
+        scrollChat(scrollAction);
+      }
+    }
+    window.addEventListener("keydown", onPaneKey);
+    return () => window.removeEventListener("keydown", onPaneKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keymapDefs, keymapOverrides]);
 
   // F-16-3（DEC-50）：dock 高度实测 → panel 级 CSS 变量 --dock-h，
   // .chat 的 padding-bottom 引用它，末条消息不再被输入框遮挡。
@@ -1205,7 +1349,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }, []);
 
   return (
-    <div className="panel" ref={(el) => { panelRef.current = el; setPanelEl(el); }} data-dragging={dragging ? "true" : "false"}>
+    <div
+      className="panel"
+      ref={(el) => { panelRef.current = el; setPanelEl(el); }}
+      data-dragging={dragging ? "true" : "false"}
+      data-zone={focusZone}
+    >
       {/* P16 F-16-1 文件预览浮层（DEC-48）：窗格内右侧 overlay，非模态 */}
       {previewPath && <FilePreview path={previewPath} onClose={closePreview} />}
       <div className="chat" ref={chatScrollRef}>
@@ -1370,6 +1519,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         onPickSlash={pickSlash}
         onPickAt={pickAt}
         expandPortalTarget={panelEl}
+        registerVoiceToggle={registerVoiceToggle}
         />
       </div>
 

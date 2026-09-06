@@ -43,6 +43,7 @@ export function Composer({
   onPickSlash,
   onPickAt,
   expandPortalTarget,
+  registerVoiceToggle,
 }: {
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
@@ -65,6 +66,8 @@ export function Composer({
   /** F-21-5 全屏编辑的 portal 宿主：传入 session 窗格容器（.panel）→ 只铺满自己窗格；
    *  缺省 body（fixed + 100vw 旧语义，测试/兜底用） */
   expandPortalTarget?: HTMLElement | null;
+  /** P25：语音开关注册透传（Alt+\ 快捷键 → ChatPanel ref → VoiceInput） */
+  registerVoiceToggle?: (fn: () => void) => void;
 }) {
   // L1：Esc 显式关闭 slash 菜单（下次输入变化时重置重新可开）
   const [slashClosed, setSlashClosed] = useState(false);
@@ -263,7 +266,7 @@ export function Composer({
       <button type="button" className="attach-btn" aria-label="添加文件" title="添加文件" onClick={onPickFiles}>
         ＋
       </button>
-      <VoiceInput onTranscribed={onVoice} />
+      <VoiceInput onTranscribed={onVoice} registerToggle={registerVoiceToggle} />
       <div className="input-wrap">
         {slashOpen && slashMatches.length > 0 && (
           <div className="slash-menu" ref={slashMenuRef}>
