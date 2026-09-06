@@ -157,7 +157,7 @@ jobs:
             }' > latest.json
           cat latest.json
 
-      - name: Upload to R2
+      - name: Upload installers to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -166,5 +166,23 @@ jobs:
           BUCKET: ${{ secrets.R2_BUCKET }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          aws s3 cp bundles/ "s3://$BUCKET/v$VERSION/" --recursive --endpoint-url "$ENDPOINT" --cache-control "public, max-age=31536000, immutable"
-          aws s3api put-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" --key latest.json --body bundles/latest.json --content-type "application/json" --cache-control "no-cache"
+          cd bundles
+          # 只传安装器本体到 v$VER/ 根（latest.json 的 URL 与之一一对应）；
+          # 整树递归会把 .app 内部文件、bundle 脚本等 300+ 杂物也堆进桶（v0.7.0 首发实锤）
+          aws s3 cp ./ "s3://$BUCKET/v$VERSION/" \
+            --recursive --exclude "*" \
+            --include "*.dmg" --include "*.exe" --include "*.msi" \
+            --include "*.deb" --include "*.rpm" --include "*.AppImage" \
+            --endpoint-url "$ENDPOINT" --cache-control "public, max-age=31536000, immutable"
+
+      - name: Upload latest.json to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          aws s3api put-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
+            --key latest.json --body bundles/latest.json \
+            --content-type "application/json" --cache-control "no-cache"
