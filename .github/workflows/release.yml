@@ -72,15 +72,18 @@ jobs:
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1
-        env:
-          # macOS 签名：secrets 未配置时 tauri CLI 自动跳过签名/公证（仅日志提示，不失败）
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # macOS 公证（App Store Connect API 密钥）
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+        # 注意：签名/公证 env 只在 Apple secrets 实际配置后才注入。secrets 引用
+        # 会把空字符串设进环境，tauri bundler 检测到 APPLE_CERTIFICATE 非空才
+        # 走 keychain setup——空串同样触发 `security import`，对空数据导入必炸
+        # "SecKeychainItemImport: parameters not valid"（v0.7.0 三跑实锤）。
+        # 未来配好证书后把这段 env 注释还原即可。
+        # env:
+        #   APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        #   APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        #   APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        #   APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        #   APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        #   APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
         with:
           args: ${{ matrix.args }}
 
