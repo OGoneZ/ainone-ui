@@ -41,7 +41,7 @@ import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
-import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf } from "@/app/logic/layout";
+import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
 import { logger } from "@/lib/logger";
 
 
@@ -114,7 +114,7 @@ function App() {
   // F-10-3 flexlayout Model：布局 + tab 集合的单一真源（跨渲染稳定，重建会丢拖拽布局）
   const modelRef = useRef<Model | null>(null);
 
-  const activeTab = tabs.find((t) => t.key === activeKey);
+  const activeTab = tabs.find((t) => t.key === activeKey) ?? tabs[0];
   const activeAdapter = activeTab ? adapters.find((a) => a.id === activeTab.adapterId) : undefined;
 
   function getModel(): Model {
@@ -148,7 +148,12 @@ function App() {
   function syncFromModel() {
     const m = getModel();
     setTabs(extractTabsFromModel(m));
-    setActiveKey(activeKeyOf(m));
+    const key = activeKeyOf(m);
+    // P20：拖拽/调整分栏过程中 flexlayout 的 getActiveTabset 可能短暂为空
+    // （拖拽 tabset 尚未 set active）→ activeKey 抖成空串 → activeTab=undefined
+    // → RightRail 随之卸载；若后续 action 不再触发（WKWebView dragend 丢失，
+    // F-19-3 同族），侧栏停留消失态直到点其他 session。空串时保留上一值。
+    if (key) setActiveKey(key);
   }
 
   /** 在 target tab 所在 tabset 内 dock 一个新 tab（默认 CENTER=叠入，select） */
@@ -218,6 +223,41 @@ function App() {
       e.preventDefault();
       splitCurrent(axis);
     }
+    // P20 窗格焦点切换：Ctrl+方向键在分屏窗格间移动（WARP/VS Code 语义）。
+    // 输入框内也响应——用户在输入框聊天时依然可以用方向键切窗格。
+    function onFocusMove(e: KeyboardEvent) {
+      const dir = focusArrowShortcut(e);
+      if (!dir) return;
+      const m = getModel();
+      const curTabset = m.getActiveTabset();
+      if (!curTabset) return;
+      // 收集全部 tabset 的屏幕几何（getRect 返回布局坐标系矩形）
+      const rects: TabsetRectLike[] = [];
+      m.visitNodes((n: unknown) => {
+        const node = n as { getType(): string; getId(): string; getRect?: () => { x: number; y: number; width: number; height: number } };
+        if (node.getType() === "tabset" && typeof node.getRect === "function") {
+          const r = node.getRect();
+          rects.push({ id: node.getId(), x: r.x, y: r.y, w: r.width, h: r.height });
+        }
+      });
+      if (rects.length < 2) return;
+      const cr = (curTabset as unknown as { getRect: () => { x: number; y: number; width: number; height: number } }).getRect();
+      const targetId = pickFocusTarget(
+        { id: curTabset.getId(), x: cr.x, y: cr.y, w: cr.width, h: cr.height },
+        rects,
+        dir,
+      );
+      if (!targetId) return;
+      const target = m.getNodeById(targetId);
+      if (!target) return;
+      e.preventDefault();
+      m.doAction(Actions.setActiveTabset(targetId));
+      const sel = (target as unknown as { getChildren: () => { getId(): string }[] }).getChildren();
+      if (sel.length > 0) {
+        m.doAction(Actions.selectTab(sel[curTabset.getSelected() ?? 0]?.getId() ?? sel[0].getId()));
+      }
+      syncFromModel();
+    }
     // F-11-2 全局搜索：Ctrl/Cmd+F（DEC-26；会话内搜索已改绑 Ctrl+Shift+F）
     const onGlobalSearch = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "f") {
@@ -227,9 +267,11 @@ function App() {
     };
     window.addEventListener("keydown", onGlobalSearch);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onFocusMove);
     return () => {
       window.removeEventListener("keydown", onGlobalSearch);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onFocusMove);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, activeTab, activeAdapter]);
@@ -262,16 +304,24 @@ function App() {
    *  等分不只发生在分屏动作后，布局任何变更后都保持等分栅格语义） */
   function equalizeAllRows() {
     const m = getModel();
-    const rows: { id: string; n: number }[] = [];
+    const rows: { id: string; n: number; weights: number[] }[] = [];
     m.visitNodes((n: unknown) => {
-      const node = n as { getType(): string; getChildren(): { length: number }[]; getId(): string };
+      const node = n as { getType(): string; getChildren(): { getWeight(): number; length: number }[]; getId(): string };
       if (node.getType() === "row") {
-        const cn = node.getChildren().length;
-        if (cn >= 2) rows.push({ id: node.getId(), n: cn });
+        const cn = node.getChildren();
+        if (cn.length >= 2) {
+          rows.push({ id: node.getId(), n: cn.length, weights: cn.map((c) => c.getWeight()) });
+        }
       }
     });
+    // P20：先在数据层面判断是否需要调整，再落 doAction——flexlayout 的 doAction
+    // 会无条件广播 changeListeners（即使 setWeight 写入相同值），而 onModelChange
+    // 回调就是 handleAction → equalizeAllRows 无条件 doAction 会形成同步递归
+    // （Maximum update depth exceeded，实测发首条消息 renameTab 即触发）。
     for (const r of rows) {
-      m.doAction(Actions.adjustWeights(r.id, Array(r.n).fill(100 / r.n)));
+      const even = 100 / r.n;
+      const needs = r.weights.some((w) => Math.abs(w - even) > 0.01);
+      if (needs) m.doAction(Actions.adjustWeights(r.id, Array(r.n).fill(even)));
     }
   }
 
@@ -393,12 +443,22 @@ function App() {
    *  drop 预览矩形常驻，像一层蓝色遮罩挡住整个窗格（用户实测复现）。
    *  flexlayout 无对外清理接口，此处用 mouseup 兜底：拖拽结束后若预览
    *  矩形仍显示（display 未被置回），直接隐藏其 DOM（引用保留，下次拖拽
-   *  positionElement 会重新赋样式，无副作用）。 */
+   *  positionElement 会重新赋样式，无副作用）。
+   *  P20：兜底会误杀拖拽中的预览——mouseup 在拖拽刚启动时（手抖松开再按住/
+   *  双击起拖）也派发，250ms 后 outline 被隐藏 → 整个拖拽期间无蓝色落点
+   *  预览（用户实测「有时没有蓝色预览」）。加 dragstart/dragover 心跳标记：
+   *  标记新鲜（<600ms）视为拖拽进行中，跳过本轮清理。 */
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | null = null;
+    let lastDragBeat = 0;
+    const beat = () => {
+      lastDragBeat = Date.now();
+    };
     const onAnyEnd = () => {
       if (t) clearTimeout(t);
       t = setTimeout(() => {
+        // 拖拽进行中（dragover 持续刷新心跳）→ 预览是合法显示，不清
+        if (Date.now() - lastDragBeat < 600) return;
         const host = layoutHostRef.current;
         if (!host) return;
         // 遮罩本体：.flexlayout__layout_overlay（z1000 全窗格拦截层，挡一切点击）。
@@ -427,10 +487,15 @@ function App() {
     window.addEventListener("mouseup", onAnyEnd, true);
     window.addEventListener("dragend", onAnyEnd, true);
     window.addEventListener("drop", onAnyEnd, true);
+    // 心跳：dragover 在拖拽全程高频派发；dragstart 也打一次（启动瞬间即保护）
+    window.addEventListener("dragstart", beat, true);
+    window.addEventListener("dragover", beat, true);
     return () => {
       window.removeEventListener("mouseup", onAnyEnd, true);
       window.removeEventListener("dragend", onAnyEnd, true);
       window.removeEventListener("drop", onAnyEnd, true);
+      window.removeEventListener("dragstart", beat, true);
+      window.removeEventListener("dragover", beat, true);
       if (t) clearTimeout(t);
     };
   }, []);

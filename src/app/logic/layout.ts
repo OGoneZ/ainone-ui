@@ -32,6 +32,66 @@ export function splitShortcut(e: {
   return e.shiftKey ? "col" : "row";
 }
 
+/** 焦点方向（Ctrl+方向键在分屏窗格间移动） */
+export type FocusDir = "up" | "down" | "left" | "right";
+
+/** 解析键盘事件是否为窗格焦点切换快捷键；不是则返回 null */
+export function focusArrowShortcut(e: {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+}): FocusDir | null {
+  const k = (e.key ?? "").toLowerCase();
+  if (k !== "arrowup" && k !== "arrowdown" && k !== "arrowleft" && k !== "arrowright") return null;
+  // Ctrl（macOS 上 Cmd 会与系统/编辑器快捷键冲突，限定 Ctrl 与 WARP/VS Code 语义一致）
+  if (!e.ctrlKey || e.metaKey || e.altKey) return null;
+  return k === "arrowup" ? "up" : k === "arrowdown" ? "down" : k === "arrowleft" ? "left" : "right";
+}
+
+/** tabset 的屏幕几何（鸭子类型，真实 TabSetNode 有 getRect()） */
+export interface TabsetRectLike {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * 焦点移动的几何判定（WARP/VS Code 语义）：沿方向找「与当前窗格中心同轴上
+ * 重叠最大」的邻窗格。投影重叠（垂直于移动方向的轴）要求 >0，主轴距离取正。
+ * 无候选（边缘方向）→ null，调用方保持焦点不变。
+ */
+export function pickFocusTarget(
+  cur: TabsetRectLike,
+  all: TabsetRectLike[],
+  dir: FocusDir,
+): string | null {
+  const vertical = dir === "up" || dir === "down";
+  const sign = dir === "down" || dir === "right" ? 1 : -1;
+  let best: { id: string; score: number } | null = null;
+  for (const r of all) {
+    if (r.id === cur.id) continue;
+    // 投影区间（垂直轴）重叠
+    const aLo = vertical ? cur.x : cur.y;
+    const aHi = vertical ? cur.x + cur.w : cur.y + cur.h;
+    const bLo = vertical ? r.x : r.y;
+    const bHi = vertical ? r.x + r.w : r.y + r.h;
+    const overlap = Math.min(aHi, bHi) - Math.max(aLo, bLo);
+    if (overlap <= 0) continue;
+    // 主轴：目标中心必须严格在当前中心的前方 sign 方向
+    const curC = vertical ? cur.y + cur.h / 2 : cur.x + cur.w / 2;
+    const rC = vertical ? r.y + r.h / 2 : r.x + r.w / 2;
+    const dist = (rC - curC) * sign;
+    if (dist <= 0) continue;
+    // 评分：投影重叠越大越优先，其次近者优先
+    const score = overlap * 10_000 - dist;
+    if (!best || score > best.score) best = { id: r.id, score };
+  }
+  return best?.id ?? null;
+}
+
 /** 从当前聚焦窗格推导要新建的会话（同 harness 同 cwd，全新会话标题） */
 export function resolveSplitTab(src: {
   adapterId: string;

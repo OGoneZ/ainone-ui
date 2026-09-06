@@ -435,3 +435,14 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* P20：聚焦窗格光晕——flexlayout 给当前激活 tabset 挂 flexlayout__tabset-selected，
+ * 默认只换背景色几乎不可见；这里换成内发光描边（双 box-shadow，深浅主题用 color-mix
+ * 跟随 --primary），用户一眼看出当前聚焦在哪一个分屏窗格。 */
+.flexlayout__tabset-selected {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--primary) 65%, transparent),
+    inset 0 0 18px color-mix(in srgb, var(--primary) 12%, transparent);
+  border-radius: var(--radius-sm);
+  transition: box-shadow var(--motion-default, 150ms) ease;
+}
