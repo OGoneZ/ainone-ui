@@ -81,7 +81,7 @@
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
-  /* 选中内容多、解释长时区内滚动（F：上限 40vh），不顶出屏幕 */
+  /* 选中内容多、解释长时区内滚动（上限 40vh），不顶出屏幕 */
   max-height: min(40vh, 360px);
   overflow-y: auto;
   overscroll-behavior: contain;
