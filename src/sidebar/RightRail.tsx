@@ -12,6 +12,8 @@ import { HistoryPanel } from "./HistoryPanel";
 import { collectModifiedPaths } from "@/lib/fileTree";
 import type { ChatMsg } from "@/acp/message-log";
 import type { AdapterWithStatus } from "@/ipc/adapters";
+import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
+import { clampWidth, sidebarMaxWidth } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
 import "@/sidebar/sidebar.css";
 
@@ -52,6 +54,13 @@ function loadState(): RailState {
 
 export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) {
   const [state, setState] = useState<RailState>(loadState);
+  // F-21-6 右栏宽度（拖宽把手，独立 key 持久化；clamp 220~min(520,40vw)）
+  const [width, setWidth] = useState<number>(() =>
+    clampWidth(Number(localStorage.getItem("ainone-rightrail-width")) || 260, 220, sidebarMaxWidth()),
+  );
+  function persistWidth(w: number) {
+    localStorage.setItem("ainone-rightrail-width", String(w));
+  }
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -101,7 +110,16 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages }: Props) 
   }
 
   return (
-    <aside className="rightrail" data-testid="right-rail">
+    <aside className="rightrail" data-testid="right-rail" style={{ width }}>
+      <SidebarResizeHandle
+        edge="left"
+        min={220}
+        max={() => sidebarMaxWidth()}
+        width={width}
+        onResize={setWidth}
+        onResizeEnd={persistWidth}
+        label="拖拽调整侧栏宽度"
+      />
       <div className="rail-tabs" role="tablist">
         <button
           type="button"
