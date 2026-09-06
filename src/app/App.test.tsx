@@ -185,12 +185,13 @@ describe("P25 App 全局快捷键", () => {
   });
 });
 
-describe("P26e Ctrl+Shift+Space 临时全屏", () => {
-  it("命中键位表 pane.temp-maximize（Ctrl+Shift+Space）", async () => {
+describe("P26e Ctrl+Enter 临时全屏", () => {
+  it("命中键位表 pane.temp-maximize（Ctrl/Cmd+Enter），裸 Enter 不命中", async () => {
     const { matchShortcut, DEFAULT_DEFS } = await import("@/app/logic/keymap");
-    expect(matchShortcut({ code: "Space", ctrlKey: true, shiftKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(true);
-    // 无 Shift / 无修饰不命中
-    expect(matchShortcut({ code: "Space", ctrlKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(false);
-    expect(matchShortcut({ code: "Space" }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(false);
+    expect(matchShortcut({ code: "Enter", ctrlKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(true);
+    expect(matchShortcut({ code: "Enter", metaKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(true);
+    // 裸 Enter / Shift+Enter 不命中
+    expect(matchShortcut({ code: "Enter" }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(false);
+    expect(matchShortcut({ code: "Enter", shiftKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(false);
   });
 });
