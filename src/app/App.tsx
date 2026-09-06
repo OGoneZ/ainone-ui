@@ -933,6 +933,15 @@ function App() {
                 <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
                   <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
                 </button>
+                {/* P23 F-23-1：侧栏头部新建终端——归属当前活跃 tab 的工作区（无则未归组） */}
+                <button
+                  className="add-ws"
+                  title="新建终端"
+                  aria-label="新建终端"
+                  onClick={() => newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd)}
+                >
+                  <TerminalIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                </button>
                 <button className="add-ws sidebar-collapse" title="收起侧栏" aria-label="收起侧栏" onClick={() => setSidebarOpen(false)}>
                   <SidebarCollapseIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
                 </button>
@@ -1124,7 +1133,6 @@ function App() {
         presetWorkspaceId={newSession.workspaceId}
         onClose={() => setNewSession({ open: false })}
         onConfirm={confirmNewSession}
-        onOpenTerminal={newTerminalTab}
         onWorkspaceCreated={reloadWorkspaces}
       />
 

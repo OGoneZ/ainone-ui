@@ -7,7 +7,6 @@ import type { AdapterWithStatus } from "@/ipc/adapters";
 import { workspacesUpsert, pickDirectory, type Workspace } from "@/ipc/workspaces";
 import { normPath } from "@/lib/normPath";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { TerminalIcon } from "@/components/ui/icons";
 
 interface Props {
   open: boolean;
@@ -17,8 +16,6 @@ interface Props {
   presetWorkspaceId?: string | null;
   onClose: () => void;
   onConfirm: (adapterId: string, workspaceId: string | null, cwd?: string) => void;
-  /** P23 F-23-1：快捷开终端（选中的工作区 cwd 随行）；null = 未归组 */
-  onOpenTerminal?: (workspaceId: string | null, cwd?: string) => void;
   /** 新建工作区后回调（父级刷新 workspaces 列表，避免侧栏分组状态过期） */
   onWorkspaceCreated?: () => void;
 }
@@ -30,7 +27,6 @@ export function NewSessionModal({
   presetWorkspaceId,
   onClose,
   onConfirm,
-  onOpenTerminal,
   onWorkspaceCreated,
 }: Props) {
   // 本地工作区副本：新建工作区后即时回显，无需父级刷新
@@ -83,23 +79,6 @@ export function NewSessionModal({
         <DialogHeader>
           <DialogTitle>新建会话</DialogTitle>
         </DialogHeader>
-
-        {/* P23 F-23-1：终端快捷卡——不等选 harness，直接开终端 tab */}
-        {onOpenTerminal && (
-          <button
-            className="ns-terminal-card"
-            onClick={() => {
-              onClose();
-              onOpenTerminal(workspaceId, selected?.cwd);
-            }}
-          >
-            <TerminalIcon style={{ width: 18, height: 18, strokeWidth: 1.75 }} />
-            <span>
-              打开终端
-              <small>本地 shell，支持分屏与拖拽布局</small>
-            </span>
-          </button>
-        )}
 
         <label className="ns-label">
           harness
