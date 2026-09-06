@@ -376,6 +376,24 @@ function App() {
     );
   };
 
+  // F-21-1：tab 标题前渲染 harness logo（AgentAvatar 四层降级链，size 14 即「Tab 徽标」档；
+  // leading 是渲染回调，不受 renameTab 影响；adapter 从 tabs 反查，与 factory 同法）
+  const renderTab = (node: TabNode, renderValues: { leading: React.ReactNode }) => {
+    const t = tabs.find((x) => x.key === node.getId());
+    const ad = t ? adapterById.get(t.adapterId) : undefined;
+    if (ad) {
+      renderValues.leading = (
+        <AgentAvatar
+          adapterId={ad.id}
+          name={ad.name}
+          brandColor={ad.logo}
+          size={14}
+          className="shrink-0"
+        />
+      );
+    }
+  };
+
   // flexlayout 动作回调：任何模型变更（含用户关闭 tab / 拖拽 dock）→ 投影回 tabs
   /** F-19-1：跨窗格拖动 tab（含 tabset 整体移动）后，所有「≥2 子节点的 row」
    *  按子节点数均分——拖走方残缺的权重、接收方的二分切割一并归位（DEC-52 扩展：
@@ -853,6 +871,7 @@ function App() {
             <Layout
               model={getModel()}
               factory={factory}
+              onRenderTab={renderTab}
               onModelChange={handleAction}
               realtimeResize
               onExternalDrag={handleExternalDrag}
