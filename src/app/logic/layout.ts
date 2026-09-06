@@ -35,7 +35,8 @@ export function splitShortcut(e: {
 /** 焦点方向（Ctrl+方向键在分屏窗格间移动） */
 export type FocusDir = "up" | "down" | "left" | "right";
 
-/** 解析键盘事件是否为窗格焦点切换快捷键；不是则返回 null */
+/** 解析键盘事件是否为窗格焦点切换快捷键；不是则返回 null。
+ *  macOS 用 Cmd（平台惯例，VS Code 同款），其他平台 Ctrl。 */
 export function focusArrowShortcut(e: {
   key: string;
   ctrlKey: boolean;
@@ -44,8 +45,11 @@ export function focusArrowShortcut(e: {
 }): FocusDir | null {
   const k = (e.key ?? "").toLowerCase();
   if (k !== "arrowup" && k !== "arrowdown" && k !== "arrowleft" && k !== "arrowright") return null;
-  // Ctrl（macOS 上 Cmd 会与系统/编辑器快捷键冲突，限定 Ctrl 与 WARP/VS Code 语义一致）
-  if (!e.ctrlKey || e.metaKey || e.altKey) return null;
+  if (e.altKey) return null;
+  // macOS（UA 判定）：Cmd+方向键；其余平台（含 node 测试环境）Ctrl+方向键。
+  const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
+  const mod = isMac ? e.metaKey : e.ctrlKey;
+  if (!mod) return null;
   return k === "arrowup" ? "up" : k === "arrowdown" ? "down" : k === "arrowleft" ? "left" : "right";
 }
 

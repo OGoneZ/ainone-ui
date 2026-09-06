@@ -77,16 +77,18 @@ describe("P10 分屏纯逻辑", () => {
     expect(activeKeyOf(none)).toBe("");
   });
 
-  it("focusArrowShortcut：Ctrl+方向键→方向，裸方向键/Cmd/Alt 修饰→null", () => {
+  it("focusArrowShortcut：macOS Cmd+方向键→方向，裸方向键/Alt 修饰→null", () => {
+    // node 环境无 navigator，focusArrowShortcut 内部回退 Ctrl 分支（浏览器专属判定）
     expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: true, metaKey: false, altKey: false })).toBe("right");
-    expect(focusArrowShortcut({ key: "ArrowLeft", ctrlKey: true, metaKey: false, altKey: false })).toBe("left");
     expect(focusArrowShortcut({ key: "ArrowUp", ctrlKey: true, metaKey: false, altKey: false })).toBe("up");
+    expect(focusArrowShortcut({ key: "ArrowLeft", ctrlKey: true, metaKey: false, altKey: false })).toBe("left");
     expect(focusArrowShortcut({ key: "ArrowDown", ctrlKey: true, metaKey: false, altKey: false })).toBe("down");
     // 裸方向键（输入框光标移动）不受拦截
     expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: false, metaKey: false, altKey: false })).toBeNull();
-    // Cmd+方向键（macOS 系统语义）/ Alt 修饰不响应
-    expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: false, metaKey: true, altKey: false })).toBeNull();
+    // Alt 修饰不响应
     expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: true, metaKey: false, altKey: true })).toBeNull();
+    // node 环境下 typeof navigator === "undefined" → 走 Ctrl 分支，Cmd 单独不响应
+    expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: false, metaKey: true, altKey: false })).toBeNull();
   });
 
   it("pickFocusTarget：左右分屏横向切换、上下投影不重叠不误切", () => {
