@@ -1251,10 +1251,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         onSubmit={submit}
         onStop={stop}
         onPickFiles={pickFiles}
-        onEnqueue={(t) => {
-          enqueueCommand(t);
-          setInput("");
-        }}
         onVoice={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))}
         onPickSlash={pickSlash}
         onPickAt={pickAt}
