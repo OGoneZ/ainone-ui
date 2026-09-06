@@ -231,22 +231,33 @@ function App() {
       const m = getModel();
       const curTabset = m.getActiveTabset();
       if (!curTabset) return;
-      // 收集全部 tabset 的屏幕几何（getRect 返回布局坐标系矩形）
-      const rects: TabsetRectLike[] = [];
+      // 收集全部 tabset 几何。优先 model rect（getRect，布局坐标系）；
+      // flexlayout 仅在 redraw 后回填 rect，部分时序下为 Rect.empty()——
+      // 全空时回退读 DOM（visitNodes 顺序与 tabset_container DOM 顺序一致）。
+      const nodes: { id: string; getRect?: () => { x: number; y: number; width: number; height: number } }[] = [];
       m.visitNodes((n: unknown) => {
         const node = n as { getType(): string; getId(): string; getRect?: () => { x: number; y: number; width: number; height: number } };
-        if (node.getType() === "tabset" && typeof node.getRect === "function") {
-          const r = node.getRect();
-          rects.push({ id: node.getId(), x: r.x, y: r.y, w: r.width, h: r.height });
-        }
+        if (node.getType() === "tabset") nodes.push({ id: node.getId(), getRect: node.getRect });
       });
-      if (rects.length < 2) return;
-      const cr = (curTabset as unknown as { getRect: () => { x: number; y: number; width: number; height: number } }).getRect();
-      const targetId = pickFocusTarget(
-        { id: curTabset.getId(), x: cr.x, y: cr.y, w: cr.width, h: cr.height },
-        rects,
-        dir,
-      );
+      if (nodes.length < 2) return;
+      let rects: TabsetRectLike[] = nodes.map((n) => {
+        const r = n.getRect?.();
+        return { id: n.id, x: r?.x ?? 0, y: r?.y ?? 0, w: r?.width ?? 0, h: r?.height ?? 0 };
+      });
+      if (rects.every((r) => r.w === 0 || r.h === 0)) {
+        const domRects = [...layoutHostRef.current?.querySelectorAll<HTMLElement>(".flexlayout__tabset_container") ?? []].map((el) => el.getBoundingClientRect());
+        if (domRects.length !== nodes.length) return;
+        rects = nodes.map((n, i) => ({
+          id: n.id,
+          x: domRects[i].left,
+          y: domRects[i].top,
+          w: domRects[i].width,
+          h: domRects[i].height,
+        }));
+      }
+      const curR = rects.find((r) => r.id === curTabset.getId());
+      if (!curR || (curR.w === 0 && curR.h === 0)) return;
+      const targetId = pickFocusTarget(curR, rects, dir);
       if (!targetId) return;
       const target = m.getNodeById(targetId);
       if (!target) return;

@@ -7,6 +7,8 @@ import {
   resolveSplitTab,
   extractTabsFromModel,
   activeKeyOf,
+  focusArrowShortcut,
+  pickFocusTarget,
   type ModelLike,
 } from "./layout";
 
@@ -73,5 +75,42 @@ describe("P10 分屏纯逻辑", () => {
     expect(activeKeyOf(withSel)).toBe("k9");
     const none: ModelLike = { visitNodes: () => {}, getActiveTabset: () => undefined };
     expect(activeKeyOf(none)).toBe("");
+  });
+
+  it("focusArrowShortcut：Ctrl+方向键→方向，裸方向键/Cmd/Alt 修饰→null", () => {
+    expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: true, metaKey: false, altKey: false })).toBe("right");
+    expect(focusArrowShortcut({ key: "ArrowLeft", ctrlKey: true, metaKey: false, altKey: false })).toBe("left");
+    expect(focusArrowShortcut({ key: "ArrowUp", ctrlKey: true, metaKey: false, altKey: false })).toBe("up");
+    expect(focusArrowShortcut({ key: "ArrowDown", ctrlKey: true, metaKey: false, altKey: false })).toBe("down");
+    // 裸方向键（输入框光标移动）不受拦截
+    expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: false, metaKey: false, altKey: false })).toBeNull();
+    // Cmd+方向键（macOS 系统语义）/ Alt 修饰不响应
+    expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: false, metaKey: true, altKey: false })).toBeNull();
+    expect(focusArrowShortcut({ key: "ArrowRight", ctrlKey: true, metaKey: false, altKey: true })).toBeNull();
+  });
+
+  it("pickFocusTarget：左右分屏横向切换、上下投影不重叠不误切", () => {
+    // 左右两窗格
+    const left = { id: "L", x: 0, y: 0, w: 500, h: 600 };
+    const right = { id: "R", x: 508, y: 0, w: 500, h: 600 };
+    expect(pickFocusTarget(left, [left, right], "right")).toBe("R");
+    expect(pickFocusTarget(right, [left, right], "left")).toBe("L");
+    // 边缘方向无候选 → null（焦点保持）
+    expect(pickFocusTarget(right, [left, right], "right")).toBeNull();
+    expect(pickFocusTarget(left, [left, right], "left")).toBeNull();
+    // 上下叠放：横向投影重叠 0 → 左右不误切
+    const top = { id: "T", x: 0, y: 0, w: 1000, h: 300 };
+    const bottom = { id: "B", x: 0, y: 308, w: 1000, h: 300 };
+    expect(pickFocusTarget(top, [top, bottom], "down")).toBe("B");
+    expect(pickFocusTarget(top, [top, bottom], "right")).toBeNull();
+  });
+
+  it("pickFocusTarget：三窗格取投影重叠最大者（斜向就近），而非任意前方窗格", () => {
+    // 当前在右上，右下与左下都在下方；ArrowDown 应选投影重叠的右下（正下方），
+    // 而不是左下（无水平重叠，被 overlap<=0 排除）
+    const cur = { id: "TR", x: 508, y: 0, w: 500, h: 300 };
+    const br = { id: "BR", x: 508, y: 308, w: 500, h: 300 };
+    const bl = { id: "BL", x: 0, y: 308, w: 500, h: 300 };
+    expect(pickFocusTarget(cur, [cur, br, bl], "down")).toBe("BR");
   });
 });
