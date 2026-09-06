@@ -13,6 +13,7 @@ import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
 import { SettingsModal } from "@/app/modals/SettingsModal";
 import { NewSessionModal } from "@/app/modals/NewSessionModal";
 import { DonateModal } from "@/app/modals/DonateModal";
+import { ShortcutsModal } from "@/app/modals/ShortcutsModal";
 import { EmptyState } from "@/components/EmptyState";
 import { RightRail, loadRailState, saveRailState, type RailTab } from "@/sidebar/RightRail";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -23,6 +24,7 @@ import {
   PlusIcon,
   SettingsIcon,
   DonateIcon,
+  HelpIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
   TerminalIcon,
@@ -104,6 +106,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // P22 打赏作者弹层
   const [donateOpen, setDonateOpen] = useState(false);
+  // P25 快捷键帮助弹层
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // 新建会话弹层：open + 预填工作区（右键新建时传入）
   const [newSession, setNewSession] = useState<{ open: boolean; workspaceId?: string | null }>({ open: false });
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -943,6 +947,11 @@ function App() {
           <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           打赏作者
         </button>
+        {/* P25 快捷键帮助（打赏左侧） */}
+        <button className="inline-flex items-center gap-1.5" onClick={() => setShortcutsOpen(true)}>
+          <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+          快捷键
+        </button>
         <button className="settings-btn inline-flex items-center gap-1.5" onClick={() => setSettingsOpen(true)}>
           <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           设置
@@ -1171,6 +1180,8 @@ function App() {
       />
 
       <DonateModal open={donateOpen} onClose={() => setDonateOpen(false)} />
+
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       <NewSessionModal
         open={newSession.open}
