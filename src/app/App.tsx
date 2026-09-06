@@ -45,7 +45,7 @@ import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
-import { splitShortcut, closeTabShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
+import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { clampWidth, sidebarMaxWidth } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
@@ -292,8 +292,11 @@ function App() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // p20n：Ctrl/Cmd+D = 关闭当前窗格的当前 tab（原分屏快捷键让位，见 layout.ts）
+      // p20p：不再 inEditable 拦截——终端窗格的 xterm helper textarea 恒占焦点，
+      // 拦截导致终端窗格内分屏快捷键「永不生效」（上下分屏从未生效的根因）；
+      // 聊天输入框「有时不生效」同理。这些组合键（Cmd/Ctrl[+Shift]+D/E）不产生
+      // 字符输入，在可编辑控件内拦截无副作用。
       if (closeTabShortcut(e)) {
-        if (inEditable(document.activeElement)) return;
         const m = getModel();
         const tabset = m.getActiveTabset();
         const sel = tabset?.getSelectedNode?.();
@@ -304,7 +307,6 @@ function App() {
       }
       const axis = splitShortcut(e);
       if (!axis) return;
-      if (inEditable(document.activeElement)) return;
       e.preventDefault();
       splitCurrent(axis);
     }    // P20 窗格焦点切换：Cmd/Ctrl+方向键在分屏窗格间移动（WARP/VS Code 语义）。
