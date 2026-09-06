@@ -14,7 +14,7 @@ import { SettingsModal } from "@/app/modals/SettingsModal";
 import { NewSessionModal } from "@/app/modals/NewSessionModal";
 import { DonateModal } from "@/app/modals/DonateModal";
 import { EmptyState } from "@/components/EmptyState";
-import { RightRail } from "@/sidebar/RightRail";
+import { RightRail, loadRailState, saveRailState, type RailTab } from "@/sidebar/RightRail";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
   WorkspaceIcon,
@@ -26,6 +26,7 @@ import {
   SidebarCollapseIcon,
   SidebarExpandIcon,
   TerminalIcon,
+  NewTerminalIcon,
 } from "@/components/ui/icons";
 import {
   ContextMenu,
@@ -45,7 +46,9 @@ import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
-import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
+import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
+import { matchShortcut } from "@/app/logic/keymap";
+import { useKeymapStore } from "@/store/keymapStore";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { clampWidth, sidebarMaxWidth } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
@@ -108,6 +111,11 @@ function App() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   // F-15-7 左侧栏开合（持久化 localStorage，RightRail 同款交互）
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem("ainone-sidebar-open") !== "0");
+  // P25 右栏开合 + tab：state 从 RightRail 提升到 App（Ctrl+M 可达），持久化 key 不变
+  const [railState, setRailState] = useState(() => loadRailState());
+  useEffect(() => {
+    saveRailState(railState);
+  }, [railState]);
   // F-21-6 左侧栏宽度（拖宽把手，持久化；clamp 200~min(520,40vw)）
   const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-sidebar-width")) || 240, 200, sidebarMaxWidth()),
@@ -289,8 +297,33 @@ function App() {
   }
 
   // 快捷键监听：仅在编辑器区（非输入框）响应分屏快捷键（AC-P10-8）
+  // P25：判定全部走键位表（keymapStore 覆盖 → 默认表），并新增 Ctrl+B/M/N/T 全局键。
+  const keymapOverrides = useKeymapStore((s) => s.overrides);
   useEffect(() => {
+    const kb = layoutBindings(keymapOverrides);
     function onKey(e: KeyboardEvent) {
+      // P25 全局四键：切左栏 / 切右栏 / 新建会话 / 新建终端。
+      // 组合键不产生字符输入，在可编辑控件内拦截无副作用（同分屏/关窗先例）。
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.toggle-sidebar", keymapOverrides)) {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+        return;
+      }
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.toggle-rightrail", keymapOverrides)) {
+        e.preventDefault();
+        setRailState((s) => ({ ...s, open: !s.open }));
+        return;
+      }
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.new-session", keymapOverrides)) {
+        e.preventDefault();
+        setNewSession({ open: true });
+        return;
+      }
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.new-terminal", keymapOverrides)) {
+        e.preventDefault();
+        newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd);
+        return;
+      }
       // p20n：Ctrl/Cmd+D = 关闭当前窗格的当前 tab（原分屏快捷键让位，见 layout.ts）
       // p20p：不再 inEditable 拦截——终端窗格的 xterm helper textarea 恒占焦点，
       // 拦截导致终端窗格内分屏快捷键「永不生效」（上下分屏从未生效的根因）；
@@ -341,14 +374,14 @@ function App() {
         setTimeout(retarget, 80);
         return;
       }
-      const axis = splitShortcut(e);
+      const axis = splitShortcut(e, kb);
       if (!axis) return;
       e.preventDefault();
       splitCurrent(axis);
     }    // P20 窗格焦点切换：Cmd/Ctrl+方向键在分屏窗格间移动（WARP/VS Code 语义）。
     // 输入框内也响应——用户在输入框聊天时依然可以用方向键切窗格。
     function onFocusMove(e: KeyboardEvent) {
-      const dir = focusArrowShortcut(e);
+      const dir = focusArrowShortcut(e, kb);
       if (!dir) return;
       const m = getModel();
       const curTabset = m.getActiveTabset();
@@ -475,7 +508,7 @@ function App() {
       window.removeEventListener("keydown", onFocusMove);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKey, activeTab, activeAdapter]);
+  }, [activeKey, activeTab, activeAdapter, keymapOverrides]);
 
   // flexlayout tab 内容工厂：tab.id = tabKey，按 component 分派 ChatPanel / TerminalPanel（P23）
   const factory = (node: TabNode) => {
@@ -930,6 +963,15 @@ function App() {
             <div className="sidebar-head">
               <h3>工作区</h3>
               <div className="sidebar-head-actions">
+                {/* P25 F-25-1：新建终端入口移出 NewSessionModal，落在侧栏头部（+号左侧） */}
+                <button
+                  className="add-ws"
+                  title="新建终端"
+                  aria-label="新建终端"
+                  onClick={() => newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd)}
+                >
+                  <NewTerminalIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                </button>
                 <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
                   <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
                 </button>
@@ -1113,6 +1155,10 @@ function App() {
               sessionId={activeTab.sessionId ?? null}
               cwd={activeTab.cwd}
               messages={activeMessages}
+              open={railState.open}
+              tab={railState.tab}
+              onSwitchTab={(t: RailTab) => setRailState((s) => ({ ...s, tab: t, open: true }))}
+              onToggle={() => setRailState((s) => ({ ...s, open: !s.open }))}
             />
           )}
         </section>

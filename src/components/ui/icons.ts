@@ -38,6 +38,7 @@ import {
   Plus,
   Settings,
   Square,
+  SquareTerminal,
   Terminal,
   Undo2,
   User,
@@ -53,6 +54,7 @@ export const AgentIcon = Bot; // agent 头像兜底
 export const ThinkingIcon = Brain; // thinking 块
 export const ToolIcon = Wrench; // 工具调用
 export const TerminalIcon = Terminal; // 终端输出
+export const NewTerminalIcon = SquareTerminal; // P25 新建终端入口（侧栏头部图标钮）
 export const FileTextIcon = FileText; // 文件
 export const DiffIcon = FileDiff; // diff 视图
 export const CopyIcon = Copy; // 复制
