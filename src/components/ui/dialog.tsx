@@ -53,10 +53,40 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  // P26 补丁：macOS WKWebView 原生鼠标不派发 pointerdown（p20m 黑匣子，p22f 同坑第三次），
+  // Radix DismissableLayer 的「点遮罩关闭」只挂 document pointerdown 判定（mousedown 仅做
+  // interaction 标记不触发 dismiss）→ 真实鼠标点遮罩永远关不掉弹窗。
+  // 兜底：捕获 mousedown 且 target 在 Content 外 → 向原 target 派发合成 pointerdown
+  // （DismissableLayer 不校验 isTrusted），Radix 原生 outside-close 流程照常接管。
+  // 双发副作用防护：paneSwitchFromEvent 等双通道监听自带 200ms 去重窗（p20m）。
+  const contentRef = React.useRef<HTMLDivElement | null>(null)
+  React.useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      const content = contentRef.current
+      if (!content || !(e.target instanceof Node) || content.contains(e.target)) return
+      const { clientX, clientY, button, buttons } = e
+      e.target.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY,
+          button,
+          buttons,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+        }),
+      )
+    }
+    document.addEventListener("mousedown", onMouseDown, true)
+    return () => document.removeEventListener("mousedown", onMouseDown, true)
+  }, [])
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={contentRef}
         data-slot="dialog-content"
         className={cn(
           "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
