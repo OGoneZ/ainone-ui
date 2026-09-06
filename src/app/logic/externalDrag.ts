@@ -5,7 +5,7 @@
 // 写入同通道可能污染其判定；HTML5 dataTransfer 在 dragover 阶段也读不到
 // 自定义类型（protected 模式）。模块级暂存 + dragstart/drop 生命周期即够。
 
-import type { Tab } from "./tabs";
+import type { Tab, TabKind } from "./tabs";
 
 /** 拖拽载荷：侧栏会话行的最小投影 */
 export interface ExternalDragPayload {
@@ -14,6 +14,8 @@ export interface ExternalDragPayload {
   title: string;
   cwd: string;
   workspaceId: string | null;
+  /** P23：终端条目携带 terminal；旧载荷缺省 agent */
+  kind?: TabKind;
 }
 
 let pending: ExternalDragPayload | null = null;
@@ -49,5 +51,6 @@ export function payloadToTab(p: ExternalDragPayload, key: string): Tab {
     title: p.title,
     cwd: p.cwd && p.cwd.length > 0 ? p.cwd : undefined,
     workspaceId: p.workspaceId ?? null,
+    kind: p.kind,
   };
 }

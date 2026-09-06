@@ -8,6 +8,7 @@ import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
 import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "@/ipc/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "@/ipc/workspaces";
 import { ChatPanel } from "@/chat/ChatPanel";
+import { TerminalPanel } from "@/terminal/TerminalPanel";
 import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
 import { SettingsModal } from "@/app/modals/SettingsModal";
 import { NewSessionModal } from "@/app/modals/NewSessionModal";
@@ -24,6 +25,7 @@ import {
   DonateIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
+  TerminalIcon,
 } from "@/components/ui/icons";
 import {
   ContextMenu,
@@ -32,7 +34,7 @@ import {
   ContextMenuItem,
 } from "@/components/ui/context-menu";
 import { Toaster } from "@/components/ui/sonner";
-import { resolveHistoryOpen, type Tab } from "@/app/logic/tabs";
+import { resolveHistoryOpen, TERMINAL_ADAPTER_ID, type Tab } from "@/app/logic/tabs";
 import {
   setExternalDragPayload,
   takeExternalDragPayload,
@@ -50,7 +52,20 @@ import { logger } from "@/lib/logger";
 
 
 /** 侧栏会话行 leading 槽：harness logo + 状态角标（F-8-1 收尾，融合 F-7-7 状态机） */
-function SessionRowLeading({ adapter, st }: { adapter: AdapterWithStatus | undefined; st: SessionStatus }) {
+/** 侧栏会话行 leading 槽：harness logo + 状态角标（F-8-1 收尾，融合 F-7-7 状态机）。
+ *  P23：终端条目（adapter_id=terminal）画 TerminalIcon，无状态角标（终端无 busy/perm）。 */
+function SessionRowLeading({ adapter, st, isTerminal }: { adapter: AdapterWithStatus | undefined; st: SessionStatus; isTerminal?: boolean }) {
+  if (isTerminal) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center justify-center rounded-full"
+        style={{ width: 22, height: 22, background: "var(--bg-3)", color: "var(--text-primary)" }}
+        title="终端"
+      >
+        <TerminalIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
+      </span>
+    );
+  }
   const dot =
     st === "working" ? "dot-working" : st === "awaiting_input" ? "dot-awaiting_input" : "dot-done";
   return (
@@ -138,18 +153,20 @@ function App() {
     return modelRef.current;
   }
 
-  /** 业务 Tab → flexlayout IJsonTabNode（config 存投影回业务所需字段） */
+  /** 业务 Tab → flexlayout IJsonTabNode（config 存投影回业务所需字段）。
+   *  component 按种类分派（P23）：terminal tab 渲染 TerminalPanel。 */
   function tabToJson(tab: Tab) {
     return {
       type: "tab",
       id: tab.key,
       name: tab.title,
-      component: "chat",
+      component: tab.kind === "terminal" ? "terminal" : "chat",
       config: {
         adapterId: tab.adapterId,
         sessionId: tab.sessionId,
         cwd: tab.cwd,
         workspaceId: tab.workspaceId,
+        kind: tab.kind,
       },
     };
   }
@@ -208,13 +225,25 @@ function App() {
     m.doAction(Actions.adjustWeights(eq.rowId, eq.weights));
   }
 
-  /** 分屏：Ctrl+D（左右）/ Ctrl+Shift+D（上下），新窗格 = 同 harness 同 cwd 新会话（DEC-23） */
+  /** 分屏：Ctrl+D（左右）/ Ctrl+Shift+D（上下），新窗格 = 同 harness 同 cwd 新会话（DEC-23）。
+   *  源 tab 是终端（P23）→ 新窗格 = 同 workspace/cwd 新终端（WARP 语义按种类对齐）。 */
   function splitCurrent(axis: "row" | "col") {
     const src = activeTab;
-    if (!src || !activeAdapter) return;
-    const st = resolveSplitTab({ adapterId: src.adapterId, workspaceId: src.workspaceId, cwd: src.cwd });
+    if (!src) return;
     const key = `tab-${nextKey.current++}`;
     const dir = axis === "row" ? DockLocation.RIGHT : DockLocation.BOTTOM;
+    if (src.kind === "terminal") {
+      addTabToModel(
+        { key, adapterId: TERMINAL_ADAPTER_ID, title: "终端", workspaceId: src.workspaceId, cwd: src.cwd, kind: "terminal" },
+        dir,
+        activeKey,
+      );
+      equalizeAfterSplit(getModel(), axis === "row" ? "horz" : "vert");
+      logger.info("split", "split-pane-terminal", { axis, srcTabKey: activeKey, newTabKey: key });
+      return;
+    }
+    if (!activeAdapter) return;
+    const st = resolveSplitTab({ adapterId: src.adapterId, workspaceId: src.workspaceId, cwd: src.cwd });
     addTabToModel(
       { key, adapterId: st.adapterId, title: "新会话", workspaceId: st.workspaceId, cwd: st.cwd },
       dir,
@@ -368,10 +397,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, activeTab, activeAdapter]);
 
-  // flexlayout tab 内容工厂：tab.id = tabKey，渲染 ChatPanel
+  // flexlayout tab 内容工厂：tab.id = tabKey，按 component 分派 ChatPanel / TerminalPanel（P23）
   const factory = (node: TabNode) => {
     const t = tabs.find((x) => x.key === node.getId());
     if (!t) return null;
+    if (t.kind === "terminal" || node.getComponent() === "terminal") {
+      return <TerminalPanel key={t.key} tabKey={t.key} cwd={t.cwd} active={t.key === activeKey} />;
+    }
     const ad = adapters.find((a) => a.id === t.adapterId);
     if (!ad) return null;
     return (
@@ -391,9 +423,16 @@ function App() {
   };
 
   // F-21-1：tab 标题前渲染 harness logo（AgentAvatar 四层降级链，size 14 即「Tab 徽标」档；
-  // leading 是渲染回调，不受 renameTab 影响；adapter 从 tabs 反查，与 factory 同法）
+  // leading 是渲染回调，不受 renameTab 影响；adapter 从 tabs 反查，与 factory 同法。
+  // P23：终端 tab 用 TerminalIcon 徽标，无状态角标）
   const renderTab = (node: TabNode, renderValues: { leading: React.ReactNode }) => {
     const t = tabs.find((x) => x.key === node.getId());
+    if (t?.kind === "terminal") {
+      renderValues.leading = (
+        <TerminalIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} className="shrink-0" />
+      );
+      return;
+    }
     const ad = t ? adapterById.get(t.adapterId) : undefined;
     if (ad) {
       renderValues.leading = (
@@ -512,6 +551,7 @@ function App() {
       title: h.title,
       cwd: h.cwd ?? "",
       workspaceId: h.workspace_id ?? null,
+      kind: h.kind,
     });
     // 拖拽图像用会话行本身即可；effectAllowed move 表达「移动开新窗」语义
     e.dataTransfer.effectAllowed = "copyMove";
@@ -621,6 +661,35 @@ function App() {
       DockLocation.CENTER,
       activeKey,
     );
+  }
+
+  /** 新建终端 tab（P23 F-23-1）：与 harness session 同级；落会话索引供侧栏恢复
+   *  （终端无「首条消息」时机，创建即落；adapter_id 固定 terminal） */
+  function newTerminalTab(workspaceId?: string | null, cwd?: string) {
+    const key = `tab-${nextKey.current++}`;
+    const sessionId = `term-${key}`;
+    addTabToModel(
+      {
+        key,
+        adapterId: TERMINAL_ADAPTER_ID,
+        sessionId,
+        title: "终端",
+        workspaceId: workspaceId ?? null,
+        cwd,
+        kind: "terminal",
+      },
+      DockLocation.CENTER,
+      activeKey,
+    );
+    sessionsUpsert({
+      session_id: sessionId,
+      adapter_id: TERMINAL_ADAPTER_ID,
+      title: "终端",
+      cwd: cwd ?? "",
+      workspace_id: workspaceId ?? null,
+      kind: "terminal",
+      mtime_ms: Date.now(),
+    }).then(reloadHistory);
   }
 
   function openFromHistory(entry: SessionEntry) {
@@ -748,6 +817,14 @@ function App() {
           <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           新建会话
         </button>
+        {/* P23 F-23-1：新建终端——直接开一个本地 shell 终端 tab */}
+        <button
+          className="inline-flex items-center gap-1.5"
+          onClick={() => newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd)}
+        >
+          <TerminalIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+          新建终端
+        </button>
         {/* P22 打赏入口（右上角，设置左侧） */}
         <button className="donate-btn inline-flex items-center gap-1.5" onClick={() => setDonateOpen(true)}>
           <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
@@ -825,6 +902,17 @@ function App() {
                     <ContextMenuItem onSelect={() => setNewSession({ open: true, workspaceId: g.workspace?.id ?? null })}>
                       新建会话
                     </ContextMenuItem>
+                    {/* P23 F-23-1：工作区右键新建终端（cwd = 工作区目录） */}
+                    <ContextMenuItem
+                      onSelect={() =>
+                        newTerminalTab(
+                          g.workspace?.id ?? null,
+                          g.workspace?.cwd ?? activeTab?.cwd,
+                        )
+                      }
+                    >
+                      新建终端
+                    </ContextMenuItem>
                     {hasWorkspace && (
                       <>
                         <ContextMenuItem
@@ -846,6 +934,7 @@ function App() {
                   {g.sessions.map((h) => {
                     const st = statusOf(h.session_id);
                     const active = h.session_id === activeSessionId;
+                    const isTerminalRow = h.kind === "terminal";
                     const hAdapter = adapterById.get(h.adapter_id);
                     return (
                       <div
@@ -856,7 +945,7 @@ function App() {
                         onDragStart={(e) => onSessionDragStart(e, h)}
                         onDragEnd={onSessionDragEnd}
                       >
-                        <SessionRowLeading adapter={hAdapter} st={st} />
+                        <SessionRowLeading adapter={hAdapter} st={st} isTerminal={isTerminalRow} />
                         {/* F-8-1 AC-P8-1：hover/聚焦显示 harness 名称 */}
                         {/* P17：行内按钮 draggable={false}——WebKit 下 button 会吞掉
                             父级 draggable 的拖拽启动（拖拽分屏无反应的根因） */}
@@ -864,7 +953,7 @@ function App() {
                           className="history-open"
                           draggable={false}
                           onClick={() => openFromHistory(h)}
-                          title={hAdapter ? hAdapter.name : h.session_id}
+                          title={isTerminalRow ? "终端" : hAdapter ? hAdapter.name : h.session_id}
                         >
                           {h.title}
                         </button>
@@ -955,6 +1044,7 @@ function App() {
         presetWorkspaceId={newSession.workspaceId}
         onClose={() => setNewSession({ open: false })}
         onConfirm={confirmNewSession}
+        onOpenTerminal={newTerminalTab}
         onWorkspaceCreated={reloadWorkspaces}
       />
 

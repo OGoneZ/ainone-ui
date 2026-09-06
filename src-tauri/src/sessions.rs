@@ -17,6 +17,9 @@ pub struct SessionEntry {
     /// 所属工作区 id（F-5-4）；None = 未归组（旧数据迁移而来或移除工作区后）
     #[serde(default)]
     pub workspace_id: Option<String>,
+    /// 条目种类（P23）：Some("terminal") = 本地终端；None = harness 会话（旧索引无字段，兼容）
+    #[serde(default)]
+    pub kind: Option<String>,
     /// Unix 时间戳（毫秒），用于排序
     pub mtime_ms: u64,
 }

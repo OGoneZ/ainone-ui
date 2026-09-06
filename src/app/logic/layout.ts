@@ -122,7 +122,8 @@ export interface ModelLike {
     | undefined;
 }
 
-/** 把 flexlayout Model 里的全部 tab 节点投影为业务 Tab（顺序 = 访问顺序） */
+/** 把 flexlayout Model 里的全部 tab 节点投影为业务 Tab（顺序 = 访问顺序）。
+ *  config.kind 透传（P23 终端 tab）；缺省 = agent（兼容旧布局 config）。 */
 export function extractTabsFromModel(model: ModelLike): Tab[] {
   const out: Tab[] = [];
   model.visitNodes((n) => {
@@ -131,6 +132,7 @@ export function extractTabsFromModel(model: ModelLike): Tab[] {
     const sessionId = typeof cfg.sessionId === "string" && cfg.sessionId.length > 0 ? cfg.sessionId : undefined;
     const cwd = typeof cfg.cwd === "string" && cfg.cwd.length > 0 ? cfg.cwd : undefined;
     const workspaceId = typeof cfg.workspaceId === "string" && cfg.workspaceId.length > 0 ? cfg.workspaceId : null;
+    const kind = cfg.kind === "terminal" ? ("terminal" as const) : ("agent" as const);
     out.push({
       key: n.getId(),
       adapterId: String(cfg.adapterId ?? ""),
@@ -138,6 +140,7 @@ export function extractTabsFromModel(model: ModelLike): Tab[] {
       title: n.getName() || "新会话",
       cwd,
       workspaceId,
+      kind,
     });
   });
   return out;
