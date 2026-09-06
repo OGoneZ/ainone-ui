@@ -329,6 +329,18 @@ function App() {
         newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd);
         return;
       }
+      // P26e：Ctrl+Shift+Space 临时全屏当前聚焦窗格（flexlayout maximizeToggle），
+      // 再按恢复原布局。模态浮层开着时事件 target 落在浮层内 → 不响应。
+      if (matchShortcut(e, useKeymapStore.getState().defs, "pane.temp-maximize", keymapOverrides)) {
+        const t = e.target as Element | null;
+        if (t?.closest?.("[role='dialog'], [cmdk-root]")) return;
+        const m = getModel();
+        const tabset = m.getActiveTabset();
+        if (!tabset) return;
+        e.preventDefault();
+        m.doAction(Actions.maximizeToggle(tabset.getId()));
+        return;
+      }
       // p20n：Ctrl/Cmd+D = 关闭当前窗格的当前 tab（原分屏快捷键让位，见 layout.ts）
       // p20p：不再 inEditable 拦截——终端窗格的 xterm helper textarea 恒占焦点，
       // 拦截导致终端窗格内分屏快捷键「永不生效」（上下分屏从未生效的根因）；
