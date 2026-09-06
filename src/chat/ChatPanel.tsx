@@ -836,7 +836,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const runRef = useRef<{ promise: Promise<void> } | null>(null);
 
-  async function runPrompt(text: string) {
+  async function runPrompt(text: string, opts?: { queueItemId?: string; isRetry?: boolean }) {
     // F-8-1：刷新最近交互时间戳（回收判定的数据源）
     lastActivityRef.current = Date.now();
     patch(tabKey, { busy: true, turnStartedAt: Date.now() });
@@ -902,6 +902,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
         };
         useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
+        // 队列条目执行失败 → 回插队首（条目不丢）。重试语义：isRetry 防死循环
+        //（retried 条目失败不再回插）；不撤 user 气泡——已发生的尝试是事实。
+        if (opts?.queueItemId && !opts?.isRetry) {
+          useQueueStore.getState().requeueHead(tabKey, {
+            id: opts.queueItemId,
+            text,
+            retried: true,
+          });
+          toast.warning("该任务执行失败，已放回队列首位");
+        }
       } finally {
         patch(tabKey, { busy: false, turnStartedAt: undefined });
         runRef.current = null;
@@ -939,9 +949,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           const userCancelled = reason === "cancelled";
           const head = userCancelled ? null : useQueueStore.getState().dequeue(tabKey);
           if (head) {
-            logger.info("queue", "consume", { id: head.id });
-            appendUser(tabKey, head.text);
-            void runPrompt(head.text);
+            logger.info("queue", "consume", { id: head.id, retried: head.retried ?? false });
+            // retried 条目重放：transcript 已有该 user 气泡 + 错误块，跳过 appendUser
+            //（不重复气泡）；成功则新的 assistant turn 跟在错误块后，时间线自然
+            if (!head.retried) appendUser(tabKey, head.text);
+            void runPrompt(head.text, { queueItemId: head.id, isRetry: head.retried ?? false });
           } else if (userCancelled) {
             logger.info("queue", "hold-on-cancel", { reason });
           }

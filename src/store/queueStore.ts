@@ -6,7 +6,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { QueueItem } from "@/lib/queue";
-import { mergeItems } from "@/lib/queue";
+import { mergeItems, requeueHead } from "@/lib/queue";
 
 interface QueueStore {
   /** tabKey → 待执行指令队列 */
@@ -25,6 +25,8 @@ interface QueueStore {
   merge: (key: string, dragId: string, overId: string) => void;
   /** 消费队首，返回被消费的指令（空队列返回 null） */
   dequeue: (key: string) => QueueItem | null;
+  /** 失败回插队首（不受容量限制；配合 retried 标记防死循环） */
+  requeueHead: (key: string, item: QueueItem) => void;
   /** 清空某 tabKey 队列 */
   clear: (key: string) => void;
 }
@@ -96,6 +98,11 @@ export const useQueueStore = create<QueueStore>()(
         set((s) => ({ queues: { ...s.queues, [key]: rest } }));
         return head;
       },
+
+      requeueHead: (key, item) =>
+        set((s) => ({
+          queues: { ...s.queues, [key]: requeueHead(s.queues[key] ?? [], item) },
+        })),
 
       clear: (key) =>
         set((s) => {
