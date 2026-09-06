@@ -121,6 +121,10 @@
   --z-popover: 50;
   --z-modal: 100;
   --z-toast: 1000;
+  /* P20i：光晕 token（light 主题）—— 同 dark 块注释 */
+  --glow-line: rgba(57, 108, 216, 0.9);
+  --glow-near: rgba(57, 108, 216, 0.32);
+  --glow-far: rgba(57, 108, 216, 0.16);
 }
 
 :root[data-theme="dark"] {
@@ -141,6 +145,12 @@
   --danger: #ef5350;
   --message-user-bg: #396cd8;
   --thought-bg: #2a2d31;
+  /* P20i：光晕 token——lightningcss 会把 color-mix(in srgb, var(--primary) X%, transparent)
+   * 降级成纯 var(--primary)（回退），WKWebView 计算为透明黑（光晕不可见的根因）。
+   * 改用预定义 rgba 令牌（light/dark 各一套），绕开 color-mix 转换链。 */
+  --glow-line: rgba(123, 164, 240, 0.9);
+  --glow-near: rgba(123, 164, 240, 0.32);
+  --glow-far: rgba(123, 164, 240, 0.16);
 }
 
 /* ======================= 基础复位与全局 ======================= */
@@ -465,10 +475,14 @@ body {
   transform: translateY(-2px);
   border-radius: var(--radius-sm);
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--primary) 90%, transparent),
-    0 0 18px color-mix(in srgb, var(--primary) 32%, transparent),
-    0 0 44px color-mix(in srgb, var(--primary) 16%, transparent);
+    0 0 0 2px var(--glow-line),
+    0 0 18px var(--glow-near),
+    0 0 44px var(--glow-far);
   background: var(--bg-base);
+  /* 面板为 absolute 定位元素：z 提升让光晕压在相邻窗格之上——
+   * 否则左右邻居（DOM 靠后/不透明背景）会盖住光晕的左右边缘
+   * （实测症状：光晕只在上/下边可见）。 */
+  z-index: 7;
 }
 
 .flexlayout__tabset-selected {
