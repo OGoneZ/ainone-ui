@@ -41,7 +41,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+          # 注意：不开 cache: pnpm。该缓存机制依赖 `pnpm store path`，本仓库
+          # pnpm-workspace.yaml 仅含 onlyBuiltDependencies（非真 workspace），
+          # 会报 "packages field missing or empty" 使四条腿全挂（v0.7.0 首跑实锤）
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
