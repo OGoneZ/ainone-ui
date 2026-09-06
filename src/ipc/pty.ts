@@ -48,7 +48,7 @@ async function defaultShellSpec(): Promise<ShellSpec> {
     return {
       program: "/bin/zsh",
       args: ["-l"],
-      path: typeof process !== "undefined" ? process.env?.PATH ?? "" : "",
+      path: (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.PATH ?? "",
     };
   }
 }

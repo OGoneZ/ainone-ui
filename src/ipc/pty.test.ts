@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { spawnMock, killSpy, resizeSpy, writeSpy, eventHandlers, invokeMock } = vi.hoisted(() => {
+const { spawnMock, eventHandlers, invokeMock } = vi.hoisted(() => {
   const eventHandlers: { data: ((e: Uint8Array) => void)[]; exit: ((e: { exitCode: number }) => void)[] } = {
     data: [],
     exit: [],
@@ -28,9 +28,6 @@ const { spawnMock, killSpy, resizeSpy, writeSpy, eventHandlers, invokeMock } = v
       resize: vi.fn(),
       kill: vi.fn(),
     })),
-    killSpy: vi.fn(),
-    resizeSpy: vi.fn(),
-    writeSpy: vi.fn(),
     invokeMock: vi.fn(),
   };
 });
