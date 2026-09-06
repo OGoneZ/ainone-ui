@@ -165,6 +165,9 @@ export function NewSessionModal({
             value={adapterId ? `harness-${adapterId}` : undefined}
             onValueChange={onHarnessValueChange}
             onKeyDown={onStepNavKeyDown}
+            // P26g：禁「hover 即选中」——鼠标移动只走 CSS :hover 视觉高亮，
+            // 选中必须点击（键盘 ↑↓ 仍经 onValueChange 同步选中，两路互不干扰）
+            disablePointerSelection
           >
             <CommandList className="ns-command-list">
               <CommandGroup heading="harness（↑↓ 选择，→ 或 Enter 下一步）">
@@ -193,6 +196,7 @@ export function NewSessionModal({
             value={workspaceId ? `ws-${workspaceId}` : "ws-none"}
             onValueChange={onWorkspaceValueChange}
             onKeyDown={onStepNavKeyDown}
+            disablePointerSelection
           >
             <CommandList className="ns-command-list">
               <CommandGroup heading="工作区（↑↓ 选择，Enter 确认，← 上一步）">
