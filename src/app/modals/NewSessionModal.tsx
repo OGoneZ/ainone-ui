@@ -4,7 +4,7 @@
 // 右键工作区「新建会话」时 presetWorkspaceId 预填，直接落在第二步。
 // P7 外壳迁到 shadcn Dialog；P25 改 cmdk 列表；P26 改两步向导。
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import { workspacesUpsert, pickDirectory, type Workspace } from "@/ipc/workspaces";
 import { normPath } from "@/lib/normPath";
@@ -39,6 +39,15 @@ export function NewSessionModal({
   const [creating, setCreating] = useState(false);
   // P26 两步向导：harness=选框架；workspace=选目录（presetWorkspaceId 存在时直接进第二步）
   const [step, setStep] = useState<"harness" | "workspace">("harness");
+  // P26b：cmdk root ref——无输入框模式下方向键监听在 root 的 onKeyDown，
+  // root 必须持焦点方向键才可达（Dialog 默认把焦点给容器，真机实测高亮不动）
+  const cmdkRootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    // 等内容渲染完再聚焦（Dialog 焦点圈先落容器）
+    const t = setTimeout(() => cmdkRootRef.current?.focus(), 50);
+    return () => clearTimeout(t);
+  }, [open, step]);
 
   useEffect(() => {
     if (!open) return;
@@ -98,11 +107,11 @@ export function NewSessionModal({
           <DialogTitle>{step === "harness" ? "新建会话 · 选择 Harness" : "新建会话 · 选择工作目录"}</DialogTitle>
         </DialogHeader>
 
-        {/* P26 两步向导：每步一个 cmdk 列表。↑↓ 导航（cmdk 自带）、
-            onSelect 选中当前项，「下一步/开始对话」项 Enter 推进；
-            第二步列表尾部保留「上一步」与「新建工作区」入口。 */}
+        {/* P26 两步向导：每步一个 cmdk 列表。↑↓ 导航（root 持焦点后 cmdk 自带）、
+            选项 onSelect 仅选中（鼠标点击同义），Enter 落在「下一步/上一步/开始对话」
+            操作项上推进；底部按钮同语义。 */}
         {step === "harness" ? (
-          <Command loop className="ns-command">
+          <Command loop ref={cmdkRootRef} tabIndex={-1} className="ns-command">
             <CommandList className="ns-command-list">
               <CommandGroup heading={`harness（↑↓ 选择，Enter 下一步）`}>
                 {adapters.map((a) => (
@@ -110,11 +119,7 @@ export function NewSessionModal({
                     key={a.id}
                     value={`harness-${a.id}`}
                     disabled={!a.available}
-                    onSelect={() => {
-                      setAdapterId(a.id);
-                      // P26：Enter/点击 harness 项 = 选中并直接进下一步
-                      setStep("workspace");
-                    }}
+                    onSelect={() => setAdapterId(a.id)}
                     className={adapterId === a.id ? "ns-item ns-item-active" : "ns-item"}
                   >
                     <span className="ns-item-name">{a.name}</span>
@@ -123,10 +128,21 @@ export function NewSessionModal({
                   </CommandItem>
                 ))}
               </CommandGroup>
+              <CommandSeparator />
+              <CommandGroup heading="操作">
+                <CommandItem
+                  value="ns-next"
+                  disabled={!adapterId}
+                  onSelect={goNext}
+                  data-testid="ns-next"
+                >
+                  <span className="ns-item-name">下一步 →</span>
+                </CommandItem>
+              </CommandGroup>
             </CommandList>
           </Command>
         ) : (
-          <Command loop className="ns-command">
+          <Command loop ref={cmdkRootRef} tabIndex={-1} className="ns-command">
             <CommandList className="ns-command-list">
               <CommandGroup heading={`工作区（↑↓ 选择，Enter 确认）`}>
                 <CommandItem

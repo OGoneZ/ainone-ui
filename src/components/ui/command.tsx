@@ -13,10 +13,12 @@ import {
 
 function Command({
   className,
+  ref,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive>) {
   return (
     <CommandPrimitive
+      ref={ref}
       data-slot="command"
       className={cn(
         "flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground",

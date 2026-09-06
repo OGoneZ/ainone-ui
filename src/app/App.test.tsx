@@ -100,8 +100,9 @@ describe("App 编排（工作区分组）", () => {
     const modal = await screen.findByRole("heading", { name: "新建会话 · 选择 Harness" });
     expect(modal).toBeInTheDocument();
 
-    // P26 两步：点 harness 项进第二步 → 默认工作区第一个（dev）→ 开始对话
+    // P26b 两步：点 harness 项仅选中 → 点「下一步」进第二步 → 开始对话（默认工作区第一个 dev）
     await user.click(await screen.findByText("Oh My Pi"));
+    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByRole("button", { name: "开始对话" }));
 
     // 生成 Tab（Tab 标题「新会话」）+ 聊天面板的 harness 徽标
