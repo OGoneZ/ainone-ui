@@ -15,6 +15,7 @@ import { NewSessionModal } from "@/app/modals/NewSessionModal";
 import { DonateModal } from "@/app/modals/DonateModal";
 import { ShortcutsModal } from "@/app/modals/ShortcutsModal";
 import { EmptyState } from "@/components/EmptyState";
+import { Welcome } from "@/app/components/Welcome";
 import { RightRail, loadRailState, saveRailState, type RailTab } from "@/sidebar/RightRail";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
@@ -1135,6 +1136,9 @@ function App() {
         <section className="tabs-area">
           {/* F-10-3 flexlayout 分屏窗格：替换原 tabs-bar + tab-content 区域 */}
           <div className="layout-host" ref={layoutHostRef} data-dragging={false}>
+            {/* 欢迎页：无任何 tab（无 session / 无终端）时的空态。flexlayout
+                model 空布局只渲染度量节点，铺 Welcome 占满 host。 */}
+            {tabs.length === 0 && <Welcome />}
             <Layout
               model={getModel()}
               factory={factory}
