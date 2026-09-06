@@ -244,7 +244,8 @@ tree-row:hover .filetree-ref {
 
 /* ======================= P11 · F-11-7 右侧侧边栏（元数据 / 文件 双 tab） ======================= */
 .rightrail {
-  width: 260px;
+  width: 260px; /* F-21-6：运行时被 RightRail inline width 覆盖（拖宽持久化值） */
+  position: relative; /* 拖宽把手定位锚 */
   flex-shrink: 0;
   border: 1px solid var(--bg-3);
   border-radius: var(--radius);
@@ -583,4 +584,12 @@ tree-row:hover .filetree-ref {
 .history-rewind:hover {
   background: var(--bg-3);
   color: var(--text-primary);
+}
+
+/* ======================= F-21-6 右栏拖宽把手（左缘 6px 热区） ======================= */
+.rightrail > .sidebar-resize-handle.handle-left {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
 }

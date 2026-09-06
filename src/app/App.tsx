@@ -42,6 +42,8 @@ import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
 import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
+import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
+import { clampWidth, sidebarMaxWidth } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
 
 
@@ -87,6 +89,10 @@ function App() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   // F-15-7 左侧栏开合（持久化 localStorage，RightRail 同款交互）
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem("ainone-sidebar-open") !== "0");
+  // F-21-6 左侧栏宽度（拖宽把手，持久化；clamp 200~min(520,40vw)）
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
+    clampWidth(Number(localStorage.getItem("ainone-sidebar-width")) || 240, 200, sidebarMaxWidth()),
+  );
   useEffect(() => {
     localStorage.setItem("ainone-sidebar-open", sidebarOpen ? "1" : "0");
   }, [sidebarOpen]);
@@ -374,6 +380,24 @@ function App() {
         onRewind={() => {}}
       />
     );
+  };
+
+  // F-21-1：tab 标题前渲染 harness logo（AgentAvatar 四层降级链，size 14 即「Tab 徽标」档；
+  // leading 是渲染回调，不受 renameTab 影响；adapter 从 tabs 反查，与 factory 同法）
+  const renderTab = (node: TabNode, renderValues: { leading: React.ReactNode }) => {
+    const t = tabs.find((x) => x.key === node.getId());
+    const ad = t ? adapterById.get(t.adapterId) : undefined;
+    if (ad) {
+      renderValues.leading = (
+        <AgentAvatar
+          adapterId={ad.id}
+          name={ad.name}
+          brandColor={ad.logo}
+          size={14}
+          className="shrink-0"
+        />
+      );
+    }
   };
 
   // flexlayout 动作回调：任何模型变更（含用户关闭 tab / 拖拽 dock）→ 投影回 tabs
@@ -710,7 +734,7 @@ function App() {
 
       <div className="workspace">
         {sidebarOpen ? (
-          <aside className="sidebar">
+          <aside className="sidebar" style={{ width: sidebarWidth }}>
             <div className="sidebar-head">
               <h3>工作区</h3>
               <div className="sidebar-head-actions">
@@ -834,6 +858,15 @@ function App() {
                 onAction={() => setNewSession({ open: true })}
               />
             )}
+            <SidebarResizeHandle
+              edge="right"
+              min={200}
+              max={() => sidebarMaxWidth()}
+              width={sidebarWidth}
+              onResize={setSidebarWidth}
+              onResizeEnd={(w) => localStorage.setItem("ainone-sidebar-width", String(w))}
+              label="拖拽调整侧栏宽度"
+            />
           </aside>
         ) : (
           // F-15-7 折叠态：细栏杆（展开 + 新建两个图标位）
@@ -853,6 +886,7 @@ function App() {
             <Layout
               model={getModel()}
               factory={factory}
+              onRenderTab={renderTab}
               onModelChange={handleAction}
               realtimeResize
               onExternalDrag={handleExternalDrag}

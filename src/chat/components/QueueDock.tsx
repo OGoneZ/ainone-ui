@@ -29,11 +29,22 @@ import {
 } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDownIcon, ChevronUpIcon, XIcon, SendIcon, GripVerticalIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, XIcon, SendIcon, GripVerticalIcon, MergeIcon } from "lucide-react";
+import { isInCenterBand } from "@/lib/queue";
 import { logger } from "@/lib/logger";
 
 /** 合并候选触发时长（悬停另一条目多久后进入「吸入待合并」高亮态） */
 const MERGE_HOLD_MS = 600;
+
+/** 从 activatorEvent 提取起始 clientX（pointer/touch/mouse 统一；键盘拖拽无坐标返回 null） */
+function getEventX(ev: Event): number | null {
+  if ("clientX" in ev && typeof (ev as PointerEvent).clientX === "number") {
+    return (ev as PointerEvent).clientX;
+  }
+  const touches = (ev as TouchEvent).touches;
+  if (touches && touches.length > 0) return touches[0].clientX;
+  return null;
+}
 
 interface Props {
   tabKey: string;
@@ -53,6 +64,8 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
   const [open, setOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mergeCandidate, setMergeCandidate] = useState<string | null>(null);
+  /** F-21-3 边缘带插入指示：overId 非 null 且未进合并候选 → 显示排序落点线 */
+  const [insertOver, setInsertOver] = useState<string | null>(null);
   const [merging, setMerging] = useState<{ dragId: string; overId: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -60,6 +73,8 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
   // 悬停计时：dragOver 持续命中同一条目 MERGE_HOLD_MS → 进入合并候选
   const hoverRef = useRef<{ id: string; since: number } | null>(null);
   const holdTimerRef = useRef<number | null>(null);
+  // F-21-3：卡片容器 ref（条目几何查询 + overlay 定位）
+  const cardRef = useRef<HTMLDivElement | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -78,6 +93,14 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
     logger.debug("queue", "dock-drag-start", { id: String(e.active.id) });
   }
 
+  // F-21-3：合并候选双条件——悬停满 MERGE_HOLD_MS **且** 指针位于目标条目中心 50% 带。
+  // 边缘带 = 排序意图 → 显示插入指示线，不计时。dnd-kit 事件不带指针坐标，
+  // 用 activatorEvent 起点 + delta 还原（内部 pointerCoordinates 同款换算）。
+  function pointerXOf(e: DragOverEvent): number | null {
+    const start = getEventX(e.activatorEvent);
+    if (start === null) return null;
+    return start + e.delta.x;
+  }
   function handleDragOver(e: DragOverEvent) {
     const overId = e.over ? String(e.over.id) : null;
     const dragId = activeId;
@@ -85,8 +108,22 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
       hoverRef.current = null;
       if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
       setMergeCandidate(null);
+      setInsertOver(null);
       return;
     }
+    const px = pointerXOf(e);
+    const el = cardRef.current?.querySelector<HTMLElement>(`[data-id="${overId}"]`);
+    const rect = el?.getBoundingClientRect();
+    const inCenter = px !== null && rect ? isInCenterBand(px, rect) : true;
+    if (!inCenter) {
+      // 边缘带：取消候选计时，只显示排序插入指示
+      hoverRef.current = null;
+      if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
+      setMergeCandidate(null);
+      setInsertOver(overId);
+      return;
+    }
+    setInsertOver(null);
     if (hoverRef.current?.id !== overId) {
       hoverRef.current = { id: overId, since: performance.now() };
       setMergeCandidate(null);
@@ -102,12 +139,36 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
     const overId = e.over ? String(e.over.id) : null;
     setActiveId(null);
     setMergeCandidate(null);
+    setInsertOver(null);
     hoverRef.current = null;
     if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
 
     if (!overId || overId === dragId) return;
     if (mergeCandidate === overId) {
-      // 合并：先播吸入动画（overlay 由 CSS transition 收缩），落账延迟到动画尾
+      // 合并：先播吸入动画，落账延迟到动画尾。
+      // F-21-3：吸入动画真实化——读取目标中心，overlay 先飞向目标再收缩（两段 keyframe）。
+      const overlayEl = cardRef.current?.closest(".panel")?.querySelector<HTMLElement>(".queue-dock-item.dragging");
+      const overEl = cardRef.current?.querySelector<HTMLElement>(`[data-id="${overId}"]`);
+      if (overlayEl && overEl) {
+        const or = overlayEl.getBoundingClientRect();
+        const tr = overEl.getBoundingClientRect();
+        const dx = tr.left + tr.width / 2 - (or.left + or.width / 2);
+        const dy = tr.top + tr.height / 2 - (or.top + or.height / 2);
+        overlayEl.animate(
+          [
+            { transform: "translate(0, 0) scale(1)", opacity: 1 },
+            { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0 },
+          ],
+          { duration: 320, easing: "ease-in", fill: "forwards" },
+        ).addEventListener("finish", () => {
+          merge(tabKey, dragId, overId);
+          setMerging(null);
+          logger.info("queue", "merge", { dragId, overId, len: items.length - 1 });
+        });
+        setMerging({ dragId, overId });
+        return;
+      }
+      // 兜底：拿不到几何（测试/极端环境）→ 旧两段时序（merging state 驱动 CSS）
       setMerging({ dragId, overId });
       window.setTimeout(() => {
         merge(tabKey, dragId, overId);
@@ -153,7 +214,7 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
       </button>
 
       {open && (
-        <div className="queue-dock-card" role="list" aria-label="待执行队列">
+        <div className="queue-dock-card" role="list" aria-label="待执行队列" ref={cardRef}>
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -164,6 +225,7 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
             onDragCancel={() => {
               setActiveId(null);
               setMergeCandidate(null);
+              setInsertOver(null);
               hoverRef.current = null;
             }}
           >
@@ -176,6 +238,7 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
                   order={idx + 1}
                   isMerging={merging?.dragId === it.id || merging?.overId === it.id}
                   isCandidate={mergeCandidate === it.id}
+                  isInsert={insertOver === it.id && mergeCandidate !== it.id}
                   isEditing={editingId === it.id}
                   editText={editText}
                   onEditText={setEditText}
@@ -216,6 +279,7 @@ function DockItem({
   order,
   isMerging,
   isCandidate,
+  isInsert,
   isEditing,
   editText,
   onEditText,
@@ -230,6 +294,7 @@ function DockItem({
   order: number;
   isMerging: boolean;
   isCandidate: boolean;
+  isInsert: boolean;
   isEditing: boolean;
   editText: string;
   onEditText: (v: string) => void;
@@ -244,7 +309,7 @@ function DockItem({
   return (
     <div
       ref={setNodeRef}
-      className={`queue-dock-item ${isDragging ? "ghost" : ""} ${isCandidate ? "candidate" : ""} ${isMerging ? "merging" : ""}`}
+      className={`queue-dock-item ${isDragging ? "ghost" : ""} ${isCandidate ? "candidate" : ""} ${isMerging ? "merging" : ""} ${isInsert ? "insert-over" : ""}`}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       data-id={id}
     >
@@ -257,7 +322,7 @@ function DockItem({
       >
         <GripVerticalIcon style={{ width: 12, height: 12 }} />
       </button>
-      <span className="queue-dock-order">{order}</span>
+      {isCandidate ? <MergeIcon className="queue-dock-merge-hint" style={{ width: 12, height: 12 }} aria-label="将合并" /> : <span className="queue-dock-order">{order}</span>}
       {isEditing ? (
         <input
           className="queue-dock-input"

@@ -40,6 +40,17 @@ export function next(items: QueueItem[]): DequeueResult {
   return { item: items[0], items: items.slice(1) };
 }
 
+/** F-21-3 拖拽几何：指针落在目标条目中心 50% 区（x ∈ [25%,75%]）= 合并意图，
+ *  边缘带 = 排序插入意图。防误触：仅悬停计时不区分「想排序停在条目上」与「想合并」，
+ *  中心带判定把排序意图还给边缘。坐标系 clientX 相对 rect。
+ */
+export function isInCenterBand(pointerX: number, rect: { left: number; width: number }): boolean {
+  if (rect.width <= 0) return false;
+  const rel = (pointerX - rect.left) / rect.width;
+  // 浮点容差：中点 150 相对 [100,200] 是 0.25/0.75 的精确界，需 1e-9 级容差
+  return rel >= 0.25 - 1e-9 && rel <= 0.75 + 1e-9;
+}
+
 /**
  * 合并（P16 · F-16-3，DEC-50）：拖拽条目 A 到条目 B 上 → 两文本按原队列顺序
  * 空行拼接，位置取两者较前者。找不到 id 时原样返回（不静默变形）。

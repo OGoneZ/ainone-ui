@@ -69,7 +69,8 @@ select {
 }
 
 .sidebar {
-  width: 240px;
+  width: 240px; /* F-21-6：运行时被 App.tsx inline width 覆盖（拖宽持久化值） */
+  position: relative; /* 拖宽把手定位锚 */
   flex-shrink: 0;
   overflow-y: auto;
   border: 1px solid var(--bg-3);
@@ -110,6 +111,23 @@ select {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* F-21-6 侧栏拖宽把手（右栏左缘样式在 sidebar.css，仅定位差异；基础外观在此单一路径） */
+.sidebar-resize-handle {
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:active {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+.sidebar > .sidebar-resize-handle.handle-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
 }
 
 /* F-15-7 折叠态：28px 细栏杆（RightRail-collapsed 同款交互） */
@@ -226,10 +244,28 @@ select {
   }
 }
 
+/* F-21-4：待审批会话行光晕——警告色呼吸外发光，提醒用户去处理权限请求。
+   数据流现成：deriveStatus 里 perm !== null → awaiting_input（优先级最高）。 */
+.history-item.status-awaiting_input {
+  animation: awaiting-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes awaiting-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 10px 2px color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+}
+
 /* reduced-motion：呼吸/摇动全部短路（F-7-11 全局开关已覆盖 animation，此处兜底显色） */
 @media (prefers-reduced-motion: reduce) {
   .status-dot.dot-working,
   .status-dot.dot-awaiting_input {
+    animation: none;
+  }
+  .history-item.status-awaiting_input {
     animation: none;
   }
 }

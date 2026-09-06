@@ -436,6 +436,13 @@ body {
   white-space: nowrap;
 }
 
+/* F-21-1：tab 标题前的 harness logo（onRenderTab leading 槽）与文本间距 */
+.flexlayout__tab_button_leading {
+  margin-right: 5px;
+  display: inline-flex;
+  align-items: center;
+}
+
 /* P20g：聚焦窗格光晕（外圈版）。
  * 用户要求：光晕在窗格**外边框**上，凸出时不被邻居遮挡。
  * 裁剪链真相：.flexlayout__row 与 .flexlayout__tabset_container 都是

@@ -31,8 +31,9 @@ export interface RuntimeState {
   sessionId: string | null;
   messages: ChatMsg[];
   busy: boolean;
-  /** 当前等待用户批准的权限请求标题（null = 无） */
-  pending: string | null;
+  /** F-21-4 当前等待用户批准的权限请求（title=工具调用标题，options=harness 全量选项）；
+   *  null = 无。替代原 pending: string（只存标题丢选项，全屏 modal 时代遗留） */
+  perm: PermState | null;
   /** 是否已发出首条消息（用于写会话索引） */
   prompted: boolean;
   /** F-8-4 元数据：上下文占用（usage_update 采集），无则为 null */
@@ -48,6 +49,12 @@ export interface RuntimeState {
   /** P16b：当前 turn 的起点时间戳（ms，Date.now()）；0/undefined = 无进行中 turn。
    *  总耗时 = now - turnStartedAt，与工具/思考结果无关的墙钟时间。 */
   turnStartedAt?: number;
+}
+
+/** F-21-4 权限审批状态（ACP RequestPermissionRequest 投影） */
+export interface PermState {
+  title: string;
+  options: { optionId: string; name: string; kind: string | null }[];
 }
 
 /** F-12-2 提问卡状态 */
@@ -105,7 +112,7 @@ export const useSessionStore = create<SessionStore>()(
                 sessionId: null,
                 messages: [],
                 busy: false,
-                pending: null,
+                perm: null,
                 prompted: false,
                 usage: null,
                 meta: null,

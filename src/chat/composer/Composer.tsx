@@ -1,5 +1,5 @@
 // 输入区（composer）：悬浮输入框（F-10-4）+ slash 菜单（F-4-7/F-11-1）+ @ 文件联想
-// 菜单（F-11-3）+ 附件按钮 + 语音输入 + 发送/停止/排队。
+// 菜单（F-11-3）+ 附件按钮 + 语音输入 + 发送/停止（busy 自动入队 F-21-2，无独立排队按钮）。
 // 自 ChatPanel 拆出（P13 C3b）：菜单键盘导航 / IME 防护（M4）/ 菜单互斥（M3）逻辑
 // 逐字随迁，行为不变。
 
@@ -39,10 +39,10 @@ export function Composer({
   onSubmit,
   onStop,
   onPickFiles,
-  onEnqueue,
   onVoice,
   onPickSlash,
   onPickAt,
+  expandPortalTarget,
 }: {
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
@@ -59,10 +59,12 @@ export function Composer({
   onSubmit: () => void;
   onStop: () => void;
   onPickFiles: () => void;
-  onEnqueue: (text: string) => void;
   onVoice: (text: string) => void;
   onPickSlash?: (w: CommandWord) => void;
   onPickAt: (entry: AtEntry) => void;
+  /** F-21-5 全屏编辑的 portal 宿主：传入 session 窗格容器（.panel）→ 只铺满自己窗格；
+   *  缺省 body（fixed + 100vw 旧语义，测试/兜底用） */
+  expandPortalTarget?: HTMLElement | null;
 }) {
   // L1：Esc 显式关闭 slash 菜单（下次输入变化时重置重新可开）
   const [slashClosed, setSlashClosed] = useState(false);
@@ -199,9 +201,10 @@ export function Composer({
     }
   }
 
-  // F-19-2：全屏编辑用 Portal 渲染到 body——祖先 .composer-dock 有
-  // transform（居中偏移），按 CSS 规范 transform 非 none 的元素是 fixed
-  // 后代的包含块，form 的 fixed 定位会被锁死在 dock 内（实测「坍塌」根因）。
+  // F-19-2：全屏编辑必须 Portal——祖先 .composer-dock 有 transform（居中偏移），
+  // 按 CSS 规范 transform 非 none 的元素是 fixed 后代的包含块，不脱离会「坍塌」。
+  // F-21-5：portal 目标从 body 改为 session 窗格容器（.panel，expandPortalTarget），
+  // 定位随之 absolute inset-0——只铺满自己窗格，分屏时不再遮挡邻居窗格。
   if (expanded) {
     return createPortal(
       <form className="row composer-expanded" onSubmit={submit}>
@@ -224,7 +227,7 @@ export function Composer({
           value={input}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={busy ? "运行中，输入将打断当前 turn…" : "输入消息…"}
+          placeholder={busy ? "运行中，发送将加入队列" : "输入消息…"}
           disabled={starting}
           rows={1}
         />
@@ -251,7 +254,7 @@ export function Composer({
           </button>
         </div>
       </form>,
-      document.body,
+      expandPortalTarget ?? document.body,
     );
   }
 
@@ -309,7 +312,7 @@ export function Composer({
           onKeyDown={handleKeyDown}
           placeholder={
             busy
-              ? "运行中，输入将打断当前 turn…"
+              ? "运行中，发送将加入队列"
               : input.startsWith("!")
                 ? "！命令将交由 harness 执行（claude-code 支持；omp/pi-acp 未验证）"
                 : typeText
@@ -354,24 +357,6 @@ export function Composer({
         }}
       >
         <StopIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-      </button>
-      {/* F-9-3 命令队列：排队追加按钮（区别于立即发送） */}
-      <button
-        type="button"
-        disabled={!input.trim() || starting}
-        aria-label="排队发送"
-        title="加入命令队列"
-        className="inline-flex h-9 px-2.5 shrink-0 items-center justify-center rounded-full text-xs"
-        style={{ backgroundColor: "var(--bg-2)", color: "var(--text-secondary)", transitionDuration: "var(--motion-default)" }}
-        onClick={() => {
-          const t = input.trim();
-          if (t) {
-            onEnqueue(t);
-            setInput("");
-          }
-        }}
-      >
-        排队
       </button>
     </form>
   );
