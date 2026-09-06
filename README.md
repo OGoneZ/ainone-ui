@@ -21,7 +21,8 @@ harness 未安装或未配置凭据时，对应下拉项会标记「未安装」
 ```bash
 pnpm install
 pnpm dev          # 前端 vite
-pnpm tauri dev    # 桌面应用（含 Rust 后端）
+pnpm tauri:dev    # 桌面应用（含 Rust 后端 + AI 调试桥，见「前端调试」）
+pnpm tauri:build  # 打包 release（不含调试桥）
 ```
 
 ## 测试
@@ -40,12 +41,12 @@ pnpm test:all    # 前端 + Rust cargo test + e2e 三件套
 让 AI agent（或任意 HTTP 客户端）**直接驱动 WebView**：执行 JS、截图、查元素、读页面源码——
 无需人工复制错误信息。
 
-**生效条件**：`pnpm tauri dev`（`tauri.conf.json` 的 `build.features` 含 `"webdriver"`，仅 debug 构建）。
-**打包不含**：`pnpm tauri:build` 用 `tauri.dist.conf.json` 覆盖（features 为空），release 二进制完全不编译此插件。
+**生效条件**：`pnpm tauri:dev`（= `tauri dev --features webdriver`，显式启用 feature；仅 debug 构建注册插件）。
+**打包不含**：`pnpm tauri:build` 不带该 feature，release 二进制完全不编译此插件。
 
 ### 使用方式
 
-1. `pnpm tauri dev` 启动应用后，调试桥监听 `127.0.0.1:4445`（可用 `TAURI_WEBDRIVER_PORT` 环境变量改端口）
+1. `pnpm tauri:dev` 启动应用后，调试桥监听 `127.0.0.1:4445`（可用 `TAURI_WEBDRIVER_PORT` 环境变量改端口）
 2. 直接发 HTTP 请求驱动 WebView（POST body 为 WebDriver 协议格式）：
 
 ```bash

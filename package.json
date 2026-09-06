@@ -11,8 +11,8 @@
     "test:all": "pnpm test && cd src-tauri && cargo test && cd .. && pnpm test:e2e",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build --config src-tauri/tauri.dist.conf.json"
+    "tauri:dev": "tauri dev --features webdriver",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
