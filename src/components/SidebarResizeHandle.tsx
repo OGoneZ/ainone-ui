@@ -1,19 +1,18 @@
 // F-21-6 侧栏拖宽把手：8px 热区（hover 高亮），pointer capture 拖拽。
 // 视觉/交互与 FilePreview 左缘把手一致（.filepreview-resize 模式随迁）。
 //
-// p22c 重写（真实环境「点击后无拖拽反应」的根治）：
-//   对齐 flexlayout Splitter 的 startDrag 模式——它是同一 WKWebView 里被用户
-//   实证可用的唯一拖拽参照（p22b 的 window 级监听 + capture try/catch 吞错版
-//   在浏览器 dispatchEvent 实测可用，但真实鼠标无效；两版差异只剩监听目标与
-//   capture 纪律，故照抄参照）：
-//   ① move/up 挂 document 而非 window（flexlayout 同款；pointer 事件冒泡终点
-//      是 document，WKWebView 真实指针流下 window 不可靠）。
-//   ② setPointerCapture 不再 try/catch 吞错（flexlayout 同款必须成功）；
-//      失败时 warn 落日志而不是静默（Rule 12 fail loud）。
-//   ③ 监听动态挂卸：pointerdown 时挂、up/cancel 时卸（参照实现形态），
-//      并补 pointercancel 复位（触控/手势中断时 dragRef 残留防护）。
+// p22c 对齐 flexlayout Splitter startDrag 后仍有两处真实环境缺陷，p22d 补齐：
+//  ① 拖拽粘滞（真实 WKWebView 实测：松手后宽度持续跟随鼠标）——pointermove/pointerup
+//     缺 preventDefault()，capture 后 WKWebView 原生拖选/滚动手势接管指针流，
+//     pointerup 不再派发 → dragRef 永不清空。flexlayout 的 pointerMove/pointerUp
+//     均显式 preventDefault（index.js:4379-4391），照抄。
+//  ② 触屏/触控板手势从 touchstart 起手会绕过 pointer 拦截——flexlayout 对拖拽元素
+//     挂 touchstart {passive:false} + preventDefault + stopImmediatePropagation
+//     （index.js:4789-4808），同款防御。
+//  元素级 onPointerMove/onPointerUp 转接保留：capture 重定向后事件 target 是把手，
+//  与 document 监听双通道都指向同一处理器（幂等：dragRef 空即 no-op）。
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { dragWidth, type DragState, type ResizeEdge } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
 
@@ -38,13 +37,17 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
   onResizeRef.current = onResize;
   const onResizeEndRef = useRef(onResizeEnd);
   onResizeEndRef.current = onResizeEnd;
+  const handleRef = useRef<HTMLDivElement | null>(null);
 
   function onPointerMove(e: PointerEvent) {
+    if (!dragRef.current) return;
+    // preventDefault 抑制 WKWebView 原生拖选/滚动手势接管指针流（粘滞根因，见头注①）
+    e.preventDefault();
     const d = dragRef.current;
-    if (!d) return;
     onResizeRef.current(dragWidth(d, e.clientX, edge, min, max()));
   }
   function onPointerUp(e: PointerEvent) {
+    e.preventDefault();
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
@@ -67,6 +70,18 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
     document.removeEventListener("pointercancel", onPointerCancel);
   }
 
+  // 触屏起手防御（flexlayout 同款）：touchstart 不拦会被系统手势接管，绕过 pointer 流
+  useEffect(() => {
+    const el = handleRef.current;
+    if (!el) return;
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    return () => el.removeEventListener("touchstart", onTouchStart);
+  }, []);
+
   function onPointerDown(e: React.PointerEvent) {
     e.preventDefault();
     // 拖拽全程禁文本选中（拖过聊天区不选中文字）；up/cancel 恢复
@@ -85,6 +100,7 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
 
   return (
     <div
+      ref={handleRef}
       className={`sidebar-resize-handle ${edge === "left" ? "handle-left" : "handle-right"}`}
       role="separator"
       aria-label={label}
@@ -94,6 +110,7 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
       // 直接绑 document 级函数会导致类型不匹配——转接一层适配签名
       onPointerMove={(e) => onPointerMove(e.nativeEvent)}
       onPointerUp={(e) => onPointerUp(e.nativeEvent)}
+      onPointerCancel={() => onPointerCancel()}
     />
   );
 }
