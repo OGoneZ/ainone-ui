@@ -44,13 +44,18 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
   onResizeRef.current = onResize;
   const onResizeEndRef = useRef(onResizeEnd);
   onResizeEndRef.current = onResizeEnd;
+  // max 是调用方 inline arrow（App/RightRail 每渲染新引用）——经 ref 转发，
+  // effect 依赖不再含 max（否则每帧重跑，cleanup 的 detach 会拆掉拖拽中的 window 监听：
+  // 症状即「拖动约 10px 就断，必须松手重新按」——p22g 真机取证实锤）
+  const maxRef = useRef(max);
+  maxRef.current = max;
   // p20m 同款：mousedown/pointerdown 同一按压双发时去重
   const lastDownAt = useRef(0);
 
   function applyWidth(clientX: number) {
     const d = dragRef.current;
     if (!d) return;
-    onResizeRef.current(dragWidth(d, clientX, edge, min, max()));
+    onResizeRef.current(dragWidth(d, clientX, edge, min, maxRef.current()));
   }
 
   function onWindowMove(e: MouseEvent | PointerEvent) {
@@ -66,7 +71,7 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
     dragRef.current = null;
     document.body.style.userSelect = "";
     detach();
-    const w = dragWidth(d, e.clientX, edge, min, max());
+    const w = dragWidth(d, e.clientX, edge, min, maxRef.current());
     onResizeRef.current(w);
     onResizeEndRef.current?.(w);
     logger.debug("layout", "sidebar-resize", { edge, width: w });
@@ -138,7 +143,9 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
       detach(); // 卸载时若拖拽残留，一并清 window 监听
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edge, min, max]);
+  // p22g：依赖不含 max（inline arrow 每渲染新引用 → effect 每帧重跑 → cleanup detach
+  // 拆掉拖拽中的 window move/up 监听 → 拖 10px 即断）。max 经 maxRef 转发。
+  }, [edge, min]);
 
   return (
     <div
