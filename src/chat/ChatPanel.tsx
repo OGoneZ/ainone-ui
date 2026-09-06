@@ -1068,6 +1068,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // 内部条带展开后的实际高度，实测仍遮挡。
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
+  // F-21-5：.panel DOM 节点作为 Composer 全屏编辑的 portal 宿主（ref 是非响应式的，
+  // 用 state 桥接使首次挂载后触发一次重渲染把节点传下去）
+  const [panelEl, setPanelEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     const panel = panelRef.current;
     const dock = dockRef.current;
@@ -1092,7 +1095,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }, []);
 
   return (
-    <div className="panel" ref={panelRef} data-dragging={dragging ? "true" : "false"}>
+    <div className="panel" ref={(el) => { panelRef.current = el; setPanelEl(el); }} data-dragging={dragging ? "true" : "false"}>
       {/* P16 F-16-1 文件预览浮层（DEC-48）：窗格内右侧 overlay，非模态 */}
       {previewPath && <FilePreview path={previewPath} onClose={closePreview} />}
       <div className="chat" ref={chatScrollRef}>
@@ -1252,6 +1255,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         onVoice={(text) => setInput((prev) => (prev ? `${prev}\n${text}` : text))}
         onPickSlash={pickSlash}
         onPickAt={pickAt}
+        expandPortalTarget={panelEl}
         />
       </div>
 

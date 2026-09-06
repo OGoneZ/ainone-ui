@@ -219,13 +219,14 @@
   background: var(--bg-1);
 }
 
-/* —— F-19-2 全屏编辑态：Portal 渲染到 body（祖先有 transform，
- *  fixed 会被锁进 dock 的包含块 → 必须脱离）—— */
+/* —— F-19-2 全屏编辑态：Portal 渲染（祖先 .composer-dock 有 transform，
+ *  fixed 会锁进 dock 的包含块 → 必须脱离）。
+ *  F-21-5：宿主从 body 改为 session 窗格容器（.panel，position:relative），
+ *  absolute inset-0 → 只铺满自己窗格，分屏时不再遮挡邻居窗格。 —— */
 .composer-expanded {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: var(--z-modal);
-  width: 100vw;
   max-width: none;
   margin: 0;
   border-radius: 0;

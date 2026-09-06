@@ -42,6 +42,7 @@ export function Composer({
   onVoice,
   onPickSlash,
   onPickAt,
+  expandPortalTarget,
 }: {
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
@@ -61,6 +62,9 @@ export function Composer({
   onVoice: (text: string) => void;
   onPickSlash?: (w: CommandWord) => void;
   onPickAt: (entry: AtEntry) => void;
+  /** F-21-5 全屏编辑的 portal 宿主：传入 session 窗格容器（.panel）→ 只铺满自己窗格；
+   *  缺省 body（fixed + 100vw 旧语义，测试/兜底用） */
+  expandPortalTarget?: HTMLElement | null;
 }) {
   // L1：Esc 显式关闭 slash 菜单（下次输入变化时重置重新可开）
   const [slashClosed, setSlashClosed] = useState(false);
@@ -197,9 +201,10 @@ export function Composer({
     }
   }
 
-  // F-19-2：全屏编辑用 Portal 渲染到 body——祖先 .composer-dock 有
-  // transform（居中偏移），按 CSS 规范 transform 非 none 的元素是 fixed
-  // 后代的包含块，form 的 fixed 定位会被锁死在 dock 内（实测「坍塌」根因）。
+  // F-19-2：全屏编辑必须 Portal——祖先 .composer-dock 有 transform（居中偏移），
+  // 按 CSS 规范 transform 非 none 的元素是 fixed 后代的包含块，不脱离会「坍塌」。
+  // F-21-5：portal 目标从 body 改为 session 窗格容器（.panel，expandPortalTarget），
+  // 定位随之 absolute inset-0——只铺满自己窗格，分屏时不再遮挡邻居窗格。
   if (expanded) {
     return createPortal(
       <form className="row composer-expanded" onSubmit={submit}>
@@ -249,7 +254,7 @@ export function Composer({
           </button>
         </div>
       </form>,
-      document.body,
+      expandPortalTarget ?? document.body,
     );
   }
 
