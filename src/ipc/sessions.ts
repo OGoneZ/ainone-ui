@@ -10,6 +10,8 @@ export interface SessionEntry {
   cwd: string;
   /** 所属工作区 id（null = 未归组） */
   workspace_id: string | null;
+  /** 条目种类（P23）：terminal = 本地终端；缺省 = agent（旧索引无字段，兼容） */
+  kind?: "agent" | "terminal";
   mtime_ms: number;
 }
 

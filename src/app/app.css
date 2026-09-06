@@ -342,6 +342,50 @@ select {
   min-height: 0;
 }
 
+/* —— 终端面板（P23）：xterm 容器 + 退出状态条 ——
+ * .terminal-host 填满 .panel 剩余高度；xterm 自带 viewport 滚动，
+ * 容器不开 overflow 防滚动条双吃。padding 让终端内容与窗格边框留呼吸位。 */
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 10px;
+}
+
+.terminal-host .xterm,
+.terminal-host .xterm-viewport {
+  height: 100%;
+}
+
+.terminal-exit-bar,
+.terminal-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--bg-3);
+}
+
+.terminal-error {
+  color: var(--danger);
+}
+
+.terminal-revive {
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.terminal-revive:hover {
+  background: var(--bg-3);
+}
+
 /* —— 原生表单控件与模态文字按钮 ——
  * F-15-4 修订（P15 修复）：裸 button 全局规则曾把 Streamdown 代码块按钮、
  * 侧栏小钮、元数据复制钮等 icon-only 按钮全部污染成「大盒子」，:not() 排除
@@ -376,6 +420,34 @@ textarea {
 .adapter-row button:hover:not(:disabled),
 .ns-new-ws:hover:not(:disabled) {
   border-color: var(--primary);
+}
+
+/* P23 F-23-1：新建弹层顶部的「打开终端」快捷卡 */
+.ns-terminal-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.6em 0.9em;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.ns-terminal-card:hover {
+  border-color: var(--primary);
+}
+
+.ns-terminal-card span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ns-terminal-card small {
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 textarea {

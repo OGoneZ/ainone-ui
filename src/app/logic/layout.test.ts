@@ -68,6 +68,28 @@ describe("P10 分屏纯逻辑", () => {
     expect(tabs[0].workspaceId).toBe("ws-1");
     expect(tabs[1].workspaceId).toBeNull(); // 缺省 workspaceId → null
     expect(tabs[1].sessionId).toBeUndefined(); // 缺省 sessionId → undefined
+    // P23：config 无 kind → 投影为 agent（旧布局兼容）
+    expect(tabs[0].kind).toBe("agent");
+    expect(tabs[1].kind).toBe("agent");
+  });
+
+  it("extractTabsFromModel：config.kind=terminal → 投影为终端 Tab（P23）", () => {
+    const mkTab = (id: string, cfg: Record<string, unknown>, name = "标题") => ({
+      getType: () => "tab",
+      getId: () => id,
+      getName: () => name,
+      getConfig: () => cfg,
+    });
+    const model: ModelLike = {
+      visitNodes: (fn) => {
+        fn(mkTab("tab-9", { adapterId: "terminal", cwd: "/w", kind: "terminal" }, "终端"), 1);
+      },
+      getActiveTabset: () => undefined,
+    };
+    const tabs = extractTabsFromModel(model);
+    expect(tabs[0].kind).toBe("terminal");
+    expect(tabs[0].adapterId).toBe("terminal");
+    expect(tabs[0].title).toBe("终端");
   });
 
   it("activeKeyOf：取激活 tabset 的选中 tab id；无则空串", () => {

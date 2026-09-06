@@ -63,4 +63,11 @@ describe("payloadToTab 投影", () => {
     expect(t.cwd).toBeUndefined();
     expect(t.workspaceId).toBeNull();
   });
+
+  it("kind 透传：终端载荷 → terminal Tab（P23）；缺省 undefined（agent）", () => {
+    const term = payloadToTab({ ...P, kind: "terminal" }, "tab-9");
+    expect(term.kind).toBe("terminal");
+    const plain = payloadToTab(P, "tab-10");
+    expect(plain.kind).toBeUndefined();
+  });
 });

@@ -51,3 +51,40 @@ describe("会话去重与单实例（F-4-4）", () => {
     expect(r.newTab).not.toBeNull();
   });
 });
+
+describe("终端 Tab（P23）", () => {
+  it("kind 缺省 = agent（旧 Tab 兼容）", () => {
+    const t = tab("k1", "s-1");
+    expect(t.kind).toBeUndefined();
+  });
+
+  it("终端条目（kind=terminal）→ 新开 Tab 透传 kind", () => {
+    const r = resolveHistoryOpen(
+      [],
+      {
+        session_id: "term-tab-1",
+        adapter_id: "terminal",
+        title: "终端",
+        cwd: "/proj",
+        workspace_id: null,
+        kind: "terminal",
+      },
+      "k-new",
+    );
+    expect(r.newTab).toEqual({
+      key: "k-new",
+      adapterId: "terminal",
+      sessionId: "term-tab-1",
+      title: "终端",
+      cwd: "/proj",
+      workspaceId: null,
+      kind: "terminal",
+    });
+  });
+
+  it("agent 条目无 kind 字段也不受影响（投影补 agent）", () => {
+    const r = resolveHistoryOpen([], entry("s-9", "omp", "x"), "k-new");
+    expect(r.newTab?.kind).toBeUndefined();
+    expect(r.newTab?.adapterId).toBe("omp");
+  });
+});

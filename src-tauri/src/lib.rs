@@ -18,6 +18,7 @@ mod gitmeta;
 mod harness_probe;
 mod quickask;
 mod sessions;
+mod terminal;
 mod workspaces;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,7 +28,10 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // 内嵌终端 PTY（P23）：spawn/read/write/resize/kill/exitstatus/get_all_pids
+        // 由插件注册（plugin:pty|*），capability 放行 pty:default
+        .plugin(tauri_plugin_pty::init());
     // 前端调试桥（P19c，仅 dev 且带 webdriver feature）：W3C WebDriver 服务内嵌
     // 在应用里，AI agent 可经 HTTP 直接驱动 WebView（执行 JS / 截图 / 查元素）。
     // dev：tauri.conf.json build.features 含 "webdriver"；打包用 tauri.dist.conf.json
@@ -51,6 +55,7 @@ pub fn run() {
         )
         .setup(|app| {
             agent::init_state(app);
+            terminal::init_state(app);
             // 启动即后台抓取 login shell PATH（8s 超时，永不阻塞 UI）
             env_path::fetch_login_shell_path_async();
             log::info!("ainone-ui 启动完成");
@@ -90,11 +95,15 @@ pub fn run() {
             asr::asr_transcribe,
             asr::asr_config_get,
             asr::asr_config_save,
+            terminal::terminal_default_shell_with_path,
+            terminal::terminal_track,
+            terminal::terminal_untrack,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // 应用退出时清理所有自管子进程
+            // 应用退出时清理所有自管子进程（harness agent + 终端 PTY）
             agent::handle_run_event(app, event);
+            terminal::on_exit_cleanup(app);
         });
 }
