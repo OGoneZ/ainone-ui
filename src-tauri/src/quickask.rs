@@ -202,11 +202,19 @@ pub fn chat_completions_url(base_url: &str) -> String {
     }
 }
 
+/// 快问提示词（P27d）：选中文本多为术语/单句，参考社区划词解释扩展
+/// （text-explainer 等通用模式）——一句话定义 + 关键点 + 简短示例，
+/// 保持简短，用选中内容的语言回答。
+pub const QUICK_ASK_SYSTEM_PROMPT: &str = "你是一个简洁的解释助手。用户会选中一段术语、代码、报错或句子。请用与选中内容相同的语言，简短清晰地解释：先用一句话给出定义或结论，再用 markdown 列表给出 2-4 个要点，必要时给一个简短示例。使用 markdown 格式。不要开场白，不要复述问题。";
+
 /// 纯函数：拼 OpenAI 兼容请求体。
 pub fn build_chat_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
-        "messages": [{ "role": "user", "content": text }],
+        "messages": [
+            { "role": "system", "content": QUICK_ASK_SYSTEM_PROMPT },
+            { "role": "user", "content": text },
+        ],
     })
 }
 
@@ -232,6 +240,7 @@ pub fn build_anthropic_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
         "max_tokens": 16384,
+        "system": QUICK_ASK_SYSTEM_PROMPT,
         "messages": [{ "role": "user", "content": text }],
     })
 }
@@ -445,6 +454,12 @@ mod tests {
         assert_eq!(b["model"], "m1");
         assert_eq!(b["messages"][0]["content"], "hi");
         assert!(b["max_tokens"].as_u64().unwrap() > 0);
+        // P27d：system 提示词入请求体（两协议一致）
+        assert_eq!(b["system"], QUICK_ASK_SYSTEM_PROMPT);
+        let c = build_chat_body("m1", "hi");
+        assert_eq!(c["messages"][0]["role"], "system");
+        assert_eq!(c["messages"][0]["content"], QUICK_ASK_SYSTEM_PROMPT);
+        assert_eq!(c["messages"][1]["content"], "hi");
     }
 
     #[test]
