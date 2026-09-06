@@ -108,7 +108,10 @@ pub enum AgentEvent {
     Stdout(Vec<u8>),
     Stderr(Vec<u8>),
     Error(String),
-    Terminated { code: Option<i32> },
+    Terminated {
+        code: Option<i32>,
+        signal: Option<i32>,
+    },
 }
 
 pub struct AgentStore(pub Mutex<HashMap<u64, CommandChild>>);
@@ -239,8 +242,10 @@ pub fn pump_events(
                     AgentEvent::Error(e)
                 }
                 CommandEvent::Terminated(p) => {
-                    log::info!("[agent] 进程退出 code={:?}", p.code);
-                    AgentEvent::Terminated { code: p.code }
+                    log::info!("[agent] 进程退出 code={:?} signal={:?}", p.code, p.signal);
+                    // signal 透传：被信号终止（如 SIGKILL/OOM）时 code 为 null，
+                    // signal 是唯一死亡线索（此前单字段丢失，前端无法区分死因）
+                    AgentEvent::Terminated { code: p.code, signal: p.signal }
                 }
                 _ => continue,
             };
