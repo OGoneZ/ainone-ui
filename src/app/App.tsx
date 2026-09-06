@@ -302,7 +302,43 @@ function App() {
         const sel = tabset?.getSelectedNode?.();
         if (!sel) return;
         e.preventDefault();
+        // p20r：关闭后把焦点/光晕交给「最近」的存活窗格——否则 tabset 整个消失时
+        // getActiveTabset 为空、无人接管焦点，用户要重新点一下才能继续操作/继续关。
+        // 目标选取：先记下被删 tab 所在 tabset 的屏幕位置，删掉后在该位置附近找
+        // 最近的其他 tabset（WARP/编辑器关闭后焦点移交的惯例）。
+        const m0 = getModel();
+        const closingNode = m0.getNodeById(tabset!.getId()) as unknown as
+          | { getRect?: () => { x: number; y: number; width: number; height: number } }
+          | null;
+        const rect = closingNode?.getRect?.();
         m.doAction(Actions.deleteTab(sel.getId()));
+        // doAction 同步更新 model；等 React 渲染出新布局后再 activate（textarea 才存在）
+        const retarget = () => {
+          // 删除后 activeTabset 仍在（同 tabset 还有别的 tab）→ 只需聚焦它；
+          // tabset 整个消失（删的是唯一 tab）→ 按屏幕距离找最近存活者
+          const m1 = getModel();
+          let nextId = m1.getActiveTabset()?.getId();
+          if (!nextId && rect && (rect.width > 0 || rect.height > 0)) {
+            let bestId: string | undefined;
+            let bestDist = Infinity;
+            m1.visitNodes((n: unknown) => {
+              const node = n as { getType(): string; getId(): string; getRect?: () => { x: number; y: number; width: number; height: number } };
+              if (node.getType() !== "tabset") return;
+              const r = node.getRect?.();
+              if (!r || r.width === 0) return;
+              const dx = Math.max(0, Math.max(rect.x - (r.x + r.width), r.x - (rect.x + rect.width)));
+              const dy = Math.max(0, Math.max(rect.y - (r.y + r.height), r.y - (rect.y + rect.height)));
+              const d = dx * dx + dy * dy;
+              if (d < bestDist) {
+                bestDist = d;
+                bestId = node.getId();
+              }
+            });
+            nextId = bestId || undefined;
+          }
+          if (nextId) activateTabsetAndComposer(nextId);
+        };
+        setTimeout(retarget, 80);
         return;
       }
       const axis = splitShortcut(e);
