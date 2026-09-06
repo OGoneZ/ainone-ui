@@ -4,7 +4,8 @@
 //   - 仅供「快问」：不进 agent 主链路、不写会话日志、不走 harness。
 //   - 密钥不暴露给 WebView：请求在 Rust 侧发起；config_get 不回传 apiKey 明文，
 //     config_save 只在用户显式填入时覆盖，留空则保留既有密钥。
-//   - OpenAI 兼容 chat/completions 格式。
+//   - OpenAI 兼容 chat/completions 格式；P22 起支持 anthropic 协议（自动取
+//     Claude Code settings，见 harness_probe.rs）。
 //
 // 分四类结果（AC-P8-14 四级返回态）：成功 / 非 2xx / 超时 / 空响应。
 
@@ -13,13 +14,49 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tauri::Manager;
 
+use crate::harness_probe;
+
 fn default_timeout_ms() -> u64 {
     30_000
 }
 
+/// 调用协议：openai = /chat/completions；anthropic = /v1/messages。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QaProtocol {
+    Openai,
+    Anthropic,
+}
+
+impl Default for QaProtocol {
+    fn default() -> Self {
+        QaProtocol::Openai
+    }
+}
+
+impl QaProtocol {
+    fn as_str(&self) -> &'static str {
+        match self {
+            QaProtocol::Openai => "openai",
+            QaProtocol::Anthropic => "anthropic",
+        }
+    }
+}
+
+/// 配置来源：manual = 用户手动保存；auto:<harness> = 从 harness settings 自动探测。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct QaSource(pub String);
+
+impl QaSource {
+    fn is_manual(&self) -> bool {
+        self.0.is_empty() || self.0 == "manual"
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuickAskConfig {
-    /// OpenAI 兼容 base_url；结尾可带或不带 /chat/completions（要求绝对 http(s)）
+    /// base_url：openai 协议下结尾可带或不带 /chat/completions；
+    /// anthropic 协议下为网关 base（自动补 /v1/messages）
     #[serde(default)]
     pub base_url: String,
     #[serde(default)]
@@ -28,6 +65,11 @@ pub struct QuickAskConfig {
     pub model: String,
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub protocol: QaProtocol,
+    /// 来源标记（空/“manual” = 手动；auto:claude-code / auto:codex = 自动探测）
+    #[serde(default)]
+    pub source: QaSource,
 }
 
 impl QuickAskConfig {
@@ -37,6 +79,8 @@ impl QuickAskConfig {
             api_key: String::new(),
             model: String::new(),
             timeout_ms: default_timeout_ms(),
+            protocol: QaProtocol::default(),
+            source: QaSource::default(),
         }
     }
 }
@@ -48,6 +92,9 @@ pub struct QuickAskConfigView {
     pub model: String,
     pub timeout_ms: u64,
     pub has_api_key: bool,
+    pub protocol: String,
+    /// "" = 手动配置；"auto:claude-code" / "auto:codex" = 自动探测来源
+    pub source: String,
 }
 
 /// 前端保存的配置（api_key 为 Option：None/空串 = 保留既有密钥）
@@ -91,12 +138,36 @@ fn save_config(app: &tauri::AppHandle, cfg: &QuickAskConfig) -> Result<(), Strin
 
 #[tauri::command]
 pub fn quickask_config_get(app: tauri::AppHandle) -> Result<QuickAskConfigView, String> {
-    let c = load_config(&app)?;
+    let mut c = load_config(&app)?;
+    // P22 自动探测：从未手动配置（无手动来源标记）且配置为空时，读本机
+    // harness settings 填默认值并落盘；此后读缓存结果，不再重复探测。
+    if c.source.is_manual() && c.base_url.trim().is_empty() && c.model.trim().is_empty() {
+        if let Some(p) = harness_probe::probe_harness(None) {
+            log::info!(
+                "[quickask] 自动采用 harness 配置：{}（{} 协议，模型 {}）",
+                p.source,
+                p.protocol,
+                p.model
+            );
+            c.base_url = p.base_url;
+            c.api_key = p.api_key;
+            c.model = p.model;
+            c.protocol = if p.protocol == "anthropic" {
+                QaProtocol::Anthropic
+            } else {
+                QaProtocol::Openai
+            };
+            c.source = QaSource(format!("auto:{}", p.source));
+            save_config(&app, &c)?;
+        }
+    }
     Ok(QuickAskConfigView {
         base_url: c.base_url,
         model: c.model,
         timeout_ms: c.timeout_ms,
         has_api_key: !c.api_key.is_empty(),
+        protocol: c.protocol.as_str().to_string(),
+        source: c.source.0,
     })
 }
 
@@ -110,6 +181,8 @@ pub fn quickask_config_save(app: tauri::AppHandle, input: QuickAskConfigInput) -
     } else {
         default_timeout_ms()
     };
+    // 用户显式保存 → 手动来源（自动探测不再覆盖）
+    c.source = QaSource("manual".to_string());
     // apiKey：仅显式填入时覆盖（留空 = 保留既有密钥）
     let key = input.api_key.trim().to_string();
     if !key.is_empty() {
@@ -151,11 +224,48 @@ pub fn classify_response(status: u16, body: &str) -> Result<String, String> {
     }
 }
 
-/// 实际发起快问请求（Rust 侧 + 密钥不落 WebView）。
+/// 纯函数：拼 anthropic /v1/messages 请求体。
+pub fn build_anthropic_body(model: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{ "role": "user", "content": text }],
+    })
+}
+
+/// 纯函数：解析 anthropic messages 响应（取 content[0].text）。
+pub fn classify_anthropic_response(status: u16, body: &str) -> Result<String, String> {
+    if !(200..300).contains(&status) {
+        return Err(format!("非 2xx 状态码 {status}"));
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("响应非 JSON: {e}"))?;
+    let content = v["content"][0]["text"].as_str();
+    match content {
+        Some(s) if !s.trim().is_empty() => Ok(s.to_string()),
+        _ => Err("空响应（无 content[0].text）".to_string()),
+    }
+}
+
+/// 实际发起快问请求（Rust 侧 + 密钥不落 WebView）。按 protocol 分协议。
 pub async fn call_quick_ask(cfg: &QuickAskConfig, text: &str) -> Result<String, String> {
-    let url = chat_completions_url(&cfg.base_url);
-    let body = build_chat_body(&cfg.model, text);
-    log::info!("[quickask] 请求 {} 模型 {}（{} 字符）", url, cfg.model, text.len());
+    let (url, body) = match cfg.protocol {
+        QaProtocol::Anthropic => (
+            harness_probe::anthropic_messages_url(&cfg.base_url),
+            build_anthropic_body(&cfg.model, text),
+        ),
+        QaProtocol::Openai => (
+            chat_completions_url(&cfg.base_url),
+            build_chat_body(&cfg.model, text),
+        ),
+    };
+    log::info!(
+        "[quickask] 请求 {} 模型 {} 协议 {}（{} 字符）",
+        url,
+        cfg.model,
+        cfg.protocol.as_str(),
+        text.len()
+    );
 
     let start = std::time::Instant::now();
     let builder = reqwest::Client::builder().timeout(Duration::from_millis(cfg.timeout_ms));
@@ -165,7 +275,14 @@ pub async fn call_quick_ask(cfg: &QuickAskConfig, text: &str) -> Result<String, 
         .post(&url)
         .json(&body);
     if !cfg.api_key.is_empty() {
-        req = req.bearer_auth(&cfg.api_key);
+        req = match cfg.protocol {
+            // anthropic 网关：x-api-key 头（部分网关同时认 Authorization，双发兼容）
+            QaProtocol::Anthropic => req
+                .header("x-api-key", &cfg.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .bearer_auth(&cfg.api_key),
+            QaProtocol::Openai => req.bearer_auth(&cfg.api_key),
+        };
     }
     let resp = match req.send().await {
         Ok(r) => r,
@@ -181,7 +298,11 @@ pub async fn call_quick_ask(cfg: &QuickAskConfig, text: &str) -> Result<String, 
     let status = resp.status().as_u16();
     let text_resp = resp.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
     let elapsed = start.elapsed().as_millis();
-    match classify_response(status, &text_resp) {
+    let result = match cfg.protocol {
+        QaProtocol::Anthropic => classify_anthropic_response(status, &text_resp),
+        QaProtocol::Openai => classify_response(status, &text_resp),
+    };
+    match result {
         Ok(out) => {
             log::info!("[quickask] 成功 {url} 耗时 {elapsed}ms");
             Ok(out)
@@ -238,6 +359,23 @@ mod tests {
         assert!(classify_response(200, no_choices).unwrap_err().contains("空响应"));
     }
 
+    // —— P22 anthropic 协议 ——
+    #[test]
+    fn anthropic_body_shape() {
+        let b = build_anthropic_body("m1", "hi");
+        assert_eq!(b["model"], "m1");
+        assert_eq!(b["messages"][0]["content"], "hi");
+        assert!(b["max_tokens"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn anthropic_classify_success_and_empty() {
+        let ok = r#"{"content":[{"type":"text","text":"解释完成"}]}"#;
+        assert_eq!(classify_anthropic_response(200, ok).unwrap(), "解释完成");
+        assert!(classify_anthropic_response(200, r#"{"content":[]}"#).unwrap_err().contains("空响应"));
+        assert!(classify_anthropic_response(502, "x").unwrap_err().contains("502"));
+    }
+
     // 超时：本地起一个「永不应答」的 socket，用 200ms 短超时验证 is_timeout 分支。
     #[tokio::test]
     async fn call_quick_ask_times_out() {
@@ -256,6 +394,8 @@ mod tests {
             api_key: String::new(),
             model: "test".into(),
             timeout_ms: 200,
+            protocol: QaProtocol::default(),
+            source: QaSource::default(),
         };
         let err = call_quick_ask(&cfg, "hi").await.unwrap_err();
         assert!(err.contains("超时"), "期望超时错误，实际: {err}");

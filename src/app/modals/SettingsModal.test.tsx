@@ -14,6 +14,8 @@ vi.mock("@/ipc/quickask", () => ({
     model: "",
     timeout_ms: 30000,
     has_api_key: false,
+    protocol: "openai",
+    source: "",
   }),
   quickAskConfigSave: vi.fn().mockResolvedValue(undefined),
 }));

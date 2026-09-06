@@ -51,8 +51,15 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
   const [items, setItems] = useState<EditableAdapter[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // F-8-7 快问模型配置
-  const [qa, setQa] = useState<QuickAskConfigView>({ base_url: "", model: "", timeout_ms: 30000, has_api_key: false });
+  // F-8-7 快问模型配置（P22：protocol/source 由 Rust 回传，视图展示来源徽标）
+  const [qa, setQa] = useState<QuickAskConfigView>({
+    base_url: "",
+    model: "",
+    timeout_ms: 30000,
+    has_api_key: false,
+    protocol: "openai",
+    source: "",
+  });
   const [qaKey, setQaKey] = useState("");
   const [qaMsg, setQaMsg] = useState<string | null>(null);
 

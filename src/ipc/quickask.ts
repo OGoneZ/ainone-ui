@@ -8,6 +8,10 @@ export interface QuickAskConfigView {
   model: string;
   timeout_ms: number;
   has_api_key: boolean;
+  /** "openai" | "anthropic"（P22 双协议） */
+  protocol: string;
+  /** "" = 手动；"auto:claude-code" / "auto:codex" = 从 harness settings 自动探测（P22） */
+  source: string;
 }
 
 export interface QuickAskConfigInput {
