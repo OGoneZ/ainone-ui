@@ -443,37 +443,35 @@ body {
   align-items: center;
 }
 
-/* P20g：聚焦窗格光晕（外圈版）。
- * 用户要求：光晕在窗格**外边框**上，凸出时不被邻居遮挡。
- * 裁剪链真相：.flexlayout__row 与 .flexlayout__tabset_container 都是
- * overflow:hidden（flexlayout 默认），外发光被裁 + 邻居窗格后渲染盖住 →
- * 只剩 splitter 缝里一条。
- * 解法三件套：
- *   ① row / container 开 overflow:visible——窗格尺寸由 flexlayout 精确计算，
- *     visible 不会引起布局溢出，仅放行光晕；
- *   ② 激活窗格 z-index 提升到 6，光晕压在相邻窗格之上；
- *   ③ inset 光晕减弱为轻微氛围（上一版 42% 大半径 inset 直接罩住聊天内容，
- *     实测不可读），外圈描边+光晕承担「看得见的聚焦」。 */
+/* P20h：聚焦窗格光晕（画在 tab 面板上）。
+ * 遮罩根因（p20g 引入、实测实锤）：光晕/z-index 挂在 .flexlayout__tabset_container
+ * 上后，container 的 transform+z-index 形成层叠上下文，其内部的
+ * .flexlayout__tabset_content（占满、relative）整体压到 tab 面板上——而聊天内容
+ * （.flexlayout__tab）挂在 .flexlayout__layout 下、不在 container 内，
+ * elementFromPoint 命中 content → 整个 session 被盖住 + 点击全部落在遮罩层
+ * （点击无法聚焦窗格的同根原因）。
+ * 解法：container 完全恢复 flexlayout 原样（无 transform/z/阴影）；
+ * 光晕+上浮改画在 .flexlayout__tab（tab 面板）上——
+ *   ① 每个 tabset 只有选中 tab 的面板 rect>0，非选中 rect=0 → box-shadow
+ *     无面积不绘制，光晕天然只出现在选中窗格；
+ *   ② tab 面板在 layout 下 DOM 靠后 → 天然绘制在邻居窗格之上，
+ *     光晕不被裁剪也不被邻居盖住（无需 z-index hack）。 */
 .flexlayout__layout .flexlayout__row,
 .layout-host .flexlayout__tabset_container {
   overflow: visible;
 }
 
-.flexlayout__tabset_container {
+.flexlayout__tab {
   transition:
     transform var(--motion-default) cubic-bezier(0.34, 1.3, 0.64, 1),
     box-shadow var(--motion-default) ease;
-}
-
-.flexlayout__tabset_container:has(.flexlayout__tabset-selected) {
   transform: translateY(-2px);
-  z-index: 6;
   border-radius: var(--radius-sm);
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--primary) 90%, transparent),
     0 0 18px color-mix(in srgb, var(--primary) 32%, transparent),
-    0 0 44px color-mix(in srgb, var(--primary) 16%, transparent),
-    inset 0 0 10px color-mix(in srgb, var(--primary) 7%, transparent);
+    0 0 44px color-mix(in srgb, var(--primary) 16%, transparent);
+  background: var(--bg-base);
 }
 
 .flexlayout__tabset-selected {
