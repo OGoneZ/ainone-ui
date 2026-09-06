@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
  "log",
+ "portable-pty",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -31,7 +32,6 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-opener",
- "tauri-plugin-pty",
  "tauri-plugin-shell",
  "tauri-plugin-webdriver",
  "tokio",
@@ -3015,8 +3015,6 @@ dependencies = [
  "libc",
  "log",
  "nix",
- "serde",
- "serde_derive",
  "serial2",
  "shared_library",
  "shell-words",
@@ -4344,19 +4342,6 @@ dependencies = [
  "url",
  "windows",
  "zbus",
-]
-
-[[package]]
-name = "tauri-plugin-pty"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ceec0d837c1cb1dcfd88793a67f44d9ba5bad3c17b3187f6c4baf6d81a0056a"
-dependencies = [
- "portable-pty",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
 ]
 
 [[package]]

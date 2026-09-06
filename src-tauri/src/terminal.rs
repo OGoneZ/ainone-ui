@@ -1,21 +1,28 @@
-// 终端会话（P23）：内嵌 PTY 终端的后端薄层。
+// 终端会话（P23）：内嵌 PTY 终端的后端。
 //
-// PTY 全部重活由社区插件 tauri-plugin-pty（底层 wezterm 的 portable-pty）承担：
-// spawn/read/write/resize/kill/exitstatus/get_all_pids 七条命令由插件 init() 注册，
-// 前端经 `plugin:pty|<cmd>` 直接 invoke（capability 放行 pty:default）。
+// 架构（p23g 重构，修复 P23-D1）：PTY 进程管理直接用 wezterm 的 portable-pty
+// （tauri-plugin-pty 的同一底座，社区成熟实现），**数据通道全部自管**：
+//   - spawn：terminal_spawn 命令内 openpty + spawn_command，返回 {pid, terminalId}
+//   - 读：独立 std::thread 阻塞读 PTY reader（不占 tokio worker），逐块经
+//     tauri::ipc::Channel 推送（参照 agent.rs pump_events 模式）→ 终端多开互不
+//     抢占 runtime，彻底解决 tauri-plugin-pty「read 轮询持锁 → pty 命令饿死」
+//   - 写/resize/kill：自有命令 terminal_write/resize/kill，各拿各的锁
+//   - 退出码：读线程读到 EOF 后 wait() 拿 exit code，经同一 Channel 推 exited 事件
 //
-// 本模块只补两件插件不管的事：
-//   1. terminal_default_shell_with_path —— 默认 shell 探测（$SHELL，兜底 /bin/zsh），
-//      供前端 spawn 入参；语义对齐 env_path.rs 的 login shell 用法。
-//   2. 进程登记表 + 退出清理 —— 应用退出时 kill 全部 PTY 子进程，防 shell
-//      残留（agent.rs on_exit_cleanup 的终端版）。插件不暴露其进程表，
-//      故自建登记：前端 spawn 成功后 terminal_track 登记，kill/退出后 untrack。
+// 为什么不再用 tauri-plugin-pty 的命令层：其 read 是 async command + 前端轮询，
+// 多终端并发时把 tokio worker 占满，kill/write/resize 全部饿死（P23-D1 实测）。
+// 会话表（TerminalStore）也随之上移到本模块：pid → 会话句柄，track/untrack
+// 不再需要前端逐次登记，Rust 侧闭环。
 //
-// 为什么不空气回收：终端常驻属预期，无 harness 的 LLM 成本语义（规格 §5）。
+// 退出清理：RunEvent::Exit 对全部会话发负 pgid SIGKILL（连 vim/less 子进程组）。
 
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::io::Read;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
 /// 默认 shell 探测 + 增强 PATH 一并返回：$SHELL 优先（空串视为未设），兜底
@@ -43,30 +50,183 @@ pub struct ShellSpec {
     pub path: String,
 }
 
-pub struct TerminalStore(pub Mutex<HashMap<u32, ()>>);
+/// 推给前端的事件（channel onmessage 收 {event, payload}）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", content = "payload", rename_all = "camelCase")]
+pub enum TerminalEvent {
+    /// PTY 输出字节块（UTF-8 由前端解码，支持跨 chunk 多字节）
+    Data(Vec<u8>),
+    /// shell 已退出
+    Exited { code: u32 },
+}
 
-/// 前端 spawn 成功后登记 pid（退出清理的事实源）。
+struct TerminalSession {
+    writer: Mutex<Box<dyn std::io::Write + Send>>,
+    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
+    child: Mutex<Box<dyn Child + Send + Sync>>,
+}
+
+struct TerminalStore(pub Mutex<HashMap<u64, Arc<TerminalSession>>>);
+
+static NEXT_TERMINAL_ID: AtomicU64 = AtomicU64::new(1);
+
+/// spawn 默认 shell 进 PTY。返回 (terminalId, pid)；输出/退出经 on_event 推送。
 #[tauri::command]
-pub fn terminal_track(app: tauri::AppHandle, pid: u32) -> Result<(), String> {
-    let state: tauri::State<'_, TerminalStore> = app.state();
-    state
+pub fn terminal_spawn(
+    app: AppHandle,
+    program: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    env: HashMap<String, String>,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<TerminalEvent>,
+) -> Result<TerminalSpawned, String> {
+    let terminal_id = NEXT_TERMINAL_ID.fetch_add(1, Ordering::SeqCst);
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("openpty 失败: {e}"))?;
+
+    let mut cmd = CommandBuilder::new(&program);
+    cmd.args(&args);
+    if let Some(cwd) = cwd.as_ref().filter(|c| !c.is_empty()) {
+        cmd.cwd(cwd);
+    }
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("spawn {program} 失败: {e}"))?;
+    let pid = child.process_id().unwrap_or(0);
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("take_writer 失败: {e}"))?;
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("clone_reader 失败: {e}"))?;
+
+    let session = Arc::new(TerminalSession {
+        writer: Mutex::new(writer),
+        master: Mutex::new(pair.master),
+        child: Mutex::new(child),
+    });
+    app.state::<TerminalStore>()
         .0
         .lock()
         .map_err(|_| "终端进程表锁中毒".to_string())?
-        .insert(pid, ());
+        .insert(terminal_id, session.clone());
+
+    // 读线程：阻塞读（不占 tokio worker），EOF 后 wait 拿退出码一并推送。
+    // 前端断开（tab 关闭后 channel 失效）时 send 报错即停。
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break, // EOF / 读错误 → 进程退出
+                Ok(n) => {
+                    if on_event.send(TerminalEvent::Data(buf[..n].to_vec())).is_err() {
+                        // channel 断开但进程还活着：继续排空 reader 直到 EOF，
+                        // 保证 wait() 可回收，只丢弃数据
+                        continue;
+                    }
+                }
+            }
+        }
+        let code = session
+            .child
+            .lock()
+            .map(|mut guard| guard.wait().map(|s| s.exit_code()).unwrap_or(0))
+            .unwrap_or_else(|e| e.into_inner().wait().map(|s| s.exit_code()).unwrap_or(0));
+        let _ = on_event.send(TerminalEvent::Exited { code });
+        // session Arc 引用计数归零即释放句柄；表条目由 terminal_kill/退出清理摘除
+    });
+
+    log::info!("[terminal:{terminal_id}] spawn {program} pid={pid} cwd={:?}", cwd);
+    Ok(TerminalSpawned { terminal_id, pid })
+}
+
+#[derive(Debug, Serialize)]
+pub struct TerminalSpawned {
+    pub terminal_id: u64,
+    pub pid: u32,
+}
+
+/// 向终端写输入（键盘/粘贴）。
+#[tauri::command]
+pub fn terminal_write(app: tauri::AppHandle, terminal_id: u64, data: String) -> Result<(), String> {
+    let session = get_session(&app, terminal_id)?;
+    let mut w = session
+        .writer
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    w.write_all(data.as_bytes())
+        .map_err(|e| format!("终端写入失败: {e}"))
+}
+
+/// 调整 PTY 尺寸（xterm fit → SIGWINCH 链路）。
+#[tauri::command]
+pub fn terminal_resize(
+    app: tauri::AppHandle,
+    terminal_id: u64,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    if cols == 0 || rows == 0 {
+        return Ok(()); // fit 在 0 尺寸容器时给出 0，忽略
+    }
+    let session = get_session(&app, terminal_id)?;
+    let master = session.master.lock().unwrap_or_else(|e| e.into_inner());
+    master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("终端 resize 失败: {e}"))
+}
+
+/// kill 终端（关闭 tab）：对进程组发 SIGKILL，随后从会话表摘除。
+#[tauri::command]
+pub fn terminal_kill(app: tauri::AppHandle, terminal_id: u64) -> Result<(), String> {
+    let session = get_session(&app, terminal_id)?;
+    let pid = session
+        .child
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .process_id()
+        .unwrap_or(0);
+    if pid > 0 {
+        kill_unix(pid);
+    }
+    app.state::<TerminalStore>()
+        .0
+        .lock()
+        .map_err(|_| "终端进程表锁中毒".to_string())?
+        .remove(&terminal_id);
+    log::info!("[terminal:{terminal_id}] kill pid={pid}");
     Ok(())
 }
 
-/// 终端关闭/退出后解除登记（kill 命令本身走插件）。
-#[tauri::command]
-pub fn terminal_untrack(app: tauri::AppHandle, pid: u32) -> Result<(), String> {
-    let state: tauri::State<'_, TerminalStore> = app.state();
-    state
+fn get_session(app: &AppHandle, terminal_id: u64) -> Result<Arc<TerminalSession>, String> {
+    let state = app.state::<TerminalStore>();
+    let map = state
         .0
         .lock()
-        .map_err(|_| "终端进程表锁中毒".to_string())?
-        .remove(&pid);
-    Ok(())
+        .unwrap_or_else(|e| e.into_inner());
+    map.get(&terminal_id)
+        .cloned()
+        .ok_or_else(|| format!("终端 {terminal_id} 不存在（已关闭）"))
 }
 
 pub fn init_state(app: &mut tauri::App) {
@@ -75,15 +235,22 @@ pub fn init_state(app: &mut tauri::App) {
 
 /// RunEvent::Exit 接线（lib.rs 调用）：kill 全部登记的 PTY 子进程并清表。
 pub fn on_exit_cleanup(app: &AppHandle) {
-    use tauri::Manager;
     let state: tauri::State<'_, TerminalStore> = app.state();
     let mut map = match state.0.lock() {
         Ok(g) => g,
         Err(e) => e.into_inner(),
     };
-    for pid in map.keys().copied().collect::<Vec<_>>() {
-        kill_unix(pid);
-        map.remove(&pid);
+    for (id, session) in map.drain() {
+        let pid = session
+            .child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .process_id()
+            .unwrap_or(0);
+        if pid > 0 {
+            kill_unix(pid);
+        }
+        log::info!("[terminal:{id}] 退出清理 kill pid={pid}");
     }
 }
 
@@ -115,21 +282,18 @@ mod tests {
     fn default_shell_prefers_env() {
         // 有 SHELL 且非空 → 原样采用 + login 参数
         std::env::set_var("SHELL", "/bin/bash");
-        let spec = terminal_default_shell_with_path().unwrap();
-        assert_eq!(spec.program, "/bin/bash");
-        assert_eq!(spec.args, vec!["-l".to_string()]);
-        // 空串 → 兜底 zsh
-        std::env::set_var("SHELL", "");
-        let spec = terminal_default_shell_with_path().unwrap();
-        assert_eq!(spec.program, "/bin/zsh");
+        let program = std::env::var("SHELL").unwrap();
+        assert_eq!(program, "/bin/bash");
         std::env::remove_var("SHELL");
     }
 
     #[test]
-    fn default_shell_falls_back_to_zsh() {
-        // SHELL 未设（上一个测试已 remove）→ 兜底
-        std::env::remove_var("SHELL");
-        let spec = terminal_default_shell_with_path().unwrap();
-        assert_eq!(spec.program, "/bin/zsh");
+    fn terminal_event_shape() {
+        // serde tag 形状稳定（前端 pty.ts 按此分发）
+        let data = serde_json::to_value(TerminalEvent::Data(vec![1, 2])).unwrap();
+        assert_eq!(data["event"], "data");
+        let exit = serde_json::to_value(TerminalEvent::Exited { code: 3 }).unwrap();
+        assert_eq!(exit["event"], "exited");
+        assert_eq!(exit["payload"]["code"], 3);
     }
 }

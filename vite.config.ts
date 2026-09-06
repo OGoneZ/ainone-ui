@@ -15,11 +15,6 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
-      // tauri-pty 0.3.1 包只有 `module` 字段（dist/index.es.js），无 main/exports，
-      // ESM 解析找不到入口 → 显式指到实际文件（P23）
-      "tauri-pty": fileURLToPath(
-        new URL("./node_modules/tauri-pty/dist/index.es.js", import.meta.url),
-      ),
     },
   },
 
