@@ -170,9 +170,15 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           cd bundles
-          # 只传安装器本体到 v$VER/ 根（latest.json 的 URL 与之一一对应）；
-          # 整树递归会把 .app 内部文件、bundle 脚本等 300+ 杂物也堆进桶（v0.7.0 首发实锤）
-          aws s3 cp ./ "s3://$BUCKET/v$VERSION/" \
+          # 先把散在各 artifact 目录下的安装器集中到 bundles/ 根，再整体平铺上传。
+          # 不能直接 aws s3 cp --recursive + exclude/include：S3 的 cp 保留源相对
+          # 路径（aarch64-apple-darwin/release/bundle/dmg/x.dmg），include 只是
+          # 过滤不改 key 落点（v0.1.0 首发实锤——产物仍带目录前缀，清单 URL 404）
+          find . -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' \
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec mv {} . \;
+          ls -la
+          aws s3 cp . "s3://$BUCKET/v$VERSION/" \
             --recursive --exclude "*" \
             --include "*.dmg" --include "*.exe" --include "*.msi" \
             --include "*.deb" --include "*.rpm" --include "*.AppImage" \
