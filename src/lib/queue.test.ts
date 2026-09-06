@@ -2,7 +2,7 @@
 // 拖拽合并（P16 F-16-3，AC-P16-8）。
 
 import { describe, it, expect } from "vitest";
-import { enqueue, removeItem, reorder, next, mergeItems, isInCenterBand, QUEUE_CAPACITY, type QueueItem } from "./queue";
+import { enqueue, removeItem, reorder, next, mergeItems, requeueHead, isInCenterBand, QUEUE_CAPACITY, type QueueItem } from "./queue";
 
 const item = (id: string, text = id): QueueItem => ({ id, text });
 
@@ -61,6 +61,25 @@ describe("next", () => {
     const r = next([item("a"), item("b")]);
     expect(r?.item.id).toBe("a");
     expect(r?.items.map((i) => i.id)).toEqual(["b"]);
+  });
+});
+
+describe("requeueHead（失败回插队首）", () => {
+  it("回插到队首，失败条目不丢（回到执行前状态）", () => {
+    const r = requeueHead([item("b"), item("c")], { id: "a", text: "a", retried: true });
+    expect(r.map((i) => i.id)).toEqual(["a", "b", "c"]);
+    expect(r[0].retried).toBe(true);
+  });
+
+  it("空队列也能回插", () => {
+    expect(requeueHead([], item("a")).map((i) => i.id)).toEqual(["a"]);
+  });
+
+  it("队列已满（10 条）时回插不受容量限制——失败重试是用户明确的待办，不该被容量拒绝", () => {
+    const full = Array.from({ length: QUEUE_CAPACITY }, (_, i) => item(`i${i}`));
+    const r = requeueHead(full, { id: "retry", text: "retry", retried: true });
+    expect(r).toHaveLength(QUEUE_CAPACITY + 1);
+    expect(r[0].id).toBe("retry");
   });
 });
 

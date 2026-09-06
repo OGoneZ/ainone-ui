@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "@/acp/session";
+import type * as acp from "@agentclientprotocol/sdk";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { FilePreview } from "@/sidebar/FilePreview";
@@ -38,6 +39,7 @@ import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../chat
 import { truncateToMessageIndex } from "@/acp/rewind";
 import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../chat/logic/lastPrompt";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
+import { canFork } from "../chat/logic/capabilities";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
 import { typewriterHint } from "../chat/logic/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
@@ -61,9 +63,14 @@ import "@/chat/chat.css";
 import "@/chat/message/messages.css";
 import "@/chat/composer/composer.css";
 
+// 权限决策类型：selected = 用户选了某个 optionId；cancelled = 超时/turn 收口的
+// 协议原生取消（RequestPermissionOutcome 支持 { outcome: "cancelled" }）
+type PermDecision = { kind: "selected"; optionId: string } | { kind: "cancelled" };
+// P24e：权限请求超时（对标 DeepChat DEFAULT_PERMISSION_TIMEOUT_MS）
+const PERM_TIMEOUT_MS = 60_000;
+
 interface Props {
-  tabKey: string;
-  adapter: AdapterWithStatus;
+  tabKey: string;  adapter: AdapterWithStatus;
   resumeSessionId?: string;
   /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
   cwd?: string;
@@ -102,8 +109,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const [startError, setStartError] = useState<string | null>(null);
   // F-8-2 批注：已收集的多段批注（原文 + 疑问）
   const [quotes, setQuotes] = useState<Quote[]>([]);
-  // 恢复会话但日志缺失/损坏时降级提示（F-4-3）
-  const [historyDegraded, setHistoryDegraded] = useState(false);
+  // 恢复会话但日志缺失/损坏时的降级提示（F-4-3 → P24f 三态化）：
+  // "ok" = 正常；"log-missing" = 日志空/损坏但模型上下文已恢复（仅影响回看）；
+  // "context-lost" = 恢复链降级 new，模型上下文已丢失（降级 toast 在 ensureSession）
+  const [historyState, setHistoryState] = useState<"ok" | "log-missing" | "context-lost">("ok");
   const slashRef = useRef<HTMLTextAreaElement | null>(null);
 
   // F-11-3 @ 文件联想：null = 未展开；展开时为 token 信息
@@ -141,8 +150,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }, [atMenu, workspaceCwd, atTree]);
 
   const sessionRef = useRef<AcpSession | null>(null);
-  // F-21-4：决策值 = ACP optionId 原样回传（不再客户端猜 allow/reject 前缀，L12 废弃）
-  const permResolver = useRef<((optionId: string) => void) | null>(null);
+  // F-21-4：决策值 = ACP optionId 原样回传（不再客户端猜 allow/reject 前缀，L12 废弃）。
+  // P24e：决策升级为 PermDecision——cancelled 是协议原生 outcome（RequestPermissionOutcome），
+  // 替代旧的「猜 reject 选项」收口启发式（无 reject 类选项时会误选可能是 allow 的首选项）
+  const permResolver = useRef<((d: PermDecision) => void) | null>(null);
+  // P24e 权限请求 60s 超时兜底：harness 撤回权限请求时不发任何通知，
+  // 悬挂的 PermCard 会永远卡在界面上（DeepChat P0-1 同款修复）
+  const permTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 恢复会话时已写过索引，续聊不应重写标题 → 标记为“已 prompt”
   const promptedOnce = useRef(Boolean(resumeSessionId));
   // steering：运行中打断时，待发消息暂存于此，当前 turn 结束后自动续跑
@@ -153,6 +167,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const turnRef = useRef(newTurn());
   // 已落盘的消息条数（JSONL 日志增量追加的游标）
   const persistedRef = useRef(0);
+  // 本地日志身份（事实源反转的最小落地）：与 harness sessionId 解绑。
+  // 恢复链降级（load 失败 → new）会换 harness sessionId，但日志文件必须
+  // 挂在原会话身份上，否则旧日志断链、新消息写进孤儿文件。初值 = 恢复侧栏
+  // 历史时的 sessionId；全新会话在首次 bindSession 时固化。
+  const logSidRef = useRef<string | null>(resumeSessionId ?? null);
   // F-8-1 空闲回收：最近一次交互时间戳（prompt 发起时刷新）+ 定时器句柄
   const lastActivityRef = useRef(0);
   // L7：回收发生后置 true，ensureSession 重建成功时消费（reopen 埋点的判据）
@@ -214,10 +233,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             setMessages(tabKey, msgs);
             persistedRef.current = msgs.length;
           } else {
-            setHistoryDegraded(true);
+            setHistoryState("log-missing");
           }
         })
-        .catch(() => setHistoryDegraded(true));
+        .catch(() => setHistoryState("log-missing"));
     }
     // F-8-7 快问：读配置判定入口是否可用（未配置则禁用）
     quickAskConfigGet()
@@ -373,6 +392,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }, 15_000);
     return () => {
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
+      // P24e 路径 c：卸载时收口未决权限请求（清 timer + cancelled，防悬挂响应）
+      if (permTimerRef.current) {
+        clearTimeout(permTimerRef.current);
+        permTimerRef.current = null;
+      }
+      permResolver.current?.({ kind: "cancelled" });
+      permResolver.current = null;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("ainone:ref-file", onRefFile);
       window.removeEventListener("ainone:open-file", onOpenFile);
@@ -414,12 +440,28 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             options: params.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind ?? null })),
           };
           patch(tabKey, { perm });
-          const optionId = await new Promise<string>((resolve) => {
+          // P24e：60s 超时兜底——harness 撤回请求不发通知，超时回协议原生
+          // cancelled，不让 PermCard 永远卡在界面上（三条清 timer 路径：
+          // a) onPerm 正常决策；b) finally turn 收口；c) 组件卸载 cleanup）
+          if (permTimerRef.current) clearTimeout(permTimerRef.current);
+          permTimerRef.current = setTimeout(() => {
+            logger.warn("chat", "perm-timeout", { title: perm.title, timeoutMs: PERM_TIMEOUT_MS });
+            permResolver.current?.({ kind: "cancelled" });
+            permResolver.current = null;
+          }, PERM_TIMEOUT_MS);
+          const decision = await new Promise<PermDecision>((resolve) => {
             permResolver.current = resolve;
           });
+          if (permTimerRef.current) {
+            clearTimeout(permTimerRef.current);
+            permTimerRef.current = null;
+          }
           patch(tabKey, { perm: null });
+          if (decision.kind === "cancelled") {
+            return { outcome: { outcome: "cancelled" } as acp.RequestPermissionResponse["outcome"] };
+          }
           // optionId 由 PermCard 原样回传；兜底 options[0]（harness 撤销选项的极端情况）
-          const target = params.options.find((o) => o.optionId === optionId);
+          const target = params.options.find((o) => o.optionId === decision.optionId);
           return {
             outcome: {
               outcome: "selected",
@@ -498,6 +540,22 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       );
       sessionRef.current = s;
       bindSession(tabKey, s.sessionId);
+      // 日志身份固化：全新会话（无恢复来源）首次建链时把 logSid 锚定为
+      // harness sessionId；此后即使恢复链降级换 sessionId，日志文件身份不变
+      if (logSidRef.current === null) logSidRef.current = s.sessionId;
+      // capability 存档进 store（fork/load 入口显隐的唯一数据源）
+      patch(tabKey, { capabilities: s.capabilities ?? null, degraded: null });
+      // 恢复链降级（session/load 失败 → session/new）：模型上下文丢了，
+      // 用户必须知道——toast 一次 + 常驻降级标记（横幅渲染处消费）
+      if (s.sessionOrigin === "degraded-new") {
+        const reason = s.loadError ?? "session/load 失败";
+        logger.warn("session", "resume 降级 new", { requested: resumeId, reason });
+        patch(tabKey, { degraded: { reason } });
+        // 横幅三态：context-lost 优先于 log-missing（若日志也空，两个洞叠加时
+        // 显示更严重的 context-lost 文案）
+        setHistoryState("context-lost");
+        toast.error("未能恢复模型上下文，已新建会话继续");
+      }
       if (hadSession) {
         recycledRef.current = false;
         logger.info("session", "reopen after recycle", { sessionId: s.sessionId });
@@ -540,9 +598,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         newLen: full.length,
       });
       useSessionStore.getState().setMessages(tabKey, truncated);
-      persistedRef.current = truncated.length;
+      // P24f（隐藏 bug 修复）：编辑重发的文本此前从未落盘——旧实现把「替换后
+      // 的列表长度」当游标 + 截日志保留 N 行（旧行是旧文本），编辑后的新文本
+      // 永远写不进日志。改为：游标/截断都停在编辑目标之前（保留 target.index
+      // 行），runPrompt 的 persistUserMessage 会把编辑后文本作为新行追加
+      persistedRef.current = target.index;
       // H7：同 doRewind——await 截断完成，避免与新消息 append 竞态
-      await truncateAndDetach(truncated.length);
+      await truncateAndDetach(target.index);
       setInput("");
       setAtMenu(null);
       setFiles([]);
@@ -614,7 +676,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   //   session/load 只会恢复 harness 全量历史，截断就白做了）。
   // 失败时明确提示不静默（H7）。
   async function truncateAndDetach(keepCount: number) {
-    const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+    // 日志身份走 logSidRef（降级会话的 harness sessionId 已换，不能用它截旧日志）
+    const sid = logSidRef.current ?? sessionRef.current?.sessionId ?? resumeSessionId;
     if (sid) {
       try {
         await logTruncate(sid, keepCount);
@@ -698,7 +761,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       toast.warning("当前 turn 运行中，等待结束后再分叉");
       return;
     }
-    const fromSessionId = sessionRef.current?.sessionId ?? resumeSessionId;
+    const fromSessionId = logSidRef.current ?? sessionRef.current?.sessionId ?? resumeSessionId;
     if (!fromSessionId) {
       toast.error("会话尚未建立（请先发送一条消息）");
       return;
@@ -817,7 +880,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const runRef = useRef<{ promise: Promise<void> } | null>(null);
 
-  async function runPrompt(text: string) {
+  async function runPrompt(text: string, opts?: { queueItemId?: string; isRetry?: boolean }) {
     // F-8-1：刷新最近交互时间戳（回收判定的数据源）
     lastActivityRef.current = Date.now();
     patch(tabKey, { busy: true, turnStartedAt: Date.now() });
@@ -825,6 +888,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const p = (async () => {
       try {
         const session = await ensureSession();
+        // P24f（洞 A）：user 消息即时落盘——先日志后索引。旧时序里 user 消息
+        // 要等整个 turn 结束才随 persistNew 落盘，期间强退 → 索引指向从未创建
+        // 的日志文件 →「历史消息未找到」横幅。落点选在 ensureSession 之后、
+        // session.prompt 之前（单一咽喉点，覆盖 submit/队列/steer/quotes 全部路径）
+        await persistUserMessage();
         if (!promptedOnce.current) {
           promptedOnce.current = true;
           onFirstPrompt?.(text, session.sessionId);
@@ -883,18 +951,29 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
         };
         useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
+        // 队列条目执行失败 → 回插队首（条目不丢）。重试语义：isRetry 防死循环
+        //（retried 条目失败不再回插）；不撤 user 气泡——已发生的尝试是事实。
+        if (opts?.queueItemId && !opts?.isRetry) {
+          useQueueStore.getState().requeueHead(tabKey, {
+            id: opts.queueItemId,
+            text,
+            retried: true,
+          });
+          toast.warning("该任务执行失败，已放回队列首位");
+        }
       } finally {
         patch(tabKey, { busy: false, turnStartedAt: undefined });
         runRef.current = null;
         // H10：turn 结束时未决的权限请求/提问卡一并收口（turn 已中止，
-        // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）
+        // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）。
+        // P24e：收口语义统一为协议原生 cancelled（替代旧「猜 reject 选项」启发式——
+        // 无 reject 类选项时会误选可能是 allow 的首选项）
         if (permResolver.current) {
-          // H10 兜底语义：turn 已中止，按「拒绝」收口——优先 reject 类选项，无则首选项
-          const rt = useSessionStore.getState().runtime[tabKey];
-          const fallbackReject =
-            rt?.perm?.options.find((o) => o.kind?.startsWith("reject")) ??
-            rt?.perm?.options[0];
-          permResolver.current(fallbackReject?.optionId ?? "");
+          if (permTimerRef.current) {
+            clearTimeout(permTimerRef.current);
+            permTimerRef.current = null;
+          }
+          permResolver.current({ kind: "cancelled" });
           permResolver.current = null;
         }
         if (askResolver.current) {
@@ -920,9 +999,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           const userCancelled = reason === "cancelled";
           const head = userCancelled ? null : useQueueStore.getState().dequeue(tabKey);
           if (head) {
-            logger.info("queue", "consume", { id: head.id });
-            appendUser(tabKey, head.text);
-            void runPrompt(head.text);
+            logger.info("queue", "consume", { id: head.id, retried: head.retried ?? false });
+            // retried 条目重放：transcript 已有该 user 气泡 + 错误块，跳过 appendUser
+            //（不重复气泡）；成功则新的 assistant turn 跟在错误块后，时间线自然
+            if (!head.retried) appendUser(tabKey, head.text);
+            void runPrompt(head.text, { queueItemId: head.id, isRetry: head.retried ?? false });
           } else if (userCancelled) {
             logger.info("queue", "hold-on-cancel", { reason });
           }
@@ -934,14 +1015,35 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   // —— 落盘：turn 结束一次性追加增量 ——
   function persistNew() {
-    const sid = sessionRef.current?.sessionId;
+    // 日志身份走 logSidRef（与 harness sessionId 解绑，见 ref 定义处注释）
+    const sid = logSidRef.current ?? sessionRef.current?.sessionId;
     if (!sid) return;
     const msgs = useSessionStore.getState().runtime[tabKey]?.messages ?? [];
     const count = persistedRef.current;
     if (msgs.length <= count) return;
     const lines = serializeMessages(msgs.slice(count));
     persistedRef.current = msgs.length;
-    logAppend(sid, lines).catch(() => {});
+    logAppend(sid, lines).catch((e) => {
+      // P24f：失败不再静默——日志是唯一事实源，写失败必须留痕
+      logger.error("chat", "logAppend 失败", { sid, lines: lines.length, error: String(e) });
+    });
+  }
+
+  // —— P24f（洞 A）：user 消息即时落盘（turn 开始时调用）——
+  // 语义：若游标下一条是 user 消息则立刻写盘并推进游标；失败 logger.error 显式留痕
+  //（不中断 turn——消息已在 store，下轮 persistNew 仍会尝试写全量增量）
+  async function persistUserMessage() {
+    const sid = logSidRef.current ?? sessionRef.current?.sessionId;
+    if (!sid) return;
+    const msgs = useSessionStore.getState().runtime[tabKey]?.messages ?? [];
+    const next = msgs[persistedRef.current];
+    if (!next || next.role !== "user") return;
+    try {
+      await logAppend(sid, serializeMessages([next]));
+      persistedRef.current += 1;
+    } catch (e) {
+      logger.error("chat", "user 消息落盘失败", { sid, error: String(e) });
+    }
   }
 
   async function stop() {
@@ -953,9 +1055,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
   }
 
-  // F-21-4：PermCard 决策入口（optionId 原样转传 resolver）
+  // F-21-4：PermCard 决策入口（optionId 原样转传 resolver；P24e 路径 a：清超时 timer）
   function onPerm(optionId: string) {
-    permResolver.current?.(optionId);
+    if (permTimerRef.current) {
+      clearTimeout(permTimerRef.current);
+      permTimerRef.current = null;
+    }
+    permResolver.current?.({ kind: "selected", optionId });
     permResolver.current = null;
   }
 
@@ -1001,6 +1107,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   const perm = rt?.perm ?? null;
+
+  // P24g capability gate：fork 入口按 initialize 握手能力显隐（没能力不显示入口，
+  // 而不是点了报错）。回溯不 gate——软回溯是纯本地能力，与 harness 无关。
+  const forkEnabled = canFork(rt?.capabilities ?? null);
 
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1123,9 +1233,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             </button>
           </div>
         )}
-        {empty && !historyDegraded && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
-        {empty && historyDegraded && (
-          <div className="hint degraded">⚠️ 上下文已恢复，历史消息未找到</div>
+        {empty && historyState === "ok" && <Welcome adapter={adapter} onSuggest={sendSuggestion} />}
+        {empty && historyState === "log-missing" && (
+          // P24f（洞 B）：文案准确化——session/load 成功时模型上下文其实完好，
+          // 只是本地日志缺失（旧文案「上下文已恢复，历史消息未找到」暗示上下文丢失，误导）
+          <div className="hint degraded">⚠️ 模型上下文已恢复；本地历史消息缺失，仅影响回看</div>
+        )}
+        {empty && historyState === "context-lost" && (
+          <div className="hint degraded">⚠️ 未能恢复模型上下文，已新建会话；上方历史仅为本地存档</div>
         )}
         <div
           style={{
@@ -1157,7 +1272,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   isLast={vi.index === messages.length - 1}
                   turnStartedAt={rt?.turnStartedAt}
                   onSelect={onSelectText}
-                  onFork={onFork ? doFork : undefined}
+                  onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}
                   onEdit={m.role === "user" ? () => startEdit(vi.index) : undefined}
                   diffComments={diffComments}

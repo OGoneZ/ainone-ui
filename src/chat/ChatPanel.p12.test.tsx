@@ -53,6 +53,9 @@ const input = () => screen.getByLabelText("消息输入");
 function fakeSession(events: any[] = [], capture?: { elicit?: any }): AcpSession {
   return {
     sessionId: "s-test",
+    capabilities: null,
+    agentInfo: null,
+    sessionOrigin: "new",
     prompt: async (_text: string, onOutgoing: (e: any) => void) => {
       for (const e of events) onOutgoing(e);
     },

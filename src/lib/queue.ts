@@ -6,6 +6,9 @@
 export interface QueueItem {
   id: string;
   text: string;
+  /** 失败回插标记：该条已尝试执行过一次（transcript 里已有 user 气泡 + 错误块），
+   *  重放消费时跳过 appendUser，且失败不再回插（防死循环） */
+  retried?: boolean;
 }
 
 export const QUEUE_CAPACITY = 10;
@@ -38,6 +41,11 @@ export type DequeueResult = { item: QueueItem; items: QueueItem[] } | null;
 export function next(items: QueueItem[]): DequeueResult {
   if (items.length === 0) return null;
   return { item: items[0], items: items.slice(1) };
+}
+
+/** 失败回插队首：不受容量限制（回插不该被容量拒绝），调用方负责防重（retried 标记） */
+export function requeueHead(items: QueueItem[], item: QueueItem): QueueItem[] {
+  return [item, ...items];
 }
 
 /** F-21-3 拖拽几何：指针落在目标条目中心 50% 区（x ∈ [25%,75%]）= 合并意图，

@@ -85,6 +85,9 @@ const input = () => screen.getByLabelText("消息输入");
 function fakeSession(events: Array<{ type: string; [k: string]: any }>): AcpSession {
   return {
     sessionId: "s-test",
+    capabilities: null,
+    agentInfo: null,
+    sessionOrigin: "new",
     prompt: async (_text: string, onOutgoing: (e: any) => void) => {
       for (const e of events) onOutgoing(e);
     },
@@ -310,12 +313,14 @@ describe("ChatPanel 交互行为", () => {
   });
 
   it("F-8-5 分叉：assistant 消息 hover 出现「分叉」，点击回调 onFork（AC-P8-23 组件侧）", async () => {
-    mockOpen.mockResolvedValue(
-      fakeSession([
+    // P24g：fork 入口按握手能力显隐（capability gate）——fake 声明 fork 能力
+    mockOpen.mockResolvedValue({
+      ...fakeSession([
         { type: "agent_text", text: "可以分叉的回复" },
         { type: "turn_stop", stopReason: "end_turn" },
       ]),
-    );
+      capabilities: { sessionCapabilities: { fork: {} } } as AcpSession["capabilities"],
+    });
     const onFork = vi.fn();
     render(
       <ChatPanel
@@ -335,6 +340,32 @@ describe("ChatPanel 交互行为", () => {
 
     // onFork 被调用（分叉需真实会话，这里只验证入口接线）
     expect(onFork).toHaveBeenCalledTimes(1);
+  });
+
+  it("P24g capability gate：harness 未声明 fork 能力 → 分叉入口不渲染（没能力不显示入口，而非点击报错）", async () => {
+    // fakeSession 默认 capabilities: null（旧 harness 未声明任何能力）
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "不能分叉的回复" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    const onFork = vi.fn();
+    render(
+      <ChatPanel
+        tabKey="k1"
+        adapter={adapter}
+        onFirstPrompt={() => {}}
+        onFork={onFork}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await screen.findByText(/不能分叉的回复/);
+    // gate 生效：入口不存在（MessageLine 按 onFork prop 存在性渲染）
+    expect(screen.queryByRole("button", { name: "从这里分叉" })).not.toBeInTheDocument();
   });
 
   // F-15-2（DEC-42）：会话内搜索条已移除，全局搜索（Ctrl+F）由 GlobalSearchDialog 承担。
