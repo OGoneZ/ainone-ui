@@ -8,7 +8,8 @@ export type SessionStatus = "working" | "awaiting_input" | "done" | "idle";
 
 export interface RuntimeSignal {
   busy: boolean;
-  pending: string | null;
+  /** F-21-4：权限审批状态（null = 无等待）；结构化 perm 非 null 即 awaiting_input */
+  perm: { title: string; options: unknown[] } | null;
   hasMessages: boolean;
 }
 
@@ -18,7 +19,7 @@ export interface RuntimeSignal {
  * 无任何 runtime（纯历史会话，未打开）→ done。
  */
 export function deriveStatus(runtimes: RuntimeSignal[]): SessionStatus {
-  if (runtimes.some((r) => r.pending !== null)) return "awaiting_input";
+  if (runtimes.some((r) => r.perm !== null)) return "awaiting_input";
   if (runtimes.some((r) => r.busy)) return "working";
   if (runtimes.some((r) => r.hasMessages)) return "done";
   if (runtimes.length > 0) return "idle";
@@ -32,7 +33,7 @@ export interface TabRef {
 
 export interface RuntimeRef {
   busy: boolean;
-  pending: string | null;
+  perm: { title: string; options: unknown[] } | null;
   messages: unknown[];
 }
 
@@ -50,7 +51,7 @@ export function collectSignals(
     const rt = runtime[t.key];
     if (!rt) continue;
     const arr = map.get(t.sessionId) ?? [];
-    arr.push({ busy: rt.busy, pending: rt.pending, hasMessages: rt.messages.length > 0 });
+    arr.push({ busy: rt.busy, perm: rt.perm, hasMessages: rt.messages.length > 0 });
     map.set(t.sessionId, arr);
   }
   return map;

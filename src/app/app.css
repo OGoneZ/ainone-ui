@@ -226,10 +226,28 @@ select {
   }
 }
 
+/* F-21-4：待审批会话行光晕——警告色呼吸外发光，提醒用户去处理权限请求。
+   数据流现成：deriveStatus 里 perm !== null → awaiting_input（优先级最高）。 */
+.history-item.status-awaiting_input {
+  animation: awaiting-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes awaiting-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 10px 2px color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+}
+
 /* reduced-motion：呼吸/摇动全部短路（F-7-11 全局开关已覆盖 animation，此处兜底显色） */
 @media (prefers-reduced-motion: reduce) {
   .status-dot.dot-working,
   .status-dot.dot-awaiting_input {
+    animation: none;
+  }
+  .history-item.status-awaiting_input {
     animation: none;
   }
 }

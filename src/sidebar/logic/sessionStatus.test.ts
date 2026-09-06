@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { deriveStatus, collectSignals, type RuntimeSignal } from "./sessionStatus";
 
-const idl: RuntimeSignal = { busy: false, pending: null, hasMessages: false };
+const idl: RuntimeSignal = { busy: false, perm: null, hasMessages: false };
 
 describe("会话状态推导（F-6-1）", () => {
   it("空闲 → idle", () => {
@@ -13,7 +13,7 @@ describe("会话状态推导（F-6-1）", () => {
   });
 
   it("等批准 → awaiting_input（优先于 working）", () => {
-    expect(deriveStatus([{ ...idl, busy: true, pending: "read_file" }])).toBe("awaiting_input");
+    expect(deriveStatus([{ ...idl, busy: true, perm: { title: "read_file", options: [] } }])).toBe("awaiting_input");
   });
 
   it("有历史消息 → done", () => {
@@ -28,7 +28,7 @@ describe("会话状态推导（F-6-1）", () => {
     expect(
       deriveStatus([
         { ...idl, busy: true },
-        { ...idl, pending: "x" },
+        { ...idl, perm: { title: "x", options: [] } },
       ]),
     ).toBe("awaiting_input");
   });
@@ -41,8 +41,8 @@ describe("会话状态推导（F-6-1）", () => {
         { key: "k3" }, // 新建中（无 sessionId）
       ],
       {
-        k1: { busy: true, pending: null, messages: [] },
-        k2: { busy: false, pending: "x", messages: [1, 2, 3] },
+        k1: { busy: true, perm: null, messages: [] },
+        k2: { busy: false, perm: { title: "x", options: [] }, messages: [1, 2, 3] },
       },
     );
     expect(signals.get("s-1")).toHaveLength(2);

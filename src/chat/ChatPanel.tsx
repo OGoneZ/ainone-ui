@@ -48,10 +48,12 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   useSessionStore,
   type CommandWord,
+  type PermState,
 } from "@/store/sessionStore";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { AskCard } from "@/chat/components/AskCard";
+import { PermCard } from "@/chat/components/PermCard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -139,7 +141,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }, [atMenu, workspaceCwd, atTree]);
 
   const sessionRef = useRef<AcpSession | null>(null);
-  const permResolver = useRef<((d: "allow" | "reject") => void) | null>(null);
+  // F-21-4：决策值 = ACP optionId 原样回传（不再客户端猜 allow/reject 前缀，L12 废弃）
+  const permResolver = useRef<((optionId: string) => void) | null>(null);
   // 恢复会话时已写过索引，续聊不应重写标题 → 标记为“已 prompt”
   const promptedOnce = useRef(Boolean(resumeSessionId));
   // steering：运行中打断时，待发消息暂存于此，当前 turn 结束后自动续跑
@@ -405,17 +408,18 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       const s = await openSession(
         adapter,
         async (params) => {
-          patch(tabKey, { pending: params.toolCall.title ?? "（无标题工具调用）" });
-          const decision = await new Promise<"allow" | "reject">((resolve) => {
+          // F-21-4：结构化 perm 入 store → PermCard 内嵌渲染（harness 选项全量透出）
+          const perm: PermState = {
+            title: params.toolCall.title ?? "（无标题工具调用）",
+            options: params.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind ?? null })),
+          };
+          patch(tabKey, { perm });
+          const optionId = await new Promise<string>((resolve) => {
             permResolver.current = resolve;
           });
-          patch(tabKey, { pending: null });
-          // L12：kind 前缀匹配（allow_once/allow_always 都算允许）——精确匹配
-          // allow_once 会在 harness 只提供 allow_always 时落空，回落 options[0]
-          // 可能把「允许」发成拒绝（F2）。always 选项 UI 暂不暴露，选它=同语义。
-          const target = params.options.find((o) =>
-            decision === "allow" ? o.kind?.startsWith("allow") : o.kind?.startsWith("reject"),
-          );
+          patch(tabKey, { perm: null });
+          // optionId 由 PermCard 原样回传；兜底 options[0]（harness 撤销选项的极端情况）
+          const target = params.options.find((o) => o.optionId === optionId);
           return {
             outcome: {
               outcome: "selected",
@@ -885,14 +889,19 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         // H10：turn 结束时未决的权限请求/提问卡一并收口（turn 已中止，
         // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）
         if (permResolver.current) {
-          permResolver.current("reject");
+          // H10 兜底语义：turn 已中止，按「拒绝」收口——优先 reject 类选项，无则首选项
+          const rt = useSessionStore.getState().runtime[tabKey];
+          const fallbackReject =
+            rt?.perm?.options.find((o) => o.kind?.startsWith("reject")) ??
+            rt?.perm?.options[0];
+          permResolver.current(fallbackReject?.optionId ?? "");
           permResolver.current = null;
         }
         if (askResolver.current) {
           askResolver.current(null);
           askResolver.current = null;
         }
-        patch(tabKey, { pending: null, ask: null });
+        patch(tabKey, { perm: null, ask: null });
         // F-9-1 计划栏：turn 结束清除 plan，不悬挂下一轮（AC-P9-3）
         useSessionStore.getState().setPlan(tabKey, null);
         // 落盘增量（turn 结束一次性追加，避免流式期间高频 IO）
@@ -944,8 +953,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
   }
 
-  function onPerm(d: "allow" | "reject") {
-    permResolver.current?.(d);
+  // F-21-4：PermCard 决策入口（optionId 原样转传 resolver）
+  function onPerm(optionId: string) {
+    permResolver.current?.(optionId);
     permResolver.current = null;
   }
 
@@ -990,7 +1000,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     void runPrompt(text);
   }
 
-  const pending = rt?.pending ?? null;
+  const perm = rt?.perm ?? null;
 
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1167,21 +1177,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             onClose={() => setQuickSel(null)}
           />
         )}
-        {pending && (
-          <Dialog open onOpenChange={() => {}}>
-            <DialogContent className="max-w-md" showCloseButton={false}>
-              <DialogHeader>
-                <DialogTitle>需要批准执行</DialogTitle>
-              </DialogHeader>
-              <p className="perm-code">
-                <code>{pending}</code>
-              </p>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => onPerm("reject")}>拒绝</Button>
-                <Button onClick={() => onPerm("allow")}>允许</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+        {/* F-21-4 权限审批内嵌卡：窗格内渲染替代全屏 modal（多分屏不再互相遮挡） */}
+        {perm && (
+          <PermCard title={perm.title} options={perm.options} onDecide={onPerm} />
         )}
         {/* F-8-6 回溯确认（破坏性操作，二次确认） */}
         <Dialog open={rewindTarget !== null} onOpenChange={() => setRewindTarget(null)}>
