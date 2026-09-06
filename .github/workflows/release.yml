@@ -111,7 +111,10 @@ jobs:
 
       - name: Read version
         id: ver
-        run: echo "version=$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+        # 版本号取 tag（vX.Y.Z → X.Y.Z），而非 tauri.conf.json——tag 是发布意图，
+        # conf 是仓库基线，两者允许异步前进（tag v0.7.0 时 conf 仍可为 0.1.0）。
+        # R2 目录 / 产物 URL / latest.json 全部以 tag 版本为准，互相对齐。
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: List bundles (debug)
         run: find bundles -type f | sort
