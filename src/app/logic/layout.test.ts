@@ -10,6 +10,7 @@ import {
   activeKeyOf,
   focusArrowShortcut,
   pickFocusTarget,
+  layoutBindings,
   type ModelLike,
 } from "./layout";
 
@@ -149,5 +150,28 @@ describe("P10 分屏纯逻辑", () => {
     const br = { id: "BR", x: 508, y: 308, w: 500, h: 300 };
     const bl = { id: "BL", x: 0, y: 308, w: 500, h: 300 };
     expect(pickFocusTarget(cur, [cur, br, bl], "down")).toBe("BR");
+  });
+
+  // P25：判定函数可传入键位绑定（改绑后新键生效旧键失效），缺省沿用默认表
+  it("P25 splitShortcut/closeTabShortcut：自定义绑定生效，缺省不变", () => {
+    // 缺省：默认表语义
+    expect(splitShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: true })).toBe("row");
+    expect(closeTabShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: false })).toBe(true);
+    // 自定义：关窗改绑 KeyQ（无 Shift），旧 Ctrl+D 不再关窗
+    const custom = layoutBindings({ "pane.close-tab": [{ code: "KeyQ", ctrl: true }] });
+    expect(closeTabShortcut({ key: "q", ctrlKey: true, metaKey: false, shiftKey: false }, custom)).toBe(true);
+    expect(closeTabShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: false }, custom)).toBe(false);
+    // 自定义：分屏改绑 KeyR+Shift
+    const customSplit = layoutBindings({ "pane.split-row": [{ code: "KeyR", ctrl: true, shift: true }] });
+    expect(splitShortcut({ key: "r", ctrlKey: true, metaKey: false, shiftKey: true }, customSplit)).toBe("row");
+    expect(splitShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: true }, customSplit)).toBeNull();
+  });
+
+  it("P25 focusArrowShortcut：自定义绑定（含 code 的真实事件形）生效", () => {
+    const custom = layoutBindings({ "pane.focus-n": [{ code: "ArrowUp", ctrl: true }] });
+    expect(focusArrowShortcut({ key: "ArrowUp", code: "ArrowUp", ctrlKey: true, metaKey: false, altKey: false }, custom)).toBe("up");
+    expect(focusArrowShortcut({ key: "ArrowRight", code: "ArrowRight", ctrlKey: true, metaKey: false, altKey: false }, custom)).toBe("right");
+    // 修饰不符不命中
+    expect(focusArrowShortcut({ key: "ArrowUp", code: "ArrowUp", ctrlKey: false, metaKey: false, altKey: false }, custom)).toBeNull();
   });
 });

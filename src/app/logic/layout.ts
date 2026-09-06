@@ -10,8 +10,70 @@
 // 投影回业务 Tab 数组与 activeKey。
 
 import type { Tab } from "./tabs";
+import { DEFAULT_DEFS, type Binding, type ShortcutId } from "./keymap";
 
 export type SplitAxis = "row" | "col";
+
+/** P25：从键位表取某 id 的绑定（自定义覆盖 → 默认），取不到给空表（永不匹配） */
+export function bindingsOf(
+  id: ShortcutId,
+  overrides?: Partial<Record<ShortcutId, Binding[]>>,
+): Binding[] {
+  const def = DEFAULT_DEFS.find((d) => d.id === id);
+  if (!def) return [];
+  return overrides?.[id] ?? def.defaults;
+}
+
+/** P25：把 App 传入的键位覆盖投影为 layout 判定所需的快捷键定义子集 */
+export interface LayoutBindings {
+  splitRow?: Binding[];
+  splitCol?: Binding[];
+  close?: Binding[];
+  focusArrows?: Binding[];
+}
+
+/** P25：从 defs+overrides 取 layout 判定所需绑定（缺省 = 默认表，现有测试零改动） */
+export function layoutBindings(overrides?: Partial<Record<ShortcutId, Binding[]>>): LayoutBindings {
+  const pick = (id: ShortcutId): Binding[] | undefined =>
+    overrides && overrides[id] ? (bindingsOf(id, overrides) as Binding[]) : undefined;
+  return {
+    splitRow: pick("pane.split-row"),
+    splitCol: pick("pane.split-col"),
+    close: pick("pane.close-tab"),
+    focusArrows: pick("pane.focus-n"),
+  };
+}
+
+/** 旧式按键形参（现测试与现调用方）与 P25 绑定形参的二选一 */
+type KeyLike = { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey?: boolean; altKey?: boolean };
+
+/** P25：按绑定表匹配（code 优先；旧事件可能没有 code，回退 key → code 推断） */
+function matchesAny(e: KeyLike, bindings: Binding[] | undefined, fallback: (e: KeyLike) => boolean): boolean {
+  if (!bindings || bindings.length === 0) return fallback(e);
+  const code = inferredCode(e);
+  if (!code) return fallback(e);
+  return bindings.some((b) => b.code === code);
+}
+
+/** e.key → e.code 推断（字母/方向键/命名键，仅覆盖现有判定涉及的键） */
+function inferredCode(e: KeyLike): string | null {
+  const k = (e.key ?? "").toLowerCase();
+  if (/^[a-z]$/.test(k)) return `Key${k.toUpperCase()}`;
+  const named: Record<string, string> = {
+    arrowup: "ArrowUp",
+    arrowdown: "ArrowDown",
+    arrowleft: "ArrowLeft",
+    arrowright: "ArrowRight",
+    escape: "Escape",
+    pageup: "PageUp",
+    pagedown: "PageDown",
+    home: "Home",
+    end: "End",
+    enter: "Enter",
+    " ": "Space",
+  };
+  return named[k] ?? null;
+}
 
 /** 焦点是否落在可编辑控件内（textarea/input/contenteditable 时不拦截快捷键） */
 export function inEditable(el: Element | null | undefined): boolean {
@@ -22,50 +84,58 @@ export function inEditable(el: Element | null | undefined): boolean {
 }
 
 /** 解析键盘事件是否为分屏快捷键；不是则返回 null。
- *  p20n：Ctrl/Cmd+Shift+D 左右、Ctrl/Cmd+Shift+E 上下（裸 Ctrl+D 让位给「关闭」） */
-export function splitShortcut(e: {
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  shiftKey: boolean;
-}): SplitAxis | null {
+ *  p20n：Ctrl/Cmd+Shift+D 左右、Ctrl/Cmd+Shift+E 上下（裸 Ctrl+D 让位给「关闭」）。
+ *  P25：可传入键位绑定（layoutBindings 投影），缺省沿用默认表——现有测试零改动。 */
+export function splitShortcut(e: KeyLike, bindings?: LayoutBindings): SplitAxis | null {
   if (!e.shiftKey) return null;
-  const k = (e.key ?? "").toLowerCase();
   if (!e.ctrlKey && !e.metaKey) return null;
-  if (k === "d") return "row";
-  if (k === "e") return "col";
+  if (matchesAny(e, bindings?.splitRow, (ev) => (ev.key ?? "").toLowerCase() === "d")) return "row";
+  if (matchesAny(e, bindings?.splitCol, (ev) => (ev.key ?? "").toLowerCase() === "e")) return "col";
   return null;
 }
 
-/** 解析键盘事件是否为「关闭当前窗格的当前 tab」快捷键（p20n：Ctrl/Cmd+D） */
-export function closeTabShortcut(e: {
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  shiftKey: boolean;
-}): boolean {
+/** 解析键盘事件是否为「关闭当前窗格的当前 tab」快捷键（p20n：Ctrl/Cmd+D）。
+ *  P25：可传入键位绑定，缺省沿用默认表。 */
+export function closeTabShortcut(e: KeyLike, bindings?: LayoutBindings): boolean {
   if (e.shiftKey) return false;
   if (!e.ctrlKey && !e.metaKey) return false;
-  return (e.key ?? "").toLowerCase() === "d";
+  return matchesAny(e, bindings?.close, (ev) => (ev.key ?? "").toLowerCase() === "d");
 }
 
 /** 焦点方向（Ctrl+方向键在分屏窗格间移动） */
 export type FocusDir = "up" | "down" | "left" | "right";
 
 /** 解析键盘事件是否为窗格焦点切换快捷键；不是则返回 null。
- *  macOS 用 Cmd（平台惯例，VS Code 同款），其他平台 Ctrl。 */
+ *  macOS 用 Cmd（平台惯例，VS Code 同款），其他平台 Ctrl。
+ *  P25：可传入键位绑定（focus-n 的绑定代表「方向键+主修饰」族），缺省沿用默认表。
+ *  绑定表路径下以「主修饰（ctrl/meta）+ 方向 code」匹配；alt 仍排除。 */
 export function focusArrowShortcut(e: {
   key: string;
+  code?: string;
   ctrlKey: boolean;
   metaKey: boolean;
   altKey: boolean;
-}): FocusDir | null {
+}, bindings?: LayoutBindings): FocusDir | null {
   const k = (e.key ?? "").toLowerCase();
   if (k !== "arrowup" && k !== "arrowdown" && k !== "arrowleft" && k !== "arrowright") return null;
   if (e.altKey) return null;
   // macOS（UA 判定）：Cmd+方向键；其余平台（含 node 测试环境）Ctrl+方向键。
   const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
   const mod = isMac ? e.metaKey : e.ctrlKey;
+  const custom = bindings?.focusArrows;
+  if (custom && custom.length > 0) {
+    // P25 绑定表路径：主修饰以绑定为准（ctrl|meta 等价），方向按 code 对应
+    const code = inferredCode(e);
+    const wantMod = Boolean(custom[0].ctrl) || Boolean(custom[0].meta);
+    if (!code || (Boolean(e.ctrlKey) || Boolean(e.metaKey)) !== wantMod) return null;
+    const map: Record<string, FocusDir> = {
+      ArrowUp: "up",
+      ArrowDown: "down",
+      ArrowLeft: "left",
+      ArrowRight: "right",
+    };
+    return map[code] ?? null;
+  }
   if (!mod) return null;
   return k === "arrowup" ? "up" : k === "arrowdown" ? "down" : k === "arrowleft" ? "left" : "right";
 }
