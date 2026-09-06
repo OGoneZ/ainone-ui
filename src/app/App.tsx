@@ -214,6 +214,36 @@ function App() {
     logger.info("split", "split-pane", { axis, srcTabKey: activeKey, newTabKey: key });
   }
 
+  /** P20d：激活目标窗格并把键盘焦点交给其输入框——Cmd+方向键/点击窗格共用。
+   *  「切换焦点」的终点不是悬浮高亮而是能直接打字：selectTab 让 ChatPanel 接收
+   *  active prop（window 级事件按 active 实例路由），focus 落到该窗格 composer
+   *  的 textarea（rAF 等待 flexlayout 重渲染完成后再找 DOM）。
+   *  tab 面板 DOM id = `flexlayout-tab-<tabKey>`（flexlayout 约定），用它定位。 */
+  function activateTabsetAndComposer(tabsetId: string, selectedIdx?: number) {
+    const m = getModel();
+    const target = m.getNodeById(tabsetId);
+    if (!target) return;
+    m.doAction(Actions.setActiveTabset(tabsetId));
+    const sel = (target as unknown as { getChildren: () => { getId(): string }[] }).getChildren();
+    let tabKey: string | undefined;
+    if (sel.length > 0) {
+      const idx = selectedIdx !== undefined && selectedIdx >= 0 && selectedIdx < sel.length ? selectedIdx : 0;
+      tabKey = sel[idx].getId();
+      m.doAction(Actions.selectTab(tabKey));
+    }
+    syncFromModel();
+    // 等一拍让 flexlayout 重绘 + React 提交后再 focus（同 jumpToIndex 校跳套路）。
+    // 不用双 rAF：窗口后台/完全遮挡时 WebKit 冻结 rAF，回调永不执行（实测踩坑）；
+    // setTimeout 在后台也保证触发，前台一帧（~16ms）内完成。
+    setTimeout(() => {
+      const host = layoutHostRef.current;
+      if (!host || !tabKey) return;
+      const tab = host.querySelector<HTMLElement>(`#flexlayout-tab-${tabKey}`);
+      const textarea = tab?.querySelector<HTMLTextAreaElement>("textarea[aria-label='消息输入']");
+      textarea?.focus();
+    }, 60);
+  }
+
   // 快捷键监听：仅在编辑器区（非输入框）响应分屏快捷键（AC-P10-8）
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -222,8 +252,7 @@ function App() {
       if (inEditable(document.activeElement)) return;
       e.preventDefault();
       splitCurrent(axis);
-    }
-    // P20 窗格焦点切换：Ctrl+方向键在分屏窗格间移动（WARP/VS Code 语义）。
+    }    // P20 窗格焦点切换：Cmd/Ctrl+方向键在分屏窗格间移动（WARP/VS Code 语义）。
     // 输入框内也响应——用户在输入框聊天时依然可以用方向键切窗格。
     function onFocusMove(e: KeyboardEvent) {
       const dir = focusArrowShortcut(e);
@@ -259,15 +288,8 @@ function App() {
       if (!curR || (curR.w === 0 && curR.h === 0)) return;
       const targetId = pickFocusTarget(curR, rects, dir);
       if (!targetId) return;
-      const target = m.getNodeById(targetId);
-      if (!target) return;
       e.preventDefault();
-      m.doAction(Actions.setActiveTabset(targetId));
-      const sel = (target as unknown as { getChildren: () => { getId(): string }[] }).getChildren();
-      if (sel.length > 0) {
-        m.doAction(Actions.selectTab(sel[curTabset.getSelected() ?? 0]?.getId() ?? sel[0].getId()));
-      }
-      syncFromModel();
+      activateTabsetAndComposer(targetId, curTabset.getSelected() ?? 0);
     }
     // F-11-2 全局搜索：Ctrl/Cmd+F（DEC-26；会话内搜索已改绑 Ctrl+Shift+F）
     const onGlobalSearch = (e: KeyboardEvent) => {
@@ -276,10 +298,34 @@ function App() {
         setGlobalSearchOpen((v) => !v);
       }
     };
+    // P20d：点击窗格任意位置（含聊天内容区）即切焦点——flexlayout 只在 tab 条/
+    // tab 按钮上挂了激活逻辑，点内容区不动 active，光晕自然「不跟随点击」。
+    // capture 阶段监听，closest 找所在窗格容器，与 model 节点按 DOM 顺序对齐。
+    function onPanePointerDown(e: PointerEvent) {
+      const host = layoutHostRef.current;
+      if (!host) return;
+      const containers = [...host.querySelectorAll<HTMLElement>(".flexlayout__tabset_container")];
+      if (containers.length < 2) return;
+      const target = e.target instanceof Element ? e.target.closest<HTMLElement>(".flexlayout__tabset_container") : null;
+      if (!target) return;
+      const idx = containers.indexOf(target);
+      if (idx < 0) return;
+      const m = getModel();
+      const nodes: { id: string }[] = [];
+      m.visitNodes((n: unknown) => {
+        const node = n as { getType(): string; getId(): string };
+        if (node.getType() === "tabset") nodes.push({ id: node.getId() });
+      });
+      const node = nodes[idx];
+      if (!node || m.getActiveTabset()?.getId() === node.id) return;
+      activateTabsetAndComposer(node.id);
+    }
+    window.addEventListener("pointerdown", onPanePointerDown, true);
     window.addEventListener("keydown", onGlobalSearch);
     window.addEventListener("keydown", onKey);
     window.addEventListener("keydown", onFocusMove);
     return () => {
+      window.removeEventListener("pointerdown", onPanePointerDown, true);
       window.removeEventListener("keydown", onGlobalSearch);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keydown", onFocusMove);
