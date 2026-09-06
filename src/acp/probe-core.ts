@@ -16,7 +16,13 @@ export interface AgentInfo {
 }
 
 export type ProbeResult =
-  | { ok: true; agentInfo: AgentInfo; protocolVersion: number | string }
+  | {
+      ok: true;
+      agentInfo: AgentInfo;
+      protocolVersion: number | string;
+      /** initialize 握手存档的 agent 能力（未声明 → null）；能力诊断与 UI gate 的数据源 */
+      capabilities: acp.AgentCapabilities | null;
+    }
   | { ok: false; level: "spawn" | "handshake"; message: string };
 
 export interface ProbeDeps {
@@ -74,6 +80,7 @@ export async function probeInitialize(deps: ProbeDeps): Promise<ProbeResult> {
       ok: true,
       agentInfo: (resp as acp.InitializeResponse).agentInfo ?? {},
       protocolVersion: (resp as acp.InitializeResponse).protocolVersion,
+      capabilities: (resp as acp.InitializeResponse).agentCapabilities ?? null,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

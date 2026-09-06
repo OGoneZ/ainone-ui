@@ -72,6 +72,15 @@ export interface Streams {
 
 export interface AcpSession {
   sessionId: string;
+  /** initialize 握手存档的 agent 能力（旧 harness 未声明 → null）。
+   *  capability gate 的唯一事实源（对标 AionUi：所有功能入口按此显隐） */
+  capabilities: acp.AgentCapabilities | null;
+  /** initialize 握手存档的 agent 信息（名称/版本） */
+  agentInfo: acp.Implementation | null;
+  /** 会话来源：new = 全新；loaded = session/load 成功；degraded-new = load 失败降级 new */
+  sessionOrigin: "new" | "loaded" | "degraded-new";
+  /** 降级原因（sessionOrigin === "degraded-new" 时存在，供 UI 文案） */
+  loadError?: string;
   prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
   cancel(): Promise<void>;
   /** F-8-5 会话分叉：从当前状态 fork，返回新 sessionId */
@@ -210,7 +219,13 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     }
   })();
 
-  await withStartupGuard(
+  // capabilities 存档（对标 AionUi：握手结果逐项保留，功能入口按 capability 显隐）
+  let agentCapabilities: acp.AgentCapabilities | null = null;
+  let agentInfo: acp.Implementation | null = null;
+  let sessionOrigin: "new" | "loaded" | "degraded-new" = "new";
+  let loadError: string | undefined;
+
+  const initResp = await withStartupGuard(
     connection.agent.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: {
@@ -224,22 +239,64 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     "initialize",
     { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
   );
-  console.info("[acp] initialize 完成，protocolVersion=", acp.PROTOCOL_VERSION);
+  agentCapabilities = (initResp as acp.InitializeResponse).agentCapabilities ?? null;
+  agentInfo = (initResp as acp.InitializeResponse).agentInfo ?? null;
+  console.info(
+    "[acp] initialize 完成，protocolVersion=",
+    (initResp as acp.InitializeResponse).protocolVersion,
+    "loadSession=",
+    agentCapabilities?.loadSession,
+  );
 
+  // 会话建立：三级恢复链（对标 DeepChat acpSessionManager）——
+  //   ① session/load（resumeId 存在且能力未显式声明 false）
+  //   ② load 失败/被跳过 → 同连接 session/new（降级：连接本身健康，kill 重开
+  //      白丢 stderr 上下文与一次 spawn 开销；new 也失败才走 openSession 的 kill 清理）
+  //   ③ new 失败 → 原样上抛（外层 H8 catch 兜底 kill）
   if (resumeSessionId) {
-    // load：回放历史 update（纯消费不展示），response resolve 后回放结束
-    await withStartupGuard(
-      connection.agent.request(acp.methods.agent.session.load, {
-        sessionId: resumeSessionId,
-        cwd,
-        mcpServers: [],
-      }),
-      "session/load",
-      { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
-    );
-    boundSessionId = resumeSessionId;
-    drainQueue();
-    console.info("[acp] session/load 完成 sessionId=", resumeSessionId);
+    // 能力预检：显式 false 才视为不支持（undefined = 老 harness 未声明，宽松尝试）
+    const loadSupported = agentCapabilities?.loadSession !== false;
+    if (!loadSupported) {
+      console.info("[acp] loadSession=false，跳过 session/load 直接 session/new");
+    }
+    let loaded = false;
+    if (loadSupported) {
+      try {
+        // load：回放历史 update（纯消费不展示），response resolve 后回放结束
+        await withStartupGuard(
+          connection.agent.request(acp.methods.agent.session.load, {
+            sessionId: resumeSessionId,
+            cwd,
+            mcpServers: [],
+          }),
+          "session/load",
+          { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
+        );
+        boundSessionId = resumeSessionId;
+        sessionOrigin = "loaded";
+        loaded = true;
+        console.info("[acp] session/load 完成 sessionId=", resumeSessionId);
+      } catch (e) {
+        // 降级：清掉回放中已入队的半截 update（属于已失败的 load，不能算进新会话）
+        loadError = String(e);
+        console.warn("[acp] session/load 失败，降级 session/new：", loadError);
+        drainQueue();
+      }
+    }
+    if (!loaded) {
+      const resp = await withStartupGuard(
+        connection.agent.request<acp.NewSessionResponse>(acp.methods.agent.session.new, {
+          cwd,
+          mcpServers: [],
+        }),
+        "session/new",
+        { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
+      );
+      boundSessionId = resp.sessionId;
+      sessionOrigin = "degraded-new";
+      loadError = loadError ?? "session/load 失败";
+      console.info("[acp] 降级 session/new 完成 sessionId=", resp.sessionId);
+    }
   } else {
     const resp = await withStartupGuard(
       connection.agent.request<acp.NewSessionResponse>(acp.methods.agent.session.new, {
@@ -257,6 +314,10 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
 
   return {
     sessionId,
+    capabilities: agentCapabilities,
+    agentInfo,
+    sessionOrigin,
+    ...(loadError !== undefined ? { loadError } : {}),
     async prompt(text, onOutgoing) {
       console.info("[acp] session/prompt 开始 sessionId=", sessionId);
       const promptPromise = connection.agent.request(acp.methods.agent.session.prompt, {

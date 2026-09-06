@@ -15,6 +15,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { AgentCapabilities } from "@agentclientprotocol/sdk";
 import type { ChatMsg, BlockMsg } from "@/acp/message-log";
 import type { AskQuestion } from "../chat/logic/askCard";
 
@@ -49,6 +50,10 @@ export interface RuntimeState {
   /** P16b：当前 turn 的起点时间戳（ms，Date.now()）；0/undefined = 无进行中 turn。
    *  总耗时 = now - turnStartedAt，与工具/思考结果无关的墙钟时间。 */
   turnStartedAt?: number;
+  /** initialize 握手存档的 agent 能力（capability gate 数据源；未声明 → null） */
+  capabilities: AgentCapabilities | null;
+  /** 恢复链降级记录（session/load 失败 → session/new）；null = 无降级 */
+  degraded: { reason: string } | null;
 }
 
 /** F-21-4 权限审批状态（ACP RequestPermissionRequest 投影） */
@@ -119,6 +124,8 @@ export const useSessionStore = create<SessionStore>()(
                 plan: null,
                 ask: null,
                 branch: null,
+                capabilities: null,
+                degraded: null,
               },
             },
           };

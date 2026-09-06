@@ -153,6 +153,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const turnRef = useRef(newTurn());
   // 已落盘的消息条数（JSONL 日志增量追加的游标）
   const persistedRef = useRef(0);
+  // 本地日志身份（事实源反转的最小落地）：与 harness sessionId 解绑。
+  // 恢复链降级（load 失败 → new）会换 harness sessionId，但日志文件必须
+  // 挂在原会话身份上，否则旧日志断链、新消息写进孤儿文件。初值 = 恢复侧栏
+  // 历史时的 sessionId；全新会话在首次 bindSession 时固化。
+  const logSidRef = useRef<string | null>(resumeSessionId ?? null);
   // F-8-1 空闲回收：最近一次交互时间戳（prompt 发起时刷新）+ 定时器句柄
   const lastActivityRef = useRef(0);
   // L7：回收发生后置 true，ensureSession 重建成功时消费（reopen 埋点的判据）
@@ -498,6 +503,19 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       );
       sessionRef.current = s;
       bindSession(tabKey, s.sessionId);
+      // 日志身份固化：全新会话（无恢复来源）首次建链时把 logSid 锚定为
+      // harness sessionId；此后即使恢复链降级换 sessionId，日志文件身份不变
+      if (logSidRef.current === null) logSidRef.current = s.sessionId;
+      // capability 存档进 store（fork/load 入口显隐的唯一数据源）
+      patch(tabKey, { capabilities: s.capabilities ?? null, degraded: null });
+      // 恢复链降级（session/load 失败 → session/new）：模型上下文丢了，
+      // 用户必须知道——toast 一次 + 常驻降级标记（横幅渲染处消费）
+      if (s.sessionOrigin === "degraded-new") {
+        const reason = s.loadError ?? "session/load 失败";
+        logger.warn("session", "resume 降级 new", { requested: resumeId, reason });
+        patch(tabKey, { degraded: { reason } });
+        toast.error("未能恢复模型上下文，已新建会话继续");
+      }
       if (hadSession) {
         recycledRef.current = false;
         logger.info("session", "reopen after recycle", { sessionId: s.sessionId });
@@ -614,7 +632,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   //   session/load 只会恢复 harness 全量历史，截断就白做了）。
   // 失败时明确提示不静默（H7）。
   async function truncateAndDetach(keepCount: number) {
-    const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+    // 日志身份走 logSidRef（降级会话的 harness sessionId 已换，不能用它截旧日志）
+    const sid = logSidRef.current ?? sessionRef.current?.sessionId ?? resumeSessionId;
     if (sid) {
       try {
         await logTruncate(sid, keepCount);
@@ -698,7 +717,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       toast.warning("当前 turn 运行中，等待结束后再分叉");
       return;
     }
-    const fromSessionId = sessionRef.current?.sessionId ?? resumeSessionId;
+    const fromSessionId = logSidRef.current ?? sessionRef.current?.sessionId ?? resumeSessionId;
     if (!fromSessionId) {
       toast.error("会话尚未建立（请先发送一条消息）");
       return;
@@ -934,7 +953,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   // —— 落盘：turn 结束一次性追加增量 ——
   function persistNew() {
-    const sid = sessionRef.current?.sessionId;
+    // 日志身份走 logSidRef（与 harness sessionId 解绑，见 ref 定义处注释）
+    const sid = logSidRef.current ?? sessionRef.current?.sessionId;
     if (!sid) return;
     const msgs = useSessionStore.getState().runtime[tabKey]?.messages ?? [];
     const count = persistedRef.current;
