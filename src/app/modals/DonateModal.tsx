@@ -13,7 +13,7 @@ export function DonateModal({ open, onClose }: { open: boolean; onClose: () => v
           <DialogTitle>请作者喝杯咖啡 ☕</DialogTitle>
         </DialogHeader>
         <p className="donate-slogan">
-          你的鼓励是我修 bug 的最大动力（比咖啡更管用）。金额不限，心意已收到。
+          AI 是硅基的，作者是碳基的——碳基生物的充电口在下面。
         </p>
         <div className="donate-qr-row">
           <figure className="donate-qr">
