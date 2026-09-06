@@ -36,7 +36,13 @@ function ShortcutHint({ shortcutId, action }: { shortcutId: "app.new-session" | 
 export function Welcome() {
   return (
     <div className="welcome">
-      <LogoMark />
+      <div className="welcome-logo-row">
+        <LogoMark />
+        <div className="welcome-brand">
+          <span className="welcome-brand-name">ainone</span>
+          <span className="welcome-brand-sub">Agent in One</span>
+        </div>
+      </div>
       <h1 className="welcome-headline">一个窗口，驱动所有 AI Agent</h1>
       <p className="welcome-question">今天做些什么?</p>
       <div className="welcome-hints">

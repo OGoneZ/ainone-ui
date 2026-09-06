@@ -413,7 +413,34 @@ select {
   color: var(--text-secondary);
 }
 
+/* logo + 品牌字一行排布 */
+.welcome-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.welcome-brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.welcome-brand-name {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.welcome-brand-sub {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
 .welcome-hints {
+  align-items: flex-start;
   margin-top: 10px;
   display: flex;
   flex-direction: column;
@@ -423,7 +450,6 @@ select {
 .welcome-hint {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
   font-size: 13px;
   color: var(--text-secondary);
