@@ -132,22 +132,12 @@ export function doublePress(now: number, last: number, windowMs: number): boolea
 
 // —— 展示 ——
 
-const isMac = () => typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
-
-/** 绑定的展示文案：mac 用 ⌃⌥⇧⌘ 符号，其他平台 Ctrl/Alt/Shift+ 键名 */
+/** 绑定的展示文案。mac 也输出 Ctrl+/Alt+/Shift+ 字面（用户指定：不用 ⌃⌥⇧⌘ 符号）。 */
 export function formatBinding(b: Binding): string {
-  const mac = isMac();
   const parts: string[] = [];
-  if (mac) {
-    if (b.ctrl) parts.push("⌃");
-    if (b.alt) parts.push("⌥");
-    if (b.shift) parts.push("⇧");
-    if (b.meta) parts.push("⌘");
-  } else {
-    if (b.ctrl || b.meta) parts.push("Ctrl+");
-    if (b.alt) parts.push("Alt+");
-    if (b.shift) parts.push("Shift+");
-  }
+  if (b.ctrl || b.meta) parts.push("Ctrl+");
+  if (b.alt) parts.push("Alt+");
+  if (b.shift) parts.push("Shift+");
   return parts.join("") + prettyCode(b.code);
 }
 

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// NewSessionModal 测试（P26b 两步向导改写）：
-// 第一步 harness（↑↓ 移动高亮、Enter 在「下一步」项推进、点选项仅选中不推进）→
-// 第二步工作区（↑↓、Enter 在「开始对话」项创建）；presetWorkspaceId 直落第二步。
+// NewSessionModal 测试（P26c 两步向导改写）：
+// 每步列表只放业务选项（无「下一步/上一步/开始对话」操作项；第二步保留「新建工作区」）；
+// 键盘：↑↓ 移高亮、第一步 →/Enter 进第二步、第二步 ← 回上一步、Enter 确认创建；
+// 鼠标：点选项仅选中，推进/回退用底部按钮。
 // 键盘模拟用 fireEvent.keyDown 直发 cmdk root（userEvent 在 jsdom 下的
 // 焦点模型与 cmdk 的监听不匹配，实测不触发导航）。
 // pickDirectory 被 mock，直接返回目录路径。
@@ -61,101 +62,128 @@ function selectedText(): string {
   return document.querySelector('[cmdk-item][aria-selected="true"]')?.textContent ?? "(none)";
 }
 
-describe("NewSessionModal（P26b 两步向导）", () => {
-  it("第一步渲染 harness 组（含未安装禁用项）+「下一步」操作项，首项默认高亮", () => {
+describe("NewSessionModal（P26c 两步向导）", () => {
+  it("第一步：只有 harness 选项，无任何操作面板项", () => {
     renderModal();
     expect(screen.getByText(/选择 Harness/)).toBeInTheDocument();
     expect(screen.getByText("Oh My Pi")).toBeInTheDocument();
-    expect(screen.getByText("Pi")).toBeInTheDocument(); // 未安装也渲染，disabled
-    expect(screen.getByText("下一步 →")).toBeInTheDocument();
-    // 工作区列表不在第一步出现
+    expect(screen.getByText("Pi")).toBeInTheDocument();
+    // P26c：操作面板已删
+    expect(screen.queryByText("下一步 →")).not.toBeInTheDocument();
     expect(screen.queryByText(/未归组/)).not.toBeInTheDocument();
     expect(selectedText()).toContain("Oh My Pi");
+    // 底部按钮：下一步 / 取消
+    expect(screen.getByTestId("ns-next-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("ns-confirm-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ns-back-btn")).not.toBeInTheDocument();
   });
 
-  it("↑↓ 移动高亮（含跳过 disabled 项、跨组连续），停在选项上不推进", () => {
+  it("↑↓ 移动高亮（跳过 disabled），不推进步骤", () => {
     const { container } = renderModal();
-    // Oh My Pi → (Pi disabled 跳过) 下一步
-    pressKey(container, "ArrowDown");
-    expect(selectedText()).toContain("下一步");
-    // loop 回绕
+    // Oh My Pi → (Pi disabled 跳过) 回到 Oh My Pi（只有两个项，loop）
     pressKey(container, "ArrowDown");
     expect(selectedText()).toContain("Oh My Pi");
-    pressKey(container, "ArrowUp");
-    expect(selectedText()).toContain("下一步");
-    // 仍在第一步
-    expect(screen.getByText(/选择 Harness/)).toBeInTheDocument();
-  });
-
-  it("Enter 高亮在 harness 项上 = 仅选中该 harness，不推进", () => {
-    const { container } = renderModal();
-    pressKey(container, "Enter"); // 高亮 Oh My Pi → 选中
     expect(screen.getByText(/选择 Harness/)).toBeInTheDocument(); // 仍在第一步
-    const omp = screen.getByText("Oh My Pi").closest("[cmdk-item]");
-    expect(omp?.querySelector(".ns-item-check")).toBeTruthy();
   });
 
-  it("Enter 高亮在「下一步」项上推进第二步", () => {
+  it("→ 键直接进第二步", () => {
     const { container } = renderModal();
-    pressKey(container, "ArrowDown"); // → 下一步
-    pressKey(container, "Enter");
+    pressKey(container, "ArrowRight");
     expect(screen.getByText(/选择工作目录/)).toBeInTheDocument();
     expect(screen.getByText(/未归组/)).toBeInTheDocument();
     expect(screen.getByText("dev")).toBeInTheDocument();
   });
 
-  it("鼠标点击 harness 项仅选中（✓ 移动），不推进", async () => {
+  it("Enter 在第一步直接进第二步（高亮在 harness 项上）", async () => {
+    const { container } = renderModal();
+    pressKey(container, "Enter");
+    await new Promise((r) => setTimeout(r, 10)); // 等 React 提交换步渲染
+    expect(screen.getByText(/选择工作目录/)).toBeInTheDocument();
+  });
+
+  it("第二步：只有工作区选项 + 新建工作区，无上一步/开始对话面板项", async () => {
+    const { container } = renderModal();
+    pressKey(container, "ArrowRight"); // 进第二步
+    await new Promise((r) => setTimeout(r, 10));
+    expect(screen.getByText("＋ 新建工作区（选目录）")).toBeInTheDocument();
+    // P26c：操作面板已删（底部按钮保留「开始对话」，列表内无此项）
+    expect(screen.queryByText(/上一步（重选 harness）/)).not.toBeInTheDocument();
+    expect(container.querySelector('[data-value="ns-confirm"]')).toBeNull();
+    // 底部按钮：上一步 / 开始对话 / 取消
+    expect(screen.getByTestId("ns-back-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("ns-confirm-btn")).toBeInTheDocument();
+  });
+
+  it("第二步 ← 键回第一步", () => {
+    const { container } = renderModal();
+    pressKey(container, "ArrowRight"); // 进
+    pressKey(container, "ArrowLeft"); // 回
+    expect(screen.getByText(/选择 Harness/)).toBeInTheDocument();
+  });
+
+  it("第二步 ↑↓ 高亮即选中（✓ 跟随高亮），不推进步骤", async () => {
+    const { container } = renderModal();
+    pressKey(container, "ArrowRight"); // 进第二步，高亮=已选中的 dev
+    await new Promise((r) => setTimeout(r, 10));
+    expect(selectedText()).toContain("dev");
+    // ↑ 到未归组 → ✓ 跟随（高亮即选中）
+    pressKey(container, "ArrowUp");
+    expect(selectedText()).toContain("未归组");
+    const none = screen.getByText(/未归组/).closest("[cmdk-item]");
+    expect(none?.querySelector(".ns-item-check")).toBeTruthy();
+    const dev = screen.getByText("dev").closest("[cmdk-item]");
+    expect(dev?.querySelector(".ns-item-check")).toBeFalsy();
+    // 仍在第二步
+    expect(screen.getByText(/选择工作目录/)).toBeInTheDocument();
+  });
+
+  it("第二步 Enter 直接确认创建（高亮在已选中的工作区项上）", async () => {
+    const onConfirm = vi.fn();
+    const { container } = renderModal(onConfirm);
+    pressKey(container, "ArrowRight"); // 进第二步，高亮=dev（受控选中）
+    await new Promise((r) => setTimeout(r, 10));
+    pressKey(container, "Enter"); // 直接创建
+    expect(onConfirm).toHaveBeenCalledWith("omp", "ws-1", "/Users/me/dev");
+  });
+
+  it("第二步高亮在「新建工作区」时 Enter 不创建（交给 cmdk 走选目录）", async () => {
+    const onConfirm = vi.fn();
+    pick.mockResolvedValue("/Users/me/new-project");
+    const { container } = renderModal(onConfirm);
+    pressKey(container, "ArrowRight"); // 进第二步，高亮=dev
+    await new Promise((r) => setTimeout(r, 10));
+    pressKey(container, "ArrowDown"); // dev → 新建工作区
+    expect(selectedText()).toContain("新建工作区");
+    pressKey(container, "Enter");
+    // 不创建会话，改走 pickDirectory
+    await vi.waitFor(() => expect(pick).toHaveBeenCalled());
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("鼠标：点 harness 项仅选中不推进；底部「下一步」按钮推进", async () => {
     renderModal();
     const user = userEvent.setup();
     await user.click(screen.getByText("Oh My Pi"));
     expect(screen.getByText(/选择 Harness/)).toBeInTheDocument(); // 不推进
     const omp = screen.getByText("Oh My Pi").closest("[cmdk-item]");
     expect(omp?.querySelector(".ns-item-check")).toBeTruthy();
-    // 换选另一可用项 → ✓ 移动（能改变）
-  });
-
-  it("底部「下一步」按钮推进；第二步底部按钮为「开始对话」", async () => {
-    renderModal();
-    const user = userEvent.setup();
     await user.click(screen.getByTestId("ns-next-btn"));
     expect(screen.getByText(/选择工作目录/)).toBeInTheDocument();
-    expect(screen.getByTestId("ns-confirm-btn")).toBeInTheDocument();
   });
 
-  it("第二步键盘全程：↑↓ 到「开始对话」项回车创建", () => {
+  it("鼠标：第二步点工作区项仅选中；「上一步」按钮回退；「开始对话」创建", async () => {
     const onConfirm = vi.fn();
     const { container } = renderModal(onConfirm);
-    pressKey(container, "ArrowDown"); // 下一步
-    pressKey(container, "Enter"); // 推进
-    // 第二步列表项顺序：未归组 / dev / 新建工作区 / 上一步 / 开始对话
-    for (let i = 0; i < 5; i++) pressKey(container, "ArrowDown");
-    expect(selectedText()).toContain("开始对话");
-    pressKey(container, "Enter");
-    expect(onConfirm).toHaveBeenCalledWith("omp", "ws-1", "/Users/me/dev");
-  });
-
-  it("第二步鼠标点工作区项仅选中；点「开始对话」按钮创建", async () => {
-    const onConfirm = vi.fn();
-    const { container } = renderModal(onConfirm);
-    pressKey(container, "ArrowDown");
-    pressKey(container, "Enter"); // 推进
+    pressKey(container, "ArrowRight"); // 进第二步
     const user = userEvent.setup();
-    await user.click(screen.getByText("dev")); // 仅选中
+    await user.click(screen.getByText("dev"));
     expect(screen.getByText(/选择工作目录/)).toBeInTheDocument(); // 不创建
-    expect(document.querySelector('[cmdk-item][aria-selected="true"]')?.textContent).toContain("dev");
+    await user.click(screen.getByTestId("ns-back-btn"));
+    expect(screen.getByText(/选择 Harness/)).toBeInTheDocument();
+    // 再进第二步 → 开始对话
+    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByTestId("ns-confirm-btn"));
     expect(onConfirm).toHaveBeenCalledWith("omp", "ws-1", "/Users/me/dev");
-  });
-
-  it("第二步「上一步」项回退重选 harness", () => {
-    const { container } = renderModal();
-    pressKey(container, "ArrowDown");
-    pressKey(container, "Enter"); // 进第二步
-    // 未归组(0)→dev(1)→新建工作区(2)→上一步(3)
-    for (let i = 0; i < 4; i++) pressKey(container, "ArrowDown");
-    expect(selectedText()).toContain("上一步");
-    pressKey(container, "Enter");
-    expect(screen.getByText(/选择 Harness/)).toBeInTheDocument();
   });
 
   it("presetWorkspaceId 预填：直落第二步且对应工作区带 ✓", () => {
@@ -174,8 +202,9 @@ describe("NewSessionModal（P26b 两步向导）", () => {
     expect(dev?.querySelector(".ns-item-check")).toBeTruthy();
   });
 
-  it("第二步新建工作区：选不存在的目录 → upsert + onWorkspaceCreated", async () => {
+  it("第二步新建工作区：选不存在目录 → upsert + onWorkspaceCreated；确认创建携带新工作区", async () => {
     const onCreated = vi.fn();
+    const onConfirm = vi.fn();
     pick.mockResolvedValue("/Users/me/new-project");
     render(
       <NewSessionModal
@@ -184,15 +213,16 @@ describe("NewSessionModal（P26b 两步向导）", () => {
         workspaces={workspaces}
         presetWorkspaceId="ws-1"
         onClose={() => {}}
-        onConfirm={vi.fn()}
+        onConfirm={onConfirm}
         onWorkspaceCreated={onCreated}
       />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByText(/新建工作区/));
-    await user.click(screen.getByTestId("ns-confirm-btn"));
-    expect(upsert).toHaveBeenCalled();
+    await vi.waitFor(() => expect(upsert).toHaveBeenCalled());
     expect(onCreated).toHaveBeenCalled();
+    await user.click(screen.getByTestId("ns-confirm-btn"));
+    expect(onConfirm).toHaveBeenCalledWith("omp", "ws-new", "/Users/me/new-project");
   });
 
   it("第二步新建工作区：选已存在目录 → 静默选中既有", async () => {

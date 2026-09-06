@@ -343,6 +343,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     // P25：双击 Esc 中断也在此层——单 Esc 已被上方编辑态/快问窗消费的场景不再触发中断
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // P26b：模态浮层开着时 Esc 归浮层（Radix Dialog 关闭等），不进 pane 消费链
+        const target = e.target as Element | null;
+        if (target?.closest?.("[role='dialog'], [cmdk-root]")) return;
         if (editTargetRef.current) {
           cancelEdit();
           lastEscRef.current = 0; // 消费型 Esc 不参与双击
@@ -1275,6 +1278,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     function onPaneKey(e: KeyboardEvent) {
       if (!(activeRef.current ?? true)) return;
       if (e.isComposing) return;
+      // P26b：模态浮层（弹窗/下拉等）开着时让位——事件 target 在浮层内，
+      // pane 快捷键不应响应（如新建会话弹窗里 ↑↓ 移动 cmdk 高亮，
+      // 不应同时滚动背后 session 的聊天记录）
+      const target = e.target as Element | null;
+      if (target?.closest?.("[role='dialog'], [cmdk-root]")) return;
       const match = (id: ShortcutId) => matchShortcut(e, keymapDefs, id, keymapOverrides);
       if (match("pane.focus-zone")) {
         e.preventDefault();
