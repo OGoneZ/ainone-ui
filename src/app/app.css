@@ -327,7 +327,11 @@ select {
   position: relative;
   border: 1px solid var(--bg-3);
   border-radius: var(--radius-sm);
-  overflow: hidden;
+  /* p20l：不能 overflow:hidden——它把聚焦窗格光晕的超出部分裁掉（左右分屏时
+   * 左窗格左缘/右窗格右缘的光晕贴着 host 内边界，全被吃掉，症状「整个大窗口
+   * 一圈遮挡」）。内容层（flexlayout 面板 100% 填充）本身不会溢出 host，
+   * 放开裁切只影响光晕/阴影这类装饰性溢出。 */
+  overflow: visible;
 }
 
 .panel {

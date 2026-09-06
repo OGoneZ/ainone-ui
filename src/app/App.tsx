@@ -45,7 +45,7 @@ import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
-import { splitShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
+import { splitShortcut, closeTabShortcut, inEditable, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { clampWidth, sidebarMaxWidth } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
@@ -216,7 +216,7 @@ function App() {
   }
 
   /** F-16-5（DEC-52）：分屏后对新增 tabset 所在层级的同向 row 均分权重，
-   *  连续 Ctrl+D 等分而非二分。align = "row"（左右）| "col"（上下） */
+   *  连续分屏等分而非二分。align = "row"（左右）| "col"（上下） */
   function equalizeAfterSplit(m: Model, orientation: "horz" | "vert") {
     const active = m.getActiveTabset();
     if (!active) return;
@@ -225,7 +225,8 @@ function App() {
     m.doAction(Actions.adjustWeights(eq.rowId, eq.weights));
   }
 
-  /** 分屏：Ctrl+D（左右）/ Ctrl+Shift+D（上下），新窗格 = 同 harness 同 cwd 新会话（DEC-23）。
+  /** 分屏：Ctrl+Shift+D（左右）/ Ctrl+Shift+E（上下）；Ctrl+D 关闭当前 tab。
+   *  新窗格 = 同 harness 同 cwd 新会话（DEC-23，快捷键重映射见 p20n）。
    *  源 tab 是终端（P23）→ 新窗格 = 同 workspace/cwd 新终端（WARP 语义按种类对齐）。 */
   function splitCurrent(axis: "row" | "col") {
     const src = activeTab;
@@ -290,6 +291,17 @@ function App() {
   // 快捷键监听：仅在编辑器区（非输入框）响应分屏快捷键（AC-P10-8）
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // p20n：Ctrl/Cmd+D = 关闭当前窗格的当前 tab（原分屏快捷键让位，见 layout.ts）
+      if (closeTabShortcut(e)) {
+        if (inEditable(document.activeElement)) return;
+        const m = getModel();
+        const tabset = m.getActiveTabset();
+        const sel = tabset?.getSelectedNode?.();
+        if (!sel) return;
+        e.preventDefault();
+        m.doAction(Actions.deleteTab(sel.getId()));
+        return;
+      }
       const axis = splitShortcut(e);
       if (!axis) return;
       if (inEditable(document.activeElement)) return;
@@ -342,7 +354,7 @@ function App() {
       }
     };
     // P20f：点击窗格任意位置（含聊天内容区）即切焦点 + 聚焦输入框。
-    // 两个坑（实测）：
+    // 三个坑（实测）：
     // ① flexlayout 0.10.8 的 tab 面板（.flexlayout__tab → .panel）挂在
     //    .flexlayout__layout 下，**不在** .flexlayout__tabset_container 内——
     //    closest 容器必然 miss。命中判定改为「closest 容器 或 closest tab 面板」
@@ -350,7 +362,17 @@ function App() {
     // ② flexlayout 自带 tab 面板 pointerdown → setActiveTabset（只切 active 不
     //    focus）；我们做的是 superset（切 active + focus 输入框），重复 doAction
     //    set active 幂等无害。
-    function onPanePointerDown(e: PointerEvent) {
+    // ③ p20m：macOS WKWebView 对**原生鼠标输入不派发 pointer events**（黑匣子
+    //    实锤：trusted 点击只有 mousedown+click，零 pointerdown；PointerEvent
+    //    构造器存在但仅合成派发可用）→ 监听 pointerdown 的 onPanePointerDown
+    //    对真实点击永不触发（症状：Cmd+方向键能切、鼠标点不能切）。改为
+    //    mousedown；同时保留 pointerdown 以覆盖只发 pointer 的环境（触屏等），
+    //    同一真实按压两者都发时用 200ms 去重窗口防双触发。
+    let lastPaneSwitchAt = 0;
+    function paneSwitchFromEvent(e: MouseEvent) {
+      if (e.button !== 0) return;
+      const now = Date.now();
+      if (now - lastPaneSwitchAt < 200) return; // pointerdown/mousedown 双发去重
       if (!(e.target instanceof Element)) return;
       const host = layoutHostRef.current;
       if (!host) return;
@@ -382,14 +404,23 @@ function App() {
       if (nodeIdx < 0 || nodeIdx >= allNodes.length) return;
       const node = allNodes[nodeIdx];
       if (!node || m0.getActiveTabset()?.getId() === node.id) return;
+      lastPaneSwitchAt = now;
       activateTabsetAndComposer(node.id);
     }
+    function onPanePointerDown(e: PointerEvent) {
+      paneSwitchFromEvent(e);
+    }
+    function onPaneMouseDown(e: MouseEvent) {
+      paneSwitchFromEvent(e);
+    }
     window.addEventListener("pointerdown", onPanePointerDown, true);
+    window.addEventListener("mousedown", onPaneMouseDown, true); // p20m：WKWebView 原生点击不发 pointerdown
     window.addEventListener("keydown", onGlobalSearch);
     window.addEventListener("keydown", onKey);
     window.addEventListener("keydown", onFocusMove);
     return () => {
       window.removeEventListener("pointerdown", onPanePointerDown, true);
+      window.removeEventListener("mousedown", onPaneMouseDown, true);
       window.removeEventListener("keydown", onGlobalSearch);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keydown", onFocusMove);

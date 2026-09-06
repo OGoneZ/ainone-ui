@@ -1,6 +1,7 @@
 // P10 分屏编排纯逻辑（F-10-3）。零依赖，可单测。
 //
-// 快捷键分屏语义（DEC-23）：Ctrl+D 左右切分、Ctrl+Shift+D 上下切分；
+// 快捷键分屏语义（DEC-23，p20n 调整）：Ctrl+Shift+D 左右切分、Ctrl+Shift+E 上下切分、
+// Ctrl+D 关闭当前窗格的当前 tab（原 Ctrl+D 分屏与系统/输入法冲突且不灵敏）；
 // 新窗格 = 同 harness + 同 cwd 的新会话（WARP 终端语义）。
 // 只有「编辑器区获得焦点（非输入框）」时响应，避免拦截对话输入。
 //
@@ -20,16 +21,32 @@ export function inEditable(el: Element | null | undefined): boolean {
   return (el as HTMLElement).isContentEditable === true;
 }
 
-/** 解析键盘事件是否为分屏快捷键；不是则返回 null */
+/** 解析键盘事件是否为分屏快捷键；不是则返回 null。
+ *  p20n：Ctrl/Cmd+Shift+D 左右、Ctrl/Cmd+Shift+E 上下（裸 Ctrl+D 让位给「关闭」） */
 export function splitShortcut(e: {
   key: string;
   ctrlKey: boolean;
   metaKey: boolean;
   shiftKey: boolean;
 }): SplitAxis | null {
-  if ((e.key ?? "").toLowerCase() !== "d") return null;
+  if (!e.shiftKey) return null;
+  const k = (e.key ?? "").toLowerCase();
   if (!e.ctrlKey && !e.metaKey) return null;
-  return e.shiftKey ? "col" : "row";
+  if (k === "d") return "row";
+  if (k === "e") return "col";
+  return null;
+}
+
+/** 解析键盘事件是否为「关闭当前窗格的当前 tab」快捷键（p20n：Ctrl/Cmd+D） */
+export function closeTabShortcut(e: {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}): boolean {
+  if (e.shiftKey) return false;
+  if (!e.ctrlKey && !e.metaKey) return false;
+  return (e.key ?? "").toLowerCase() === "d";
 }
 
 /** 焦点方向（Ctrl+方向键在分屏窗格间移动） */

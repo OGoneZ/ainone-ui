@@ -481,8 +481,13 @@ body {
   background: var(--bg-base);
   /* 面板为 absolute 定位元素：z 提升让光晕压在相邻窗格之上——
    * 否则左右邻居（DOM 靠后/不透明背景）会盖住光晕的左右边缘
-   * （实测症状：光晕只在上/下边可见）。 */
-  z-index: 7;
+   * （实测症状：光晕只在上/下边可见）。
+   * p20k：z 值必须 > 10——flexlayout 给 .flexlayout__splitter 设了
+   * position:relative + z-index:10 + 不透明背景（--bg-2），splitter 恰好
+   * 骑在窗格左右边界各 8px，z-index:7 时光晕左右整段被它吃掉（elementFromPoint
+   * 实锤：光晕左右边缘命中的全是 splitter；上下分屏时反过来盖上下边）。
+   * 11 > 10 压过 splitter，仍远低于浮层阶梯（--z-float=20/popover=50）。 */
+  z-index: 11;
 }
 
 .flexlayout__tabset-selected {

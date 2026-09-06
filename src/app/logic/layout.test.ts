@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import {
   inEditable,
   splitShortcut,
+  closeTabShortcut,
   resolveSplitTab,
   extractTabsFromModel,
   activeKeyOf,
@@ -13,16 +14,28 @@ import {
 } from "./layout";
 
 describe("P10 分屏纯逻辑", () => {
-  it("splitShortcut：Ctrl+D→row，Ctrl+Shift+D→col，其余→null", () => {
-    expect(splitShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: false })).toBe("row");
-    expect(splitShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: true })).toBe("col");
-    expect(splitShortcut({ key: "D", ctrlKey: true, metaKey: false, shiftKey: false })).toBe("row");
+  // p20n 重映射：分屏快捷键带 Shift（Ctrl/Cmd+Shift+D 左右、Ctrl/Cmd+Shift+E 上下），
+  // 裸 Ctrl/Cmd+D 让位给「关闭当前 tab」（closeTabShortcut）。
+  it("splitShortcut：Ctrl+Shift+D→row，Ctrl+Shift+E→col，无 Shift/无修饰→null", () => {
+    expect(splitShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: true })).toBe("row");
+    expect(splitShortcut({ key: "e", ctrlKey: true, metaKey: false, shiftKey: true })).toBe("col");
+    expect(splitShortcut({ key: "D", ctrlKey: true, metaKey: false, shiftKey: true })).toBe("row");
+    expect(splitShortcut({ key: "e", ctrlKey: false, metaKey: true, shiftKey: true })).toBe("col");
+    // 裸 Ctrl+D 不再是分屏（让位给关闭 tab）
+    expect(splitShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: false })).toBeNull();
     // 无修饰键不触发
-    expect(splitShortcut({ key: "d", ctrlKey: false, metaKey: false, shiftKey: false })).toBeNull();
-    // 非 d 键不触发
-    expect(splitShortcut({ key: "s", ctrlKey: true, metaKey: false, shiftKey: false })).toBeNull();
-    // macOS Cmd+D 等同 Ctrl+D
-    expect(splitShortcut({ key: "d", ctrlKey: false, metaKey: true, shiftKey: false })).toBe("row");
+    expect(splitShortcut({ key: "d", ctrlKey: false, metaKey: false, shiftKey: true })).toBeNull();
+    // 非 d/e 键不触发
+    expect(splitShortcut({ key: "s", ctrlKey: true, metaKey: false, shiftKey: true })).toBeNull();
+  });
+
+  it("closeTabShortcut：Ctrl/Cmd+D（无 Shift）→ true，带 Shift 或其他键 → false", () => {
+    expect(closeTabShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: false })).toBe(true);
+    expect(closeTabShortcut({ key: "d", ctrlKey: false, metaKey: true, shiftKey: false })).toBe(true);
+    // 带 Shift 是分屏不是关闭
+    expect(closeTabShortcut({ key: "d", ctrlKey: true, metaKey: false, shiftKey: true })).toBe(false);
+    expect(closeTabShortcut({ key: "e", ctrlKey: true, metaKey: false, shiftKey: false })).toBe(false);
+    expect(closeTabShortcut({ key: "d", ctrlKey: false, metaKey: false, shiftKey: false })).toBe(false);
   });
 
   it("inEditable：textarea/input/contenteditable 不可拦截，普通元素可拦截", () => {
