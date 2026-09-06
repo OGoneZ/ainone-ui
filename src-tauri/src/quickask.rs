@@ -226,10 +226,12 @@ pub fn classify_response(status: u16, body: &str) -> Result<String, String> {
 }
 
 /// 纯函数：拼 anthropic /v1/messages 请求体。
+/// max_tokens 2048：实测网关模型（glm-5.3-flash）思考块消耗输出预算——
+/// 1024 时可能全被 thinking_delta 吃满、text_delta 一个没有（AC 实锤）。
 pub fn build_anthropic_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "messages": [{ "role": "user", "content": text }],
     })
 }
@@ -269,12 +271,15 @@ pub fn sse_delta(line: &str) -> Option<String> {
     v["choices"][0]["delta"]["content"].as_str().map(String::from)
 }
 
-/// 纯函数：从一条 SSE data 行提取 anthropic 增量（content_block_delta 的 text）。
+/// 纯函数：从一条 SSE data 行提取 anthropic 增量。
+/// 只取 content_block_delta 且 delta.type=="text_delta" 的 text —— 该网关模型
+/// （glm-5.3-flash）还会推 thinking_delta（思考块），必须跳过，否则正文被
+/// 思考文本污染；且 max_tokens 被思考耗尽时 text_delta 一个都没有 → 空响应。
 pub fn sse_delta_anthropic(line: &str) -> Option<String> {
     let payload = line.strip_prefix("data: ")?;
     let payload = payload.trim();
     let v: serde_json::Value = serde_json::from_str(payload).ok()?;
-    if v["type"].as_str() == Some("content_block_delta") {
+    if v["type"].as_str() == Some("content_block_delta") && v["delta"]["type"].as_str() == Some("text_delta") {
         return v["delta"]["text"].as_str().map(String::from);
     }
     None
@@ -495,6 +500,14 @@ mod tests {
         assert_eq!(
             sse_delta_anthropic(r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"解释"}}"#).unwrap(),
             "解释"
+        );
+        // thinking_delta（思考块）必须跳过——实测网关模型会推思考流，
+        // 不滤会把思考文本当正文渲染
+        assert_eq!(
+            sse_delta_anthropic(
+                r#"data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Let me"}}"#
+            ),
+            None
         );
         // 其他事件（message_start 等）无增量
         assert_eq!(
