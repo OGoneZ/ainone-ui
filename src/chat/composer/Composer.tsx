@@ -88,6 +88,19 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 8 * 22)}px`;
   }, [input, expanded, textareaRef]);
 
+  // P26c：键盘高亮项滚动跟随——↑↓ 选到菜单可视区外时高亮项自动滚入（block:nearest 不扰动当前视图）
+  useEffect(() => {
+    const menu = slashMenuRef.current;
+    if (!menu || !slashOpen || slashMatches.length === 0) return;
+    menu.querySelector(".slash-item.active")?.scrollIntoView({ block: "nearest" });
+  }, [slashHighlight, slashOpen, slashMatches, slashMenuRef]);
+
+  useEffect(() => {
+    const menu = atMenuRef.current;
+    if (!menu || !atMenu || atMatches.length === 0) return;
+    menu.querySelector(".slash-item.active")?.scrollIntoView({ block: "nearest" });
+  }, [atHighlight, atMenu, atMatches, atMenuRef]);
+
   function submit(e: FormEvent) {
     e.preventDefault();
     setSlashIdx(-1);
