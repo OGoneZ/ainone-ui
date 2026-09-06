@@ -50,14 +50,42 @@ describe("SettingsModal", () => {
     expect(calls.some((c) => c.cmd === "adapters_list")).toBe(true);
   });
 
-  it("F-8-7 快问模型配置区渲染", async () => {
+  it("F-8-7 快问模型配置区渲染（P22 重排版：分区标题 + 卡片标题 + 输入框）", async () => {
     mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
 
-    // 快问配置区标题 + 输入框占位
-    expect(await screen.findByText("快问模型（选中文本「快速解释」用）")).toBeInTheDocument();
+    // 分区标题 + 配置卡标题 + 输入框占位
+    expect(await screen.findByText("模型服务")).toBeInTheDocument();
+    expect(screen.getByText("快问模型")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("https://api.openai.com/v1")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("gpt-4o-mini")).toBeInTheDocument();
+  });
+
+  it("P22 语音服务配置区渲染", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
+
+    expect(await screen.findByText("语音服务")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("https://asr.zhubaoduo.com/v1/audio/transcriptions")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("mano-asr")).toBeInTheDocument();
+  });
+
+  it("P22 快问来源徽标：auto:claude-code → 展示自动来源", async () => {
+    const { quickAskConfigGet } = await import("@/ipc/quickask");
+    vi.mocked(quickAskConfigGet).mockResolvedValueOnce({
+      base_url: "https://gw.example.com",
+      model: "saver/haiku",
+      timeout_ms: 30000,
+      has_api_key: true,
+      protocol: "anthropic",
+      source: "auto:claude-code",
+    });
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
+
+    expect(await screen.findByText("自动：Claude Code")).toBeInTheDocument();
+    // 接口地址占位随协议切换
+    expect(screen.getByPlaceholderText("https://gw.example.com")).toBeInTheDocument();
   });
 
   it("保存校验：清空 id 后保存 → 提示错误，不调 adapters_save", async () => {

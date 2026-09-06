@@ -1,4 +1,5 @@
-// 设置页：适配器增删改查 + 快问模型（P8 F-8-7）。
+// 设置页（P22 重排版）：两个分区——「模型服务」（快问模型 + 语音服务）与
+// 「harness 适配器」（卡片式行）。内容区限高滚动，底部操作栏固定。
 // 验收目标（plan.md AC-P2-1/6）：新增一条自定义适配器 → 保存后新会话下拉可用，全程不改代码；
 // 配置损坏时应用不崩溃并提示修复。
 
@@ -9,6 +10,7 @@ import { refreshAdapterStatus } from "@/ipc/adapters";
 import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
+import { asrConfigGet, asrConfigSave, type AsrConfigView } from "@/ipc/asr";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface Props {
@@ -47,6 +49,13 @@ function fromEditable(a: EditableAdapter): Adapter {
   };
 }
 
+/** 快问来源徽标文案（P22） */
+function sourceBadge(source: string): { text: string; auto: boolean } | null {
+  if (source === "auto:claude-code") return { text: "自动：Claude Code", auto: true };
+  if (source === "auto:codex") return { text: "自动：Codex", auto: true };
+  return null; // manual / 空 = 自定义
+}
+
 export function SettingsModal({ open, onClose, onSaved }: Props) {
   const [items, setItems] = useState<EditableAdapter[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -62,19 +71,28 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
   });
   const [qaKey, setQaKey] = useState("");
   const [qaMsg, setQaMsg] = useState<string | null>(null);
+  // P22 语音服务配置
+  const [asr, setAsr] = useState<AsrConfigView>({ base_url: "", model: "", has_api_key: false });
+  const [asrKey, setAsrKey] = useState("");
+  const [asrMsg, setAsrMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     setLoading(true);
     setQaMsg(null);
+    setAsrMsg(null);
     setQaKey("");
+    setAsrKey("");
     invoke<Adapter[]>("adapters_list")
       .then((list) => setItems(list.map(toEditable)))
       .catch((e) => setError(`读取适配器失败：${String(e)}`))
       .finally(() => setLoading(false));
     quickAskConfigGet()
-      .then(setQa)
+      .then((v) => setQa(v ?? { base_url: "", model: "", timeout_ms: 30000, has_api_key: false, protocol: "openai", source: "" }))
+      .catch(() => {});
+    asrConfigGet()
+      .then((v) => setAsr(v ?? { base_url: "", model: "", has_api_key: false }))
       .catch(() => {});
   }, [open]);
 
@@ -142,7 +160,7 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
     const adapters = items.map(fromEditable);
     try {
       await invoke("adapters_save", { adapters });
-      // F-8-7：快问模型配置一并保存（apiKey 留空 = 保留既有密钥）
+      // F-8-7：快问模型配置一并保存（apiKey 留空 = 保留既有密钥；显式保存 → 手动来源）
       setQaMsg(null);
       await quickAskConfigSave({
         base_url: qa.base_url,
@@ -152,6 +170,14 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
       });
       setQaKey("");
       setQaMsg("快问模型已保存");
+      // P22：语音服务配置一并保存
+      await asrConfigSave({
+        base_url: asr.base_url,
+        model: asr.model,
+        api_key: asrKey,
+      });
+      setAsrKey("");
+      setAsrMsg("语音服务已保存");
       onSaved();
       onClose();
     } catch (e) {
@@ -161,110 +187,192 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
 
   if (!open) return null;
 
+  const badge = sourceBadge(qa.source);
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-[720px]">
+      <DialogContent className="max-w-[720px] settings-modal">
         <DialogHeader>
-          <DialogTitle>harness 设置</DialogTitle>
+          <DialogTitle>设置</DialogTitle>
         </DialogHeader>
         {loading && <p>加载中…</p>}
         {error && <p className="modal-error">{error}</p>}
-        <div className="adapter-list">
-          {items.map((a) => (
-            <div key={a.id} className="adapter-row">
-              <input
-                placeholder="id"
-                value={a.id}
-                onChange={(e) => update(a.id, { id: e.target.value })}
-              />
-              <input
-                placeholder="名称"
-                value={a.name}
-                onChange={(e) => update(a.id, { name: e.target.value })}
-              />
-              <input
-                placeholder="program"
-                value={a.program}
-                onChange={(e) => update(a.id, { program: e.target.value, available: null })}
-              />
-              <input
-                placeholder="cwd"
-                value={a.cwd}
-                onChange={(e) => update(a.id, { cwd: e.target.value })}
-              />
-              <input
-                placeholder="logo 色 (#rrggbb)"
-                value={a.logo}
-                onChange={(e) => update(a.id, { logo: e.target.value })}
-              />
-              <textarea
-                placeholder={'启动参数（每行一个）\n例如：\nacp\n--model\nopus'}
-                value={a.argsText}
-                rows={3}
-                onChange={(e) => update(a.id, { argsText: e.target.value })}
-              />
-              <span className={a.available === null ? "" : a.available ? "ok" : "bad"}>
-                {a.available === null
-                  ? "探测中…"
-                  : a.available
-                    ? a.resolvedPath
-                      ? `✓ 可用（${a.resolvedPath}）`
-                      : "✓ 可用"
-                    : a.id === "claude-code"
-                      ? "未找到（首次使用时自动安装连接器）"
-                      : "✗ 未找到"}
-              </span>
-              <button onClick={() => testConnection(a.id)} disabled={a.probing}>
-                {a.probing ? "探测中…" : "测试连接"}
-              </button>
-              <button onClick={() => removeRow(a.id)}>删除</button>
-              {a.probe && (
-                <p className={a.probe.ok ? "ok" : "bad"} style={{ gridColumn: "1 / -1", margin: 0 }}>
-                  {a.probe.ok
-                    ? `✓ 握手成功${a.probe.agentInfo.name ? `（${a.probe.agentInfo.name}${a.probe.agentInfo.version ? ` v${a.probe.agentInfo.version}` : ""}）` : ""}`
-                    : a.probe.level === "spawn"
-                      ? `✗ 程序启动失败：${a.probe.message}`
-                      : `✗ 握手失败：${a.probe.message}`}
+
+        <div className="settings-body">
+          {/* ============ 分区一：模型服务 ============ */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">模型服务</h3>
+
+            <div className="settings-card">
+              <div className="settings-card-head">
+                <h4>快问模型</h4>
+                {badge && <span className={`source-badge ${badge.auto ? "auto" : ""}`}>{badge.text}</span>}
+                <span className="settings-card-desc">选中文本「快速解释」用的轻量模型</span>
+              </div>
+              {badge && (
+                <p className="settings-hint">
+                  已自动采用本机 {badge.text.replace("自动：", "")} 的配置，可修改覆盖（修改保存后不再自动更新）。
                 </p>
               )}
+              <div className="settings-grid">
+                <label className="ns-label">
+                  接口地址（{qa.protocol === "anthropic" ? "Anthropic base" : "OpenAI 兼容 base_url"}）
+                  <input
+                    placeholder={qa.protocol === "anthropic" ? "https://gw.example.com" : "https://api.openai.com/v1"}
+                    value={qa.base_url}
+                    onChange={(e) => setQa((q) => ({ ...q, base_url: e.target.value }))}
+                  />
+                </label>
+                <label className="ns-label">
+                  模型名
+                  <input
+                    placeholder="gpt-4o-mini"
+                    value={qa.model}
+                    onChange={(e) => setQa((q) => ({ ...q, model: e.target.value }))}
+                  />
+                </label>
+              </div>
+              <label className="ns-label">
+                API Key（留空 = 保留既有密钥{qa.has_api_key ? "，已配置 ✓" : ""}）
+                <input
+                  type="password"
+                  placeholder={qa.has_api_key ? "已配置（留空不改）" : "sk-…"}
+                  value={qaKey}
+                  onChange={(e) => setQaKey(e.target.value)}
+                />
+              </label>
+              {qaMsg && <p className="ok" style={{ color: "var(--success)" }}>{qaMsg}</p>}
             </div>
-          ))}
+
+            <div className="settings-card">
+              <div className="settings-card-head">
+                <h4>语音服务</h4>
+                <span className="settings-card-desc">语音输入转写用（OpenAI 兼容 audio/transcriptions）</span>
+              </div>
+              <div className="settings-grid">
+                <label className="ns-label">
+                  接口地址（留空用默认）
+                  <input
+                    placeholder="https://asr.zhubaoduo.com/v1/audio/transcriptions"
+                    value={asr.base_url}
+                    onChange={(e) => setAsr((q) => ({ ...q, base_url: e.target.value }))}
+                  />
+                </label>
+                <label className="ns-label">
+                  模型名（留空用默认）
+                  <input
+                    placeholder="mano-asr"
+                    value={asr.model}
+                    onChange={(e) => setAsr((q) => ({ ...q, model: e.target.value }))}
+                  />
+                </label>
+              </div>
+              <label className="ns-label">
+                API Key（留空 = 保留既有密钥{asr.has_api_key ? "，已配置 ✓" : ""}）
+                <input
+                  type="password"
+                  placeholder={asr.has_api_key ? "已配置（留空不改）" : "sk-…"}
+                  value={asrKey}
+                  onChange={(e) => setAsrKey(e.target.value)}
+                />
+              </label>
+              {asrMsg && <p className="ok" style={{ color: "var(--success)" }}>{asrMsg}</p>}
+            </div>
+          </section>
+
+          {/* ============ 分区二：harness 适配器 ============ */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">harness 适配器</h3>
+            <div className="adapter-list">
+              {items.map((a) => (
+                <div key={a.id} className="adapter-row">
+                  <label className="ns-label">
+                    id
+                    <input
+                      placeholder="id"
+                      value={a.id}
+                      onChange={(e) => update(a.id, { id: e.target.value })}
+                    />
+                  </label>
+                  <label className="ns-label">
+                    名称
+                    <input
+                      placeholder="名称"
+                      value={a.name}
+                      onChange={(e) => update(a.id, { name: e.target.value })}
+                    />
+                  </label>
+                  <label className="ns-label">
+                    启动程序
+                    <input
+                      placeholder="program"
+                      value={a.program}
+                      onChange={(e) => update(a.id, { program: e.target.value, available: null })}
+                    />
+                  </label>
+                  <label className="ns-label">
+                    工作目录
+                    <input
+                      placeholder="cwd"
+                      value={a.cwd}
+                      onChange={(e) => update(a.id, { cwd: e.target.value })}
+                    />
+                  </label>
+                  <label className="ns-label">
+                    logo 色（#rrggbb）
+                    <input
+                      placeholder="logo 色 (#rrggbb)"
+                      value={a.logo}
+                      onChange={(e) => update(a.id, { logo: e.target.value })}
+                    />
+                  </label>
+                  <label className="ns-label adapter-args">
+                    启动参数（每行一个）
+                    <textarea
+                      placeholder={'每行一个，例如：\nacp\n--model\nopus'}
+                      value={a.argsText}
+                      rows={3}
+                      onChange={(e) => update(a.id, { argsText: e.target.value })}
+                    />
+                  </label>
+                  <div className="adapter-foot">
+                    <span className={a.available === null ? "" : a.available ? "ok" : "bad"}>
+                      {a.available === null
+                        ? "探测中…"
+                        : a.available
+                          ? a.resolvedPath
+                            ? `✓ 可用（${a.resolvedPath}）`
+                            : "✓ 可用"
+                          : a.id === "claude-code"
+                            ? "未找到（首次使用时自动安装连接器）"
+                            : "✗ 未找到"}
+                    </span>
+                    <span className="adapter-foot-actions">
+                      <button onClick={() => testConnection(a.id)} disabled={a.probing}>
+                        {a.probing ? "探测中…" : "测试连接"}
+                      </button>
+                      <button onClick={() => removeRow(a.id)}>删除</button>
+                    </span>
+                  </div>
+                  {a.probe && (
+                    <p className={a.probe.ok ? "ok" : "bad"} style={{ gridColumn: "1 / -1", margin: 0 }}>
+                      {a.probe.ok
+                        ? `✓ 握手成功${a.probe.agentInfo.name ? `（${a.probe.agentInfo.name}${a.probe.agentInfo.version ? ` v${a.probe.agentInfo.version}` : ""}）` : ""}`
+                        : a.probe.level === "spawn"
+                          ? `✗ 程序启动失败：${a.probe.message}`
+                          : `✗ 握手失败：${a.probe.message}`}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
+
         <div className="modal-actions">
           <button onClick={addRow}>新增 harness</button>
           <button onClick={save}>保存</button>
           <button onClick={onClose}>关闭</button>
-        </div>
-
-        {/* F-8-7 快问模型配置（独立轻量模型，仅快问用，密钥不落 WebView） */}
-        <div className="quickask-config">
-          <h3>快问模型（选中文本「快速解释」用）</h3>
-          <label className="ns-label">
-            接口地址（OpenAI 兼容 base_url）
-            <input
-              placeholder="https://api.openai.com/v1"
-              value={qa.base_url}
-              onChange={(e) => setQa((q) => ({ ...q, base_url: e.target.value }))}
-            />
-          </label>
-          <label className="ns-label">
-            模型名
-            <input
-              placeholder="gpt-4o-mini"
-              value={qa.model}
-              onChange={(e) => setQa((q) => ({ ...q, model: e.target.value }))}
-            />
-          </label>
-          <label className="ns-label">
-            API Key（留空 = 保留既有密钥{qa.has_api_key ? "，已配置 ✓" : ""}）
-            <input
-              type="password"
-              placeholder={qa.has_api_key ? "已配置（留空不改）" : "sk-…"}
-              value={qaKey}
-              onChange={(e) => setQaKey(e.target.value)}
-            />
-          </label>
-          {qaMsg && <p className="ok" style={{ color: "var(--success)" }}>{qaMsg}</p>}
         </div>
       </DialogContent>
     </Dialog>
