@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag（v*）触发：四腿矩阵构建 → 产物汇总 → 上传 Cloudflare R2 + 生成 latest.json
+# 打 tag（v*）触发：四作业矩阵构建 → 产物汇总 → 上传 Cloudflare R2 + 生成 latest.json
 on:
   push:
     tags:
@@ -45,7 +45,8 @@ jobs:
           node-version: 22
           # 注意：不开 cache: pnpm。该缓存机制依赖 `pnpm store path`，本仓库
           # pnpm-workspace.yaml 仅含 onlyBuiltDependencies（非真 workspace），
-          # 会报 "packages field missing or empty" 使四条腿全挂（v0.7.0 首跑实锤）
+          # 会报 "packages field missing or empty" 使四个构建作业全挂（首发实锤，
+          # 见 8711a8a 之前的 ci(release) 提交链）
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -75,7 +76,7 @@ jobs:
         # 注意：签名/公证 env 只在 Apple secrets 实际配置后才注入。secrets 引用
         # 会把空字符串设进环境，tauri bundler 检测到 APPLE_CERTIFICATE 非空才
         # 走 keychain setup——空串同样触发 `security import`，对空数据导入必炸
-        # "SecKeychainItemImport: parameters not valid"（v0.7.0 三跑实锤）。
+        # "SecKeychainItemImport: parameters not valid"（首发三跑实锤）。
         # 未来配好证书后把这段 env 注释还原即可。
         # env:
         #   APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -112,8 +113,8 @@ jobs:
       - name: Read version
         id: ver
         # 版本号取 tag（vX.Y.Z → X.Y.Z），而非 tauri.conf.json——tag 是发布意图，
-        # conf 是仓库基线，两者允许异步前进（tag v0.7.0 时 conf 仍可为 0.1.0）。
-        # R2 目录 / 产物 URL / latest.json 全部以 tag 版本为准，互相对齐。
+        # conf 是仓库基线，两者允许异步前进。R2 目录 / 产物 URL / latest.json
+        # 全部以 tag 版本为准，互相对齐。
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: List bundles (debug)
