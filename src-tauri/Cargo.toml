@@ -38,6 +38,7 @@ dirs = "5"
 #   dev 默认开（tauri.conf.json build.features 含 "webdriver"）；
 #   打包用 tauri.dist.conf.json 覆盖（features 为空）→ release 完全不含此依赖。
 tauri-plugin-webdriver = { version = "0.2", optional = true }
+tauri-plugin-pty = "0.3"
 
 [features]
 webdriver = ["dep:tauri-plugin-webdriver"]
