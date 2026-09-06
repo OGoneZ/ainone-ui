@@ -234,6 +234,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const registerVoiceToggle = useCallback((fn: () => void) => {
     voiceToggleRef.current = fn;
   }, []);
+  // P25：Ctrl+O 全局展开/折叠覆写。三态循环：null→true(全展开)→false(全收起)→true；
+  // 用户手动点单卡回调置 null（回局部态）
+  const [activityOverride, setActivityOverride] = useState<boolean | null>(null);
+  const clearActivityOverride = useCallback(() => setActivityOverride(null), []);
 
   // 挂载：建立 store 运行时；恢复会话时先读本地日志回填 UI（不依赖进程，进程懒开）
   useEffect(() => {
@@ -1282,6 +1286,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         voiceToggleRef.current?.();
         return;
       }
+      if (match("pane.activity-toggle-all")) {
+        e.preventDefault();
+        // 三态循环：无覆写→全展开→全收起→全展开
+        setActivityOverride((v) => (v === null ? true : v === true ? false : true));
+        return;
+      }
       if (match("chat.jump-prev-user") || match("chat.jump-next-user")) {
         if (inEditable(document.activeElement)) return;
         e.preventDefault();
@@ -1425,6 +1435,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   onEdit={m.role === "user" ? () => startEdit(vi.index) : undefined}
                   diffComments={diffComments}
                   onAddDiffComment={addDiffComment}
+                  activityOverride={activityOverride}
+                  onActivityOverrideClear={clearActivityOverride}
                 />
               </div>
             );

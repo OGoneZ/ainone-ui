@@ -19,13 +19,25 @@ import {
 } from "@/components/ui/icons";
 import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 
-function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
-  const [open, setOpen] = useState(live);
+function ThoughtView({
+  text,
+  ms,
+  live,
+  activityOverride,
+  onActivityOverrideClear,
+}: {
+  text: string;
+  ms?: number;
+  live: boolean;
+  activityOverride?: boolean | null;
+  onActivityOverrideClear?: () => void;
+}) {
+  const [localOpen, setLocalOpen] = useState(live);
   const [thoughtStart, setThoughtStart] = useState<number | null>(null);
   useEffect(() => {
-    // 流式结束（live true→false）自动折叠
-    if (!live) setOpen(false);
-  }, [live]);
+    // 流式结束（live true→false）自动折叠——仅在无全局覆写时生效
+    if (!live && (activityOverride ?? null) === null) setLocalOpen(false);
+  }, [live, activityOverride]);
   // 实时计时（AC-P7-5-1 / P16b）：思考中每秒跳动——起点在 live 起时落定，
   // 用墙钟差而非 interval 计数（与总耗时同一时钟语义）
   useEffect(() => {
@@ -35,6 +47,8 @@ function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: bool
   const elapsed = useElapsedTicker(thoughtStart ?? undefined);
   const isThinking = ms === undefined && live;
   const summary = ms !== undefined ? `已思考 ${(ms / 1000).toFixed(0)} 秒` : `思考中… ${elapsed}s`;
+  // P25：全局覆写优先（新流入的 thought 也受控）；null 回局部态
+  const open = activityOverride ?? localOpen;
   return (
     <div
       className="my-1.5"
@@ -45,7 +59,14 @@ function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: bool
         type="button"
         className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 hover:bg-[var(--bg-hover)]"
         style={{ color: isThinking ? "var(--warning)" : "var(--text-secondary)" }}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (activityOverride !== null && activityOverride !== undefined) {
+            onActivityOverrideClear?.();
+            setLocalOpen(false);
+          } else {
+            setLocalOpen((v) => !v);
+          }
+        }}
       >
         {/* chevron 0.2s 旋转（AC-P7-5-3） */}
         <span
@@ -101,6 +122,8 @@ function ToolBlock({
   content,
   diffComments,
   onAddDiffComment,
+  activityOverride,
+  onActivityOverrideClear,
 }: {
   toolCallId: string;
   title: string;
@@ -110,8 +133,12 @@ function ToolBlock({
   content: ToolContent[];
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
+  activityOverride?: boolean | null;
+  onActivityOverrideClear?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  // P25：全局覆写优先；null 回局部态
+  const open = activityOverride ?? localOpen;
   // P16b：运行中（pending/in_progress）→ 实时秒表；终态 → 封口的 ms
   const running = status === "pending" || status === "in_progress";
   const elapsed = useElapsedTicker(running ? startTs : undefined);
@@ -123,7 +150,18 @@ function ToolBlock({
   return (
     // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）
     <div className="tool" data-status={status}>
-      <div className="tool-head" onClick={() => setOpen((v) => !v)} title={title}>
+      <div
+        className="tool-head"
+        onClick={() => {
+          if (activityOverride !== null && activityOverride !== undefined) {
+            onActivityOverrideClear?.();
+            setLocalOpen(false);
+          } else {
+            setLocalOpen((v) => !v);
+          }
+        }}
+        title={title}
+      >
         <span className="caret inline-flex transition-transform" style={{ transform: open ? "rotate(90deg)" : "none", transitionDuration: "var(--motion-fast)" }}>
           <ChevronRightIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
         </span>
@@ -190,18 +228,30 @@ export function BlockView({
   onSelect,
   diffComments,
   onAddDiffComment,
+  activityOverride,
+  onActivityOverrideClear,
 }: {
   block: BlockMsg;
   live: boolean;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
+  activityOverride?: boolean | null;
+  onActivityOverrideClear?: () => void;
 }) {
   switch (block.kind) {
     case "text":
       return <MarkdownView text={block.text} live={live} onSelect={onSelect} />;
     case "thought":
-      return <ThoughtView text={block.text} ms={block.ms} live={live} />;
+      return (
+        <ThoughtView
+          text={block.text}
+          ms={block.ms}
+          live={live}
+          activityOverride={activityOverride}
+          onActivityOverrideClear={onActivityOverrideClear}
+        />
+      );
     case "tool":
       return (
         <ToolBlock
@@ -213,6 +263,8 @@ export function BlockView({
           content={block.content}
           diffComments={diffComments}
           onAddDiffComment={onAddDiffComment}
+          activityOverride={activityOverride}
+          onActivityOverrideClear={onActivityOverrideClear}
         />
       );
   }

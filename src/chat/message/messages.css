@@ -224,3 +224,11 @@
   font-size: 13px;
   cursor: pointer;
 }
+
+/* P25：活动卡头尾部的快捷键提示（淡色小字）——折叠态显示，展开态隐藏 */
+.activity-kbd-hint {
+  margin-left: 4px;
+  opacity: 0.55;
+  font-weight: 400;
+  white-space: nowrap;
+}

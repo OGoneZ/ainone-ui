@@ -14,6 +14,8 @@ import { buildActivityGroups } from "@/chat/logic/activity";
 import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 import { aggregateFileChanges } from "@/chat/logic/fileChanges";
 import { AgentAvatar } from "@/components/AgentAvatar";
+import { formatBinding } from "@/app/logic/keymap";
+import { useKeymapStore } from "@/store/keymapStore";
 import {
   ChevronRightIcon,
   CopyIcon,
@@ -26,6 +28,13 @@ import { toast } from "sonner";
 import { BlockView } from "./BlockView";
 import { DiffView } from "./DiffView";
 
+/** P25：活动卡头尾部的快捷键提示「（Ctrl+O 展开全部）」——淡色小字，键名实时取键位表 */
+function ActivityToggleHint() {
+  const bindings = useKeymapStore((s) => s.bindingsOf("pane.activity-toggle-all"));
+  if (bindings.length === 0) return null;
+  return <span className="activity-kbd-hint">（{formatBinding(bindings[0])} 展开全部）</span>;
+}
+
 export const MessageLine = memo(function MessageLine({
   msg,
   adapter,
@@ -37,6 +46,8 @@ export const MessageLine = memo(function MessageLine({
   onEdit,
   diffComments,
   onAddDiffComment,
+  activityOverride,
+  onActivityOverrideClear,
 }: {
   msg: ChatMsg;
   adapter: AdapterWithStatus;
@@ -50,6 +61,10 @@ export const MessageLine = memo(function MessageLine({
   /** F-12-5 diff 行内评论：待发评论集（已评论行标记用）+ 收集回调 */
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
+  /** P25：Ctrl+O 全局展开/折叠覆写（null = 无覆写，各卡用局部默认态） */
+  activityOverride?: boolean | null;
+  /** P25：用户手动点击单卡时回调——清除全局覆写，回到局部态 */
+  onActivityOverrideClear?: () => void;
 }) {
   if (msg.role === "user") {
     return (
@@ -101,9 +116,11 @@ export const MessageLine = memo(function MessageLine({
               onSelect={onSelect}
               diffComments={diffComments}
               onAddDiffComment={onAddDiffComment}
+              activityOverride={activityOverride}
+              onActivityOverrideClear={onActivityOverrideClear}
             />
           ) : (
-            <ActivityGroupCard key={i} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+            <ActivityGroupCard key={i} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
           ),
         )}
         {/* p22e：turn 总耗时并入活动组卡实时走秒（原单独 ⏱ 行删除）；纯 text 轮次不显示计时 */}
@@ -151,6 +168,8 @@ function ActivityGroupCard({
   onSelect,
   diffComments,
   onAddDiffComment,
+  activityOverride,
+  onActivityOverrideClear,
 }: {
   item: Extract<RenderItem, { type: "activity_group" }>;
   /** 当前 turn 运行中且是末条消息——running 组卡只在此时走秒（历史消息异常无 ms 的 thought 不走秒） */
@@ -158,8 +177,14 @@ function ActivityGroupCard({
   onSelect?: (text: string, e: React.MouseEvent) => void;
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
+  /** P25：Ctrl+O 全局覆写（null = 无覆写） */
+  activityOverride?: boolean | null;
+  /** P25：手动点击单卡 → 清除全局覆写 */
+  onActivityOverrideClear?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  // P25：全局覆写优先；null 回局部态。手动点击时若覆写存在则清除覆写
+  const open = activityOverride ?? localOpen;
   // p22e 实时总耗时：墙钟口径——运行中从组首块 startTs 起持续走秒（不管内部各段耗时），
   // 组内最后一块封口后冻结为「起点→终点」的墙钟差。旧日志无 startTs → 回退 ms 之和。
   const wallLive = item.running && live && item.firstStartTs !== undefined;
@@ -192,7 +217,15 @@ function ActivityGroupCard({
         aria-expanded={open}
         className="activity-head inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-[var(--bg-hover)]"
         style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (activityOverride !== null && activityOverride !== undefined) {
+            // P25：覆写生效时点单卡 → 清除覆写回到局部态（局部保持 false=折叠）
+            onActivityOverrideClear?.();
+            setLocalOpen(false);
+          } else {
+            setLocalOpen((v) => !v);
+          }
+        }}
       >
         <span
           className="inline-flex transition-transform"
@@ -203,6 +236,8 @@ function ActivityGroupCard({
         <ToolIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
         <span>{summary}</span>
         {seconds !== "0" && <span>· 用时 {seconds} 秒</span>}
+        {/* P25：折叠态淡色提示「Ctrl+O 展开全部」（键名实时取键位表，改绑后同步） */}
+        {!open && <ActivityToggleHint />}
       </button>
       {open && (
         <div
@@ -225,7 +260,7 @@ function ActivityGroupCard({
             </div>
           )}
           {item.blocks.map((b, i) => (
-            <BlockView key={i} block={b} live={false} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+            <BlockView key={i} block={b} live={false} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
           ))}
         </div>
       )}

@@ -296,3 +296,74 @@ describe("P25 VoiceInput registerToggle", () => {
     });
   });
 });
+
+describe("P25 Ctrl+O 折叠全部活动组", () => {
+  /** 灌入一条含 thought+tool 块的 assistant 消息 */
+  async function setupWithActivity() {
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    act(() => {
+      useSessionStore.setState((s) => ({
+        runtime: {
+          ...s.runtime,
+          k1: {
+            ...s.runtime.k1!,
+            messages: [
+              {
+                role: "assistant",
+                text: "",
+                blocks: [
+                  { kind: "thought", text: "想一想", ms: 1200 },
+                  { kind: "tool", toolCallId: "t1", title: "bash", status: "completed", ms: 300, content: [{ kind: "text", text: "ok" }] },
+                  { kind: "text", text: "结论" },
+                ],
+              } as any,
+            ],
+          } as any,
+        },
+      }));
+    });
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
+  it("Ctrl+O 后思考/工具全部展开，再按收起（三态循环）", async () => {
+    await setupWithActivity();
+    // 折叠态：组摘要可见、正文不可见
+    expect(screen.getByText(/思考 1 次/)).toBeInTheDocument();
+    expect(screen.queryByText("想一想")).not.toBeInTheDocument();
+    // 第一次 Ctrl+O：全部展开
+    press({ key: "o", code: "KeyO", ctrlKey: true });
+    await flush();
+    expect(await screen.findByText("想一想")).toBeInTheDocument();
+    expect(screen.getByText("ok")).toBeInTheDocument();
+    // 第二次：全部收起
+    press({ key: "o", code: "KeyO", ctrlKey: true });
+    await flush();
+    expect(screen.queryByText("想一想")).not.toBeInTheDocument();
+    // 第三次：又全展开（true 循环）
+    press({ key: "o", code: "KeyO", ctrlKey: true });
+    await flush();
+    expect(await screen.findByText("想一想")).toBeInTheDocument();
+  });
+
+  it("折叠态卡头有淡色快捷键提示（含键名）", async () => {
+    await setupWithActivity();
+    const hint = document.querySelector(".activity-kbd-hint");
+    expect(hint).not.toBeNull();
+    expect(hint!.textContent).toContain("Ctrl+O");
+    // 展开后（覆写 true）提示隐藏
+    press({ key: "o", code: "KeyO", ctrlKey: true });
+    await flush();
+    expect(document.querySelector(".activity-kbd-hint")).toBeNull();
+  });
+
+  it("覆写生效时手动点单卡 → 清除覆写回局部态（收起）", async () => {
+    await setupWithActivity();
+    press({ key: "o", code: "KeyO", ctrlKey: true });
+    await flush();
+    expect(screen.getByText("想一想")).toBeInTheDocument();
+    // 手动点组卡头收起（覆写清除 + 局部折叠）
+    await userEvent.setup().click(screen.getByText(/思考 1 次/));
+    await flush();
+    expect(screen.queryByText("想一想")).not.toBeInTheDocument();
+  });
+});
