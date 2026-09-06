@@ -1,16 +1,22 @@
-// F-21-6 侧栏拖宽把手：8px 热区（hover 高亮），pointer capture 拖拽。
+// F-21-6 侧栏拖宽把手：8px 热区（hover 高亮），双事件流拖拽。
 // 视觉/交互与 FilePreview 左缘把手一致（.filepreview-resize 模式随迁）。
 //
-// p22c 对齐 flexlayout Splitter startDrag 后仍有两处真实环境缺陷，p22d 补齐：
-//  ① 拖拽粘滞（真实 WKWebView 实测：松手后宽度持续跟随鼠标）——pointermove/pointerup
-//     缺 preventDefault()，capture 后 WKWebView 原生拖选/滚动手势接管指针流，
-//     pointerup 不再派发 → dragRef 永不清空。flexlayout 的 pointerMove/pointerUp
-//     均显式 preventDefault（index.js:4379-4391），照抄。
-//  ② 触屏/触控板手势从 touchstart 起手会绕过 pointer 拦截——flexlayout 对拖拽元素
-//     挂 touchstart {passive:false} + preventDefault + stopImmediatePropagation
-//     （index.js:4789-4808），同款防御。
-//  元素级 onPointerMove/onPointerUp 转接保留：capture 重定向后事件 target 是把手，
-//  与 document 监听双通道都指向同一处理器（幂等：dragRef 空即 no-op）。
+// p22f 终版（WKWebView 事件流黑匣子，p20m 同根问题第二次踩坑）：
+//   macOS WKWebView 对原生鼠标输入**不派发 pointer events**（黑匣子实锤：
+//   trusted 输入只有 mousedown/mousemove/mouseup/click；PointerEvent 构造器
+//   存在但仅合成派发可用，GUI 验收因此被骗三轮）。p22b/c/d 三版全在 pointer
+//   流上做文章（window 监听/document 监听/capture 纪律/preventDefault），
+//   真实鼠标下 onPointerDown 从未触发——「拖拽完全没反应」的直接根因。
+//   「偶发粘滞」= 触控板按压路径走了 pointer 流但 pointerup 丢失（capture
+//   劫持全窗口点击，400 条 trusted pointermove 取证）。
+//   终版双通道（p20m 同款纪律）：
+//   ① down：mousedown（原生必发）+ pointerdown（触屏环境），200ms 去重窗；
+//   ② move/up：mousemove/mouseup 与 pointermove/pointerup 双流并行，
+//      dragRef 空则 no-op——双流同帧到达幂等（宽度由 startX 差值决定）；
+//   ③ capture 完全弃用：WKWebView 下 pointer capture 会把后续全窗口输入
+//      重定向到把手（粘滞态取证），弊远大于利；mousemove/up 挂 window，
+//      拖出窗口外仍跟踪（原生桌面拖拽惯例），blur 兜底复位；
+//   ④ touch-action: none 进 CSS（flexlayout splitter 同款，防手势判定分流）。
 
 import { useEffect, useRef } from "react";
 import { dragWidth, type DragState, type ResizeEdge } from "@/lib/sidebarResize";
@@ -30,73 +36,109 @@ interface Props {
 
 export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeEnd, label }: Props) {
   const dragRef = useRef<DragState | null>(null);
-  // width 是拖拽期间的快照 props（渲染 props），挂监听时经 ref 转发避免闭包过期
+  const handleRef = useRef<HTMLDivElement | null>(null);
+  // 渲染 props 经 ref 转发：window 级监听闭包不随重渲染重建，读 ref 拿最新值
   const widthRef = useRef(width);
   widthRef.current = width;
   const onResizeRef = useRef(onResize);
   onResizeRef.current = onResize;
   const onResizeEndRef = useRef(onResizeEnd);
   onResizeEndRef.current = onResizeEnd;
-  const handleRef = useRef<HTMLDivElement | null>(null);
+  // p20m 同款：mousedown/pointerdown 同一按压双发时去重
+  const lastDownAt = useRef(0);
 
-  function onPointerMove(e: PointerEvent) {
-    if (!dragRef.current) return;
-    // preventDefault 抑制 WKWebView 原生拖选/滚动手势接管指针流（粘滞根因，见头注①）
-    e.preventDefault();
+  function applyWidth(clientX: number) {
     const d = dragRef.current;
-    onResizeRef.current(dragWidth(d, e.clientX, edge, min, max()));
+    if (!d) return;
+    onResizeRef.current(dragWidth(d, clientX, edge, min, max()));
   }
-  function onPointerUp(e: PointerEvent) {
+
+  function onWindowMove(e: MouseEvent | PointerEvent) {
+    if (!dragRef.current) return;
+    // 拖拽全程抑制文本选中等默认行为（mouse 流无 capture 兜着，preventDefault 必须）
     e.preventDefault();
+    applyWidth(e.clientX);
+  }
+
+  function onWindowUp(e: MouseEvent | PointerEvent) {
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
     document.body.style.userSelect = "";
+    detach();
     const w = dragWidth(d, e.clientX, edge, min, max());
     onResizeRef.current(w);
     onResizeEndRef.current?.(w);
-    detachListeners();
     logger.debug("layout", "sidebar-resize", { edge, width: w });
   }
-  function onPointerCancel() {
-    // 手势/触控被系统中断：复位状态但不上报宽度（未完成的拖拽不落盘）
+
+  function onWindowCancel() {
+    // 手势/系统中断：复位但不上报宽度（未完成的拖拽不落盘）
+    if (!dragRef.current) return;
     dragRef.current = null;
     document.body.style.userSelect = "";
-    detachListeners();
-  }
-  function detachListeners() {
-    document.removeEventListener("pointermove", onPointerMove);
-    document.removeEventListener("pointerup", onPointerUp);
-    document.removeEventListener("pointercancel", onPointerCancel);
+    detach();
   }
 
-  // 触屏起手防御（flexlayout 同款）：touchstart 不拦会被系统手势接管，绕过 pointer 流
+  function attach() {
+    window.addEventListener("mousemove", onWindowMove);
+    window.addEventListener("pointermove", onWindowMove);
+    window.addEventListener("mouseup", onWindowUp);
+    window.addEventListener("pointerup", onWindowUp);
+    window.addEventListener("pointercancel", onWindowCancel);
+    window.addEventListener("blur", onWindowCancel);
+  }
+  function detach() {
+    window.removeEventListener("mousemove", onWindowMove);
+    window.removeEventListener("pointermove", onWindowMove);
+    window.removeEventListener("mouseup", onWindowUp);
+    window.removeEventListener("pointerup", onWindowUp);
+    window.removeEventListener("pointercancel", onWindowCancel);
+    window.removeEventListener("blur", onWindowCancel);
+  }
+
+  function startDrag(clientX: number) {
+    document.body.style.userSelect = "none";
+    dragRef.current = { startX: clientX, startW: widthRef.current };
+    attach();
+  }
+
+  // 常驻双通道 down 监听（move/up 动态挂卸）。p20m：WKWebView 原生鼠标
+  // 只走 mousedown；触屏只走 pointerdown；两者都发的环境用 200ms 去重。
   useEffect(() => {
     const el = handleRef.current;
     if (!el) return;
+    function onMouseDown(e: MouseEvent) {
+      if (e.button !== 0) return;
+      const now = Date.now();
+      if (now - lastDownAt.current < 200) return;
+      lastDownAt.current = now;
+      e.preventDefault();
+      startDrag(e.clientX);
+    }
+    function onPointerDown(e: PointerEvent) {
+      const now = Date.now();
+      if (now - lastDownAt.current < 200) return;
+      lastDownAt.current = now;
+      e.preventDefault();
+      startDrag(e.clientX);
+    }
+    el.addEventListener("mousedown", onMouseDown);
+    el.addEventListener("pointerdown", onPointerDown);
+    // 触屏起手防御（flexlayout 同款）：touchstart 不拦会被系统手势接管绕过 mouse 流
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
       e.stopImmediatePropagation();
     };
     el.addEventListener("touchstart", onTouchStart, { passive: false });
-    return () => el.removeEventListener("touchstart", onTouchStart);
-  }, []);
-
-  function onPointerDown(e: React.PointerEvent) {
-    e.preventDefault();
-    // 拖拽全程禁文本选中（拖过聊天区不选中文字）；up/cancel 恢复
-    document.body.style.userSelect = "none";
-    dragRef.current = { startX: e.clientX, startW: widthRef.current };
-    // flexlayout 同款：capture 必须成功（跨元素/惯性拖拽的根基），失败落日志
-    try {
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    } catch (err) {
-      logger.warn("layout", "sidebar-resize-capture-failed", { err: String(err) });
-    }
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
-    document.addEventListener("pointercancel", onPointerCancel);
-  }
+    return () => {
+      el.removeEventListener("mousedown", onMouseDown);
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("touchstart", onTouchStart);
+      detach(); // 卸载时若拖拽残留，一并清 window 监听
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edge, min, max]);
 
   return (
     <div
@@ -105,12 +147,6 @@ export function SidebarResizeHandle({ edge, min, max, width, onResize, onResizeE
       role="separator"
       aria-label={label}
       aria-orientation="vertical"
-      onPointerDown={onPointerDown}
-      // 原生 PointerEvent 处理器与 React 合成签名不同（NativePointerEvent），
-      // 直接绑 document 级函数会导致类型不匹配——转接一层适配签名
-      onPointerMove={(e) => onPointerMove(e.nativeEvent)}
-      onPointerUp={(e) => onPointerUp(e.nativeEvent)}
-      onPointerCancel={() => onPointerCancel()}
     />
   );
 }

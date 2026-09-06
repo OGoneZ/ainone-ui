@@ -127,6 +127,9 @@ select {
   cursor: col-resize;
   z-index: 1;
   border-radius: 2px;
+  /* p22f：防浏览器手势判定分流（flexlayout splitter 同款，combined.css:682）——
+     touch-action:auto 时拖拽起步可能被原生平移/拖选手势接管吞掉后续事件流 */
+  touch-action: none;
 }
 .sidebar-resize-handle:hover,
 .sidebar-resize-handle:active {
