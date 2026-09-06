@@ -15,6 +15,7 @@ mod env_path;
 mod fs;
 mod fslist;
 mod gitmeta;
+mod harness_probe;
 mod quickask;
 mod sessions;
 mod workspaces;

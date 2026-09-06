@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleCheck,
+  Coffee,
   Copy,
   FileDiff,
   FileText,
@@ -83,3 +84,4 @@ export const SidebarCollapseIcon = PanelLeftClose; // F-15-7 左侧栏收缩
 export const SidebarExpandIcon = PanelLeftOpen; // F-15-7 左侧栏展开
 export const ExpandIcon = Maximize2; // F-18-2 输入框全屏编辑
 export const ShrinkIcon = Minimize2; // F-18-2 退出全屏编辑
+export const DonateIcon = Coffee; // P22 打赏作者入口

@@ -29,6 +29,9 @@ log = "0.4.34"
 tauri-plugin-log = "2.9.1"
 # P8 F-8-7 快问：Rust 侧发 OpenAI 兼容 chat/completions（密钥不暴露给 WebView，DEC-20）
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+# P22 快问自动取 harness settings：解析 ~/.codex/config.toml（TOML）与家目录定位
+toml = "0.8"
+dirs = "5"
 
 # 前端调试桥（P19c）：W3C WebDriver 内嵌服务，AI agent 经 HTTP 直驱 WebView
 # （execute JS / 截图 / 元素查询）。optional + feature 控制：
