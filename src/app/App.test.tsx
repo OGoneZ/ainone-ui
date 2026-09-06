@@ -121,3 +121,65 @@ describe("App 编排（工作区分组）", () => {
     expect(badges).toHaveLength(1);
   });
 });
+
+// —— P25 App 级全局四键（Ctrl+B/M/N/T）——
+describe("P25 App 全局快捷键", () => {
+  function press(code: string, key: string, mods: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {}) {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key, code, bubbles: true, cancelable: true, ...mods }));
+  }
+
+  it("Ctrl+B 切换左侧栏显隐（持久化同步翻转）", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<App />);
+    await screen.findByText("dev");
+    expect(screen.getByRole("button", { name: "收起侧栏" })).toBeInTheDocument();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByRole("button", { name: "收起侧栏" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
+    // 再按一次恢复
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.getByRole("button", { name: "收起侧栏" })).toBeInTheDocument();
+  });
+
+  it("Ctrl+M 切换右侧栏显隐", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<App />);
+    // 打开一个会话让 RightRail 挂载
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "你好" }));
+    await screen.findByTestId("right-rail");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", code: "KeyM", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByTestId("right-rail")).not.toBeInTheDocument();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", code: "KeyM", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.getByTestId("right-rail")).toBeInTheDocument();
+  });
+
+  it("Ctrl+N 打开新建会话弹层", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<App />);
+    await screen.findByText("dev");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(await screen.findByRole("heading", { name: "新建会话" })).toBeInTheDocument();
+  });
+
+  it("Ctrl+T 新建终端 tab", async () => {
+    const calls = mockTauriIpc({ handlers: defaultHandlers() });
+    render(<App />);
+    await screen.findByText("dev");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", code: "KeyT", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    // 终端 tab 已入索引（sessions_upsert 携带 kind=terminal / title=终端）
+    const upsert = calls.find((c) => c.cmd === "sessions_upsert");
+    expect(upsert).toBeTruthy();
+    expect(upsert!.args.entry.kind).toBe("terminal");
+    expect(upsert!.args.entry.title).toBe("终端");
+    // 终端面板挂载（TerminalPanel → terminal_spawn）
+    await vi.waitFor(() => {
+      expect(calls.some((c) => c.cmd === "terminal_spawn")).toBe(true);
+    });
+  });
+});

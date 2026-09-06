@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --features webdriver",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "dev:port": "vite --port 1430 --strictPort"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",

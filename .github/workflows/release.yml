@@ -1,0 +1,163 @@
+name: Release
+
+# 打 tag（v*）触发：四腿矩阵构建 → 产物汇总 → 上传 Cloudflare R2 + 生成 latest.json
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ''
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.target }}
+
+      - name: Install Linux dependencies (Tauri)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install frontend dependencies
+        # 本仓库 .npmrc 指向 npmmirror，CI 上覆盖为官方 registry
+        run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v1
+        env:
+          # macOS 签名：secrets 未配置时 tauri CLI 自动跳过签名/公证（仅日志提示，不失败）
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # macOS 公证（App Store Connect API 密钥）
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+        with:
+          args: ${{ matrix.args }}
+
+      - name: Upload bundles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            src-tauri/target/*/release/bundle/**
+            src-tauri/target/release/bundle/**
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bundles-*
+          merge-multiple: true
+          path: bundles
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+
+      - name: List bundles (debug)
+        run: find bundles -type f | sort
+
+      - name: Generate latest.json
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          BASE_URL: https://pkg.zhubaoduo.com/v${{ steps.ver.outputs.version }}
+        run: |
+          cd bundles
+          # 产物布局：macOS → dmg/aarch64|x64；Windows → nsis/*.exe；Linux → deb/*.deb, appimage/*.AppImage
+          DMG_ARM=$(find . -path '*aarch64*' -name '*.dmg' | head -1)
+          DMG_X64=$(find . -path '*x64*' -name '*.dmg' | head -1)
+          NSIS=$(find . -path '*nsis*' -name '*.exe' | head -1)
+          DEB=$(find . -name '*.deb' | head -1)
+          APPIMAGE=$(find . -name '*.AppImage' | head -1)
+
+          # 任一平台产物缺失即失败（fail loud，不许半份清单上架）
+          for f in "$DMG_ARM" "$DMG_X64" "$NSIS" "$DEB" "$APPIMAGE"; do
+            [ -z "$f" ] && { echo "ERROR: bundle missing"; exit 1; }
+          done
+
+          url() { echo "$BASE_URL/$(basename "$1")"; }
+          sha() { sha256sum "$1" | cut -d' ' -f1; }
+
+          # jq 原生构建对象（避免手工拼 JSON 片段）
+          jq -n --arg v "$VERSION" \
+            --arg arm "$(url "$DMG_ARM")"     --arg armSha "$(sha "$DMG_ARM")" \
+            --arg x64 "$(url "$DMG_X64")"     --arg x64Sha "$(sha "$DMG_X64")" \
+            --arg nsis "$(url "$NSIS")"       --arg nsisSha "$(sha "$NSIS")" \
+            --arg deb "$(url "$DEB")"         --arg debSha "$(sha "$DEB")" \
+            --arg appimage "$(url "$APPIMAGE")" --arg appimageSha "$(sha "$APPIMAGE")" \
+            '{
+              version: $v,
+              publishedAt: (now | todateiso8601),
+              platforms: {
+                "darwin-aarch64":        {url: $arm,     sha256: $armSha},
+                "darwin-x86_64":         {url: $x64,     sha256: $x64Sha},
+                "windows-x86_64":        {url: $nsis,    sha256: $nsisSha},
+                "linux-x86_64-deb":      {url: $deb,     sha256: $debSha},
+                "linux-x86_64-appimage": {url: $appimage, sha256: $appimageSha}
+              }
+            }' > latest.json
+          cat latest.json
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          aws s3 cp bundles/ "s3://$BUCKET/v$VERSION/" --recursive --endpoint-url "$ENDPOINT" --cache-control "public, max-age=31536000, immutable"
+          aws s3api put-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" --key latest.json --body bundles/latest.json --content-type "application/json" --cache-control "no-cache"

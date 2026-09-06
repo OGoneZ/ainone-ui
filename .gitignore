@@ -32,3 +32,6 @@ src-tauri/target
 # agent 间握手标记文件（本地协议，不入库）
 ainone-refactor-handshake.json
 CLAUDE.md
+
+# Claude Code 本地会话产物
+.claude/
