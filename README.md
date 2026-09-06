@@ -91,6 +91,68 @@ curl -s -X POST http://127.0.0.1:4445/session/$SID/execute/sync \
 
 后端日志：`~/Library/Logs/com.zhubaoduo.ainone-ui/ainone-ui.log`。
 
+### 调试方法论（AI agent 排查 UI 交互 bug 的标准流程）
+
+p20 系列排查（光晕/焦点/快捷键）沉淀出的可复用套路，按序使用：
+
+**1. 版本指纹先行**——先确认被测实例跑的是哪份代码。多 worktree 并行开发时，
+1420 端口可能被别的 worktree 的 vite 占用，改完代码页面纹丝不动白查半天：
+
+```bash
+lsof -nP -iTCP:1420 -sTCP:LISTEN          # 端口归属进程
+lsof -p <PID> | grep cwd                   # 该进程的工作目录 → 哪个仓/worktree
+curl -s http://localhost:1420/src/index.css | grep <刚改的规则>   # 编译产物里有没有
+```
+
+页面内同样可验（绕开 fetch）：
+
+```js
+for (const s of document.styleSheets) { /* 遍历 cssRules 找目标规则 */ }
+```
+
+**2. 事件黑匣子**——「用户操作 → 应用无反应」类 bug，在 window 捕获阶段装探针，
+记录真实事件的 `isTrusted`/坐标/命中元素，让用户复现一次后读日志：
+
+```js
+const bb = [];
+window.addEventListener('pointerdown', e => bb.push({trusted: e.isTrusted,
+  x: e.clientX, y: e.clientY, target: String(e.target.className).slice(0,30)}), true);
+window.addEventListener('mousedown',  e => bb.push({type:'md', trusted: e.isTrusted}), true);
+window.addEventListener('keydown',    e => bb.push({type:'kd', key: e.key,
+  ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, trusted: e.isTrusted}), true);
+// 键盘取证同理；存 localStorage 可跨 HMR/reload 存活
+```
+
+读日志时逐条核对：事件到没到 window？`isTrusted` 是 true 还是 false？
+命中元素是否在预期容器内？
+
+**3. WKWebView 的坑（本仓库实测，Chrome 复现不了）**：
+- **原生鼠标点击不派发 pointerdown**（只有 mousedown+click；`PointerEvent`
+  构造器存在但只对合成派发生效）→ 点击类全局监听必须用 `mousedown`
+  （或双通道 + 200ms 去重）。合成 `dispatchEvent(new PointerEvent(...))`
+  测试通过 ≠ 原生点击有效——p20m 之前被这个假象误导了数轮
+- 后台窗口冻结 rAF 和 CSS transition（永远停在起始帧）→ 探测计算样式前先
+  临时 `transition: none !important`，焦点等待用 `setTimeout` 不用 rAF
+- WebDriver `element click` 走 trusted 管线但只派发 `click` 不带 `pointerdown`；
+  不支持 Actions 端点 → 机器无法模拟真实点击，只能靠黑匣子 + 用户复现
+
+**4. 合成事件对照实验**——黑匣子确认真实事件到达后，用合成事件逐级复现处理链，
+哪一级断掉即问题所在：`dispatchEvent` 一直有效而真实无效 → 差异只在
+isTrusted/原生管线；`elementFromPoint` 命中的元素和处理函数 `closest` 的
+选择器对不上 → 命中判定漏分支。
+
+**5. 布局/样式层叠问题用「边缘命中探测」**——光晕被盖、元素被裁类问题：
+
+```js
+// 对目标元素四边外扩 1px/4px 逐点采样，看每点 elementFromPoint 命中的是谁
+document.elementFromPoint(x, y)  // 命中 splitter/邻居/容器 → 盖住者实锤
+// 再配 getComputedStyle 读 z-index/position/overflow，祖先链找中间层叠上下文
+// （transform/filter/isolation/z!=auto 的 position）判定谁压谁
+```
+
+**6. 提交纪律**：每个实锤根因单独小提交，commit message 里写清「症状 → 根因
+证据 → 修法 → 验证数据」，下一个 agent 不用重查一遍。
+
 ## 架构
 
 ```
