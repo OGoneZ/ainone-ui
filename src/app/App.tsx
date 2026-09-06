@@ -227,8 +227,9 @@ function App() {
   /** P20d：激活目标窗格并把键盘焦点交给其输入框——Cmd+方向键/点击窗格共用。
    *  「切换焦点」的终点不是悬浮高亮而是能直接打字：selectTab 让 ChatPanel 接收
    *  active prop（window 级事件按 active 实例路由），focus 落到该窗格 composer
-   *  的 textarea（rAF 等待 flexlayout 重渲染完成后再找 DOM）。
-   *  tab 面板 DOM id = `flexlayout-tab-<tabKey>`（flexlayout 约定），用它定位。 */
+   *  的 textarea（tab 面板 DOM id = `flexlayout-tab-<tabKey>`，flexlayout 约定）。
+   *  focus 用重试式：首次激活长会话渲染可超过一帧，textarea 就绪即聚焦，
+   *  最多重试 ~0.5s。不用 rAF——窗口后台/完全遮挡时 WebKit 冻结 rAF（实测踩坑）。 */
   function activateTabsetAndComposer(tabsetId: string, selectedIdx?: number) {
     const m = getModel();
     const target = m.getNodeById(tabsetId);
@@ -242,16 +243,19 @@ function App() {
       m.doAction(Actions.selectTab(tabKey));
     }
     syncFromModel();
-    // 等一拍让 flexlayout 重绘 + React 提交后再 focus（同 jumpToIndex 校跳套路）。
-    // 不用双 rAF：窗口后台/完全遮挡时 WebKit 冻结 rAF，回调永不执行（实测踩坑）；
-    // setTimeout 在后台也保证触发，前台一帧（~16ms）内完成。
-    setTimeout(() => {
-      const host = layoutHostRef.current;
-      if (!host || !tabKey) return;
-      const tab = host.querySelector<HTMLElement>(`#flexlayout-tab-${tabKey}`);
-      const textarea = tab?.querySelector<HTMLTextAreaElement>("textarea[aria-label='消息输入']");
-      textarea?.focus();
-    }, 60);
+    if (!tabKey) return;
+    let tries = 0;
+    const focusTick = () => {
+      const textarea = layoutHostRef.current?.querySelector<HTMLTextAreaElement>(
+        `#flexlayout-tab-${tabKey} textarea[aria-label='消息输入']`,
+      );
+      if (textarea) {
+        textarea.focus();
+        return;
+      }
+      if (++tries < 10) setTimeout(focusTick, 50);
+    };
+    setTimeout(focusTick, 60);
   }
 
   // 快捷键监听：仅在编辑器区（非输入框）响应分屏快捷键（AC-P10-8）
@@ -712,6 +716,28 @@ function App() {
 
   // 活跃会话高亮（F-7-7）：当前 Tab 若已绑定 sessionId，则侧栏对应行加品牌色竖条
   const activeSessionId = activeTab?.sessionId;
+
+  // P20i：光晕唯一性驱动——把 data-active 打在「全局焦点窗格」的 tab 面板上。
+  // flexlayout 的 selected 是 per-tabset 的（分屏后每个窗格各有选中面板），
+  // CSS 无法区分「窗格内选中」与「全局焦点」；activeKey 变化（点击/Cmd+方向键/
+  // 侧栏点开共用 syncFromModel）时在这里统一标记，CSS 只对 [data-active] 发光。
+  // 用 activeTab.key（= activeKey）反查 model activeTabset 的 selected tab id。
+  useEffect(() => {
+    const host = layoutHostRef.current;
+    if (!host) return;
+    const markTab = (tabKey: string | null) => {
+      host.querySelectorAll<HTMLElement>(".flexlayout__tab[data-active]").forEach((el) => {
+        el.removeAttribute("data-active");
+      });
+      if (!tabKey) return;
+      const panel = host.querySelector<HTMLElement>(`#flexlayout-tab-${tabKey}`);
+      if (panel) panel.setAttribute("data-active", "true");
+    };
+    const m = getModel();
+    const activeTabset = m.getActiveTabset();
+    const selected = activeTabset?.getSelectedNode();
+    markTab(selected ? selected.getId() : null);
+  }, [activeKey, tabs]);
 
   return (
     // 复用 Tailwind 工具类（原手写 .container 与 Tailwind 内置 container 工具类同名冲突，
