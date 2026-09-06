@@ -112,7 +112,7 @@ jobs:
       - name: Generate latest.json
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          BASE_URL: https://pkg.zhubaoduo.com/v${{ steps.ver.outputs.version }}
+          BASE_URL: https://agent.zhubaoduo.com/v${{ steps.ver.outputs.version }}
         run: |
           cd bundles
           # 产物布局：macOS → dmg/aarch64|x64；Windows → nsis/*.exe；Linux → deb/*.deb, appimage/*.AppImage
