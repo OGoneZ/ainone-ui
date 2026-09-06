@@ -11,6 +11,7 @@ import { ChatPanel } from "@/chat/ChatPanel";
 import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
 import { SettingsModal } from "@/app/modals/SettingsModal";
 import { NewSessionModal } from "@/app/modals/NewSessionModal";
+import { DonateModal } from "@/app/modals/DonateModal";
 import { EmptyState } from "@/components/EmptyState";
 import { RightRail } from "@/sidebar/RightRail";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -20,6 +21,7 @@ import {
   CloseIcon,
   PlusIcon,
   SettingsIcon,
+  DonateIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
 } from "@/components/ui/icons";
@@ -80,6 +82,8 @@ function App() {
   const [history, setHistory] = useState<SessionEntry[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // P22 打赏作者弹层
+  const [donateOpen, setDonateOpen] = useState(false);
   // 新建会话弹层：open + 预填工作区（右键新建时传入）
   const [newSession, setNewSession] = useState<{ open: boolean; workspaceId?: string | null }>({ open: false });
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -627,6 +631,11 @@ function App() {
           <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           新建会话
         </button>
+        {/* P22 打赏入口（设置左侧） */}
+        <button className="donate-btn inline-flex items-center gap-1.5" onClick={() => setDonateOpen(true)}>
+          <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+          打赏作者
+        </button>
         <button className="settings-btn inline-flex items-center gap-1.5" onClick={() => setSettingsOpen(true)}>
           <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
           设置
@@ -809,6 +818,8 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         onSaved={reloadAdapters}
       />
+
+      <DonateModal open={donateOpen} onClose={() => setDonateOpen(false)} />
 
       <NewSessionModal
         open={newSession.open}
