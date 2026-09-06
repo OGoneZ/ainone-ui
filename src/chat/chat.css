@@ -20,6 +20,18 @@
   gap: 8px;
 }
 
+/* P16c（F-16c 根因修复）：.chat 的直接子元素一律禁止 flex 收缩。
+ * 根因：虚拟列表内层容器（height=getTotalSize）是 .chat 的 flex item，
+ * 默认 flex-shrink:1 且内部全是绝对定位条目（min-content 高=0），
+ * WebKit（Tauri WKWebView）会把它压缩到「容器减 padding 的剩余空间」——
+ * style.height 失效，滚动区域改由 transform 条目边界撑出，padding-bottom
+ * 不计入 scrollHeight → --dock-h 预留机制整体失效 → 滚到底末条被 dock 遮挡。
+ * （Chromium 对该场景计算不同，Chrome 里无法复现——历次调数值修复无效的原因。）
+ * flex-shrink:0 后 inner 高度生效、padding 计入滚动区，实测恢复规范行为。 */
+.chat > * {
+  flex-shrink: 0;
+}
+
 /* —— F-15-1 底部悬浮 dock（DEC-41）——
  * F-17-2：视觉收窄——不再通栏贴边，改为居中浮岛（max-width + 四向圆角 +
  * 浮起阴影），消息从两侧与下方穿过；毛玻璃透明保持。 */
