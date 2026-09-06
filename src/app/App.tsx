@@ -929,50 +929,18 @@ function App() {
     // 复用 Tailwind 工具类（原手写 .container 与 Tailwind 内置 container 工具类同名冲突，
     // 被其 max-width/display 覆盖导致根布局塌陷、窗口放大内容不跟随——bug 根因）
     <main className="flex h-full min-h-0 flex-col box-border p-4">
-      <div className="toolbar">
-        <button className="inline-flex items-center gap-1.5" onClick={() => setNewSession({ open: true })}>
-          <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          新建会话
-        </button>
-        {/* P23 F-23-1：新建终端——直接开一个本地 shell 终端 tab */}
-        <button
-          className="inline-flex items-center gap-1.5"
-          onClick={() => newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd)}
-        >
-          <TerminalIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          新建终端
-        </button>
-        {/* P22 打赏入口（右上角，设置左侧） */}
-        <button className="donate-btn inline-flex items-center gap-1.5" onClick={() => setDonateOpen(true)}>
-          <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          打赏作者
-        </button>
-        {/* P25 快捷键帮助（打赏左侧） */}
-        <button className="inline-flex items-center gap-1.5" onClick={() => setShortcutsOpen(true)}>
-          <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          快捷键
-        </button>
-        <button className="settings-btn inline-flex items-center gap-1.5" onClick={() => setSettingsOpen(true)}>
-          <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          设置
-        </button>
-        <label className="theme-select">
-          主题：
-          <select value={theme} onChange={(e) => setTheme(e.target.value)}>
-            <option value="auto">跟随系统</option>
-            <option value="light">浅色</option>
-            <option value="dark">深色</option>
-          </select>
-        </label>
-      </div>
+      {/* P26 R1：toolbar 整行移除——新建会话/终端入口在侧栏头部（R2），
+          快捷键/打赏/设置移侧栏底部 footer（R4 + p25g 收纳），主题移设置弹窗「外观」分区（R3） */}
 
       <div className="workspace">
         {sidebarOpen ? (
           <aside className="sidebar" style={{ width: sidebarWidth }}>
+            <div className="sidebar-scroll">
             <div className="sidebar-head">
               <h3>工作区</h3>
               <div className="sidebar-head-actions">
-                {/* P25 F-25-1：新建终端入口移出 NewSessionModal，落在侧栏头部（+号左侧） */}
+                {/* P26 R2：三按钮终态——终端（SquareTerminal 复杂图标）/ 新建会话 / 收起。
+                    原 P23 简单 TerminalIcon 重复「新建终端」入口删除（AC-R2-3） */}
                 <button
                   className="add-ws"
                   title="新建终端"
@@ -983,15 +951,6 @@ function App() {
                 </button>
                 <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
                   <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-                </button>
-                {/* P23 F-23-1：侧栏头部新建终端——归属当前活跃 tab 的工作区（无则未归组） */}
-                <button
-                  className="add-ws"
-                  title="新建终端"
-                  aria-label="新建终端"
-                  onClick={() => newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd)}
-                >
-                  <TerminalIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
                 </button>
                 <button className="add-ws sidebar-collapse" title="收起侧栏" aria-label="收起侧栏" onClick={() => setSidebarOpen(false)}>
                   <SidebarCollapseIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
@@ -1122,6 +1081,24 @@ function App() {
                 onAction={() => setNewSession({ open: true })}
               />
             )}
+            </div>
+            {/* P26 R4 侧栏底部动作区：上打赏作者、下设置（footer 固定底部不随列表滚动，
+                会话列表在 .sidebar-scroll 内滚动让位）；折叠态图标竖排见 sidebar-collapsed 分支 */}
+            <div className="sidebar-footer">
+              <button className="sidebar-footer-item" onClick={() => setDonateOpen(true)}>
+                <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                <span>打赏作者</span>
+              </button>
+              {/* P26：快捷键入口自 toolbar 收纳进 footer（p25g ShortcutsModal 行为不变） */}
+              <button className="sidebar-footer-item" onClick={() => setShortcutsOpen(true)}>
+                <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                <span>快捷键</span>
+              </button>
+              <button className="sidebar-footer-item" onClick={() => setSettingsOpen(true)}>
+                <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                <span>设置</span>
+              </button>
+            </div>
             <SidebarResizeHandle
               edge="right"
               min={200}
@@ -1133,7 +1110,7 @@ function App() {
             />
           </aside>
         ) : (
-          // F-15-7 折叠态：细栏杆（展开 + 新建两个图标位）
+          // F-15-7 折叠态：细栏杆（展开 + 新建 + 打赏 + 设置 四图标竖排，P26 R4）
           <aside className="sidebar sidebar-collapsed">
             <button className="add-ws" title="展开侧栏" aria-label="展开侧栏" onClick={() => setSidebarOpen(true)}>
               <SidebarExpandIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
@@ -1141,6 +1118,17 @@ function App() {
             <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
               <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
             </button>
+            <div className="sidebar-footer sidebar-footer-collapsed">
+              <button className="sidebar-footer-item" title="打赏作者" aria-label="打赏作者" onClick={() => setDonateOpen(true)}>
+                <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+              </button>
+              <button className="sidebar-footer-item" title="快捷键" aria-label="快捷键" onClick={() => setShortcutsOpen(true)}>
+                <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+              </button>
+              <button className="sidebar-footer-item" title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}>
+                <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+              </button>
+            </div>
           </aside>
         )}
 
@@ -1177,6 +1165,8 @@ function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={reloadAdapters}
+        theme={theme}
+        onThemeChange={setTheme}
       />
 
       <DonateModal open={donateOpen} onClose={() => setDonateOpen(false)} />

@@ -92,9 +92,9 @@ describe("App 编排（工作区分组）", () => {
     render(<App />);
 
     const user = userEvent.setup();
-    // toolbar「新建会话」按钮与空态 EmptyState 的「新建会话」文案相同 → 取第一个（toolbar）
-    const newBtns = await screen.findAllByRole("button", { name: "新建会话" });
-    await user.click(newBtns[0]);
+    // P26 R1 删 toolbar 后入口 = 侧栏头部「＋」按钮（aria-label 新建工作区）
+    const newBtn = await screen.findByRole("button", { name: "新建工作区" });
+    await user.click(newBtn);
 
     // 弹层出现
     const modal = await screen.findByRole("heading", { name: "新建会话" });
