@@ -39,6 +39,7 @@ import { composeFileReference, filterAbsoluteFiles, type FileRef } from "../chat
 import { truncateToMessageIndex } from "@/acp/rewind";
 import { lastUserIndex, shouldShowLastPromptBubble, ellipsize } from "../chat/logic/lastPrompt";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
+import { canFork } from "../chat/logic/capabilities";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
 import { typewriterHint } from "../chat/logic/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
@@ -1107,6 +1108,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const perm = rt?.perm ?? null;
 
+  // P24g capability gate：fork 入口按 initialize 握手能力显隐（没能力不显示入口，
+  // 而不是点了报错）。回溯不 gate——软回溯是纯本地能力，与 harness 无关。
+  const forkEnabled = canFork(rt?.capabilities ?? null);
+
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
@@ -1267,7 +1272,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   isLast={vi.index === messages.length - 1}
                   turnStartedAt={rt?.turnStartedAt}
                   onSelect={onSelectText}
-                  onFork={onFork ? doFork : undefined}
+                  onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}
                   onEdit={m.role === "user" ? () => startEdit(vi.index) : undefined}
                   diffComments={diffComments}

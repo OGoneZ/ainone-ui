@@ -34,6 +34,17 @@ interface EditableAdapter {
   probing: boolean;
 }
 
+/** P24g：握手能力摘要（诊断用——用户可直观看到 harness 声明了哪些能力） */
+function probeCapSummary(caps: import("@agentclientprotocol/sdk").AgentCapabilities | null): string {
+  if (!caps) return "";
+  const parts: string[] = [];
+  if (caps.loadSession) parts.push("load");
+  if (caps.sessionCapabilities?.fork != null) parts.push("fork");
+  if (caps.sessionCapabilities?.resume != null) parts.push("resume");
+  if (caps.sessionCapabilities?.list != null) parts.push("list");
+  return parts.length > 0 ? ` · 能力: ${parts.join("/")}` : "";
+}
+
 function toEditable(a: Adapter): EditableAdapter {
   return { ...a, argsText: a.args.join("\n"), logo: a.logo ?? "", available: null, probe: null, probing: false };
 }
@@ -357,7 +368,7 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
                   {a.probe && (
                     <p className={a.probe.ok ? "ok" : "bad"} style={{ gridColumn: "1 / -1", margin: 0 }}>
                       {a.probe.ok
-                        ? `✓ 握手成功${a.probe.agentInfo.name ? `（${a.probe.agentInfo.name}${a.probe.agentInfo.version ? ` v${a.probe.agentInfo.version}` : ""}）` : ""}`
+                        ? `✓ 握手成功${a.probe.agentInfo.name ? `（${a.probe.agentInfo.name}${a.probe.agentInfo.version ? ` v${a.probe.agentInfo.version}` : ""}）` : ""}${probeCapSummary(a.probe.capabilities)}`
                         : a.probe.level === "spawn"
                           ? `✗ 程序启动失败：${a.probe.message}`
                           : `✗ 握手失败：${a.probe.message}`}
