@@ -436,41 +436,37 @@ body {
   white-space: nowrap;
 }
 
-/* P20c：聚焦窗格「浮起」效果——flexlayout 只把 tabset-selected 挂在当前激活
- * tabset 的 tab 条（tabbar_outer）上，内容区无标记；用 :has 从容器反查整个窗格。
- * 视觉：整圈外发光（光晕）+ 亮描边 + 轻微上浮（translateY/scale），像卡片从布局里
- * 浮出来一样立体灵动；非激活窗格静止不动形成前后层次。
- * tab 条本身只保留亮色文字，不再各自发光（光晕属于整窗）。
- * P20e：用户反馈不够明显（小窗格易被忽略）→ 光晕整体加强：spread 2px 描边、
- * 30px 近晕、90px 远泛光，饱和度提高；补 0 0 0 1px 内描边增强边缘可读性。 */
+/* P20f：聚焦窗格光晕——改为 inset 系实现。
+ * 之前的外发光 box-shadow 会被祖先 .flexlayout__row / .layout-host 的
+ * overflow:hidden 裁掉，只剩 splitter 8px 间隙里露出一条（实测症状：
+ * 「只在窗口最下方看到一条蓝色光晕、侧边被切断」）。
+ * inset 阴影画在元素内部，天然四周相等、绝不被裁剪：
+ *   实线描边 + 近圈柔光 + 远圈泛光 三层叠加，聚焦感明确；
+ * 上浮 + z-index 保留立体层次。 */
 .flexlayout__tabset_container {
   transition:
     transform var(--motion-default) cubic-bezier(0.34, 1.3, 0.64, 1),
-    filter var(--motion-default) ease,
     box-shadow var(--motion-default) ease;
 }
 
 .flexlayout__tabset_container:has(.flexlayout__tabset-selected) {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   z-index: 5;
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--primary) 90%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--primary) 30%, transparent),
-    0 0 30px color-mix(in srgb, var(--primary) 38%, transparent),
-    0 0 90px color-mix(in srgb, var(--primary) 20%, transparent),
-    0 18px 40px rgba(0, 0, 0, 0.32);
   border-radius: var(--radius-sm);
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--primary) 92%, transparent),
+    inset 0 0 20px color-mix(in srgb, var(--primary) 42%, transparent),
+    inset 0 0 52px color-mix(in srgb, var(--primary) 22%, transparent);
 }
 
-/* 激活窗格稍微提亮 + 环境光（径向柔光贴着顶部，像被灯照到），其余窗格轻微压暗
- * → 立体感来自「亮起 + 上浮 + 邻居后退」三者叠加 */
+/* 激活窗格顶部径向环境光（像被灯照到），其余窗格保持平静 */
 .flexlayout__tabset_container:has(.flexlayout__tabset-selected)::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
   border-radius: var(--radius-sm);
-  background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 60%);
+  background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--primary) 10%, transparent), transparent 60%);
 }
 
 .flexlayout__tabset-selected {

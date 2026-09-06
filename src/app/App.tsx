@@ -298,26 +298,47 @@ function App() {
         setGlobalSearchOpen((v) => !v);
       }
     };
-    // P20d：点击窗格任意位置（含聊天内容区）即切焦点——flexlayout 只在 tab 条/
-    // tab 按钮上挂了激活逻辑，点内容区不动 active，光晕自然「不跟随点击」。
-    // capture 阶段监听，closest 找所在窗格容器，与 model 节点按 DOM 顺序对齐。
+    // P20f：点击窗格任意位置（含聊天内容区）即切焦点 + 聚焦输入框。
+    // 两个坑（实测）：
+    // ① flexlayout 0.10.8 的 tab 面板（.flexlayout__tab → .panel）挂在
+    //    .flexlayout__layout 下，**不在** .flexlayout__tabset_container 内——
+    //    closest 容器必然 miss。命中判定改为「closest 容器 或 closest tab 面板」
+    //    双通道；tab 面板经 data-layout-path 去尾段反查所属 tabset。
+    // ② flexlayout 自带 tab 面板 pointerdown → setActiveTabset（只切 active 不
+    //    focus）；我们做的是 superset（切 active + focus 输入框），重复 doAction
+    //    set active 幂等无害。
     function onPanePointerDown(e: PointerEvent) {
+      if (!(e.target instanceof Element)) return;
       const host = layoutHostRef.current;
       if (!host) return;
       const containers = [...host.querySelectorAll<HTMLElement>(".flexlayout__tabset_container")];
-      if (containers.length < 2) return;
-      const target = e.target instanceof Element ? e.target.closest<HTMLElement>(".flexlayout__tabset_container") : null;
-      if (!target) return;
-      const idx = containers.indexOf(target);
-      if (idx < 0) return;
-      const m = getModel();
-      const nodes: { id: string }[] = [];
-      m.visitNodes((n: unknown) => {
+      // model tabset 节点（DOM containers 顺序 == visitNodes 顺序）
+      const m0 = getModel();
+      const allNodes: { id: string }[] = [];
+      m0.visitNodes((n: unknown) => {
         const node = n as { getType(): string; getId(): string };
-        if (node.getType() === "tabset") nodes.push({ id: node.getId() });
+        if (node.getType() === "tabset") allNodes.push({ id: node.getId() });
       });
-      const node = nodes[idx];
-      if (!node || m.getActiveTabset()?.getId() === node.id) return;
+      if (allNodes.length < 2) return;
+
+      // 通道 A：点在 tab 条/空窗格（container 内）
+      const container = e.target.closest<HTMLElement>(".flexlayout__tabset_container");
+      // 通道 B：点在聊天内容区（tab 面板内）→ path 反查
+      const tab = e.target.closest<HTMLElement>(".flexlayout__tab");
+      let nodeIdx = -1;
+      if (container) {
+        nodeIdx = containers.indexOf(container);
+      } else if (tab) {
+        const tabPath = tab.getAttribute("data-layout-path") ?? "";
+        const tsPath = tabPath.replace(/\/t\d+$/, "");
+        nodeIdx = allNodes.findIndex((n) => {
+          const node = m0.getNodeById(n.id) as unknown as { getPath?: () => string } | null;
+          return node?.getPath?.() === tsPath;
+        });
+      }
+      if (nodeIdx < 0 || nodeIdx >= allNodes.length) return;
+      const node = allNodes[nodeIdx];
+      if (!node || m0.getActiveTabset()?.getId() === node.id) return;
       activateTabsetAndComposer(node.id);
     }
     window.addEventListener("pointerdown", onPanePointerDown, true);
