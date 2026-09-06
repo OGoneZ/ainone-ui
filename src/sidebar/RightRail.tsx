@@ -26,7 +26,7 @@ interface Props {
   cwd?: string;
   /** 当前会话消息（文件树「M」徽标数据源） */
   messages: ChatMsg[];
-  /** P25：开合与 tab 受控（state 提升到 App，Ctrl+M 才够得到；持久化仍在 App） */
+  /** P25：开合与 tab 受控（state 提升到 App，Ctrl+K 才够得到；持久化仍在 App） */
   open: boolean;
   tab: RailTab;
   onSwitchTab: (tab: RailTab) => void;

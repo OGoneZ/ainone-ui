@@ -115,7 +115,7 @@ function App() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   // F-15-7 左侧栏开合（持久化 localStorage，RightRail 同款交互）
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem("ainone-sidebar-open") !== "0");
-  // P25 右栏开合 + tab：state 从 RightRail 提升到 App（Ctrl+M 可达），持久化 key 不变
+  // P25 右栏开合 + tab：state 从 RightRail 提升到 App（Ctrl+K 可达），持久化 key 不变
   const [railState, setRailState] = useState(() => loadRailState());
   useEffect(() => {
     saveRailState(railState);

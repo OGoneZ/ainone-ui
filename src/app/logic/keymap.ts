@@ -3,8 +3,9 @@
 // 设计要点：
 // - Binding 用 e.code（物理键位）匹配而非 e.key：Alt+\ 在 macOS 的 e.key 是
 //   «（option 组合变字符），e.code 恒为 Backslash，跨键盘布局稳定。
-// - matchShortcut 对 ctrl/meta 等价处理（用户确认：Ctrl 为主、Cmd 兼容），
-//   唯一例外 meta+M 永不匹配（macOS 系统最小化，无法拦截也不该拦）。
+// - matchShortcut 对 ctrl/meta 等价处理（用户确认：Ctrl 为主、Cmd 兼容）。
+//   键位语义纯粹由绑定表决定，不做系统占位特判——用户改绑什么就匹配什么
+//   （如 ⌘M 系统最小化收不到事件，属平台行为，不由匹配层代管）。
 // - 所有函数接收 bindings/defs 参数，不读全局状态——保持 layout.test.ts 同款纯函数风格。
 
 /** 单个键位绑定：code = KeyboardEvent.code（如 "KeyB"、"Backslash"、"ArrowUp"） */
@@ -69,7 +70,7 @@ export interface KeyEventLike {
 /** 默认键位表。已有键（搜索/分屏/关窗/移焦）迁移进来保持原语义。 */
 export const DEFAULT_DEFS: ShortcutDef[] = [
   { id: "app.toggle-sidebar", scope: "global", label: "显示 / 隐藏左侧栏", defaults: [{ code: "KeyB", ctrl: true }] },
-  { id: "app.toggle-rightrail", scope: "global", label: "显示 / 隐藏右侧栏", defaults: [{ code: "KeyM", ctrl: true }] },
+  { id: "app.toggle-rightrail", scope: "global", label: "显示 / 隐藏右侧栏", defaults: [{ code: "KeyK", ctrl: true }] },
   { id: "app.new-session", scope: "global", label: "新建会话", defaults: [{ code: "KeyN", ctrl: true }] },
   { id: "app.new-terminal", scope: "global", label: "新建终端", defaults: [{ code: "KeyT", ctrl: true }] },
   { id: "app.global-search", scope: "global", label: "搜索会话", defaults: [{ code: "KeyF", ctrl: true }] },
@@ -97,8 +98,7 @@ export const DEFAULT_DEFS: ShortcutDef[] = [
 // —— 匹配 ——
 
 /**
- * 判定键盘事件是否命中绑定。ctrl 与 meta 等价（mac 惯例），
- * 例外：绑定含 meta 修饰的 M 键永不匹配（macOS 系统最小化）。
+ * 判定键盘事件是否命中绑定。ctrl 与 meta 等价（mac 惯例）。
  * 绑定的修饰键是「必须按下」语义——未声明的修饰键不强制抬起（宽匹配，
  * 否则浏览器自动携带的修饰会漏配）。
  */
@@ -108,8 +108,6 @@ export function matchBinding(e: KeyEventLike, b: Binding): boolean {
   if (code !== b.code) return false;
   const mod = Boolean(e.ctrlKey) || Boolean(e.metaKey);
   const wantMod = Boolean(b.ctrl) || Boolean(b.meta);
-  // meta+M 特判：macOS 最小化窗口，不可拦也不该拦
-  if (e.metaKey && b.code === "KeyM") return false;
   if (mod !== wantMod) return false;
   if (Boolean(b.shift) !== Boolean(e.shiftKey)) return false;
   if (Boolean(b.alt) !== Boolean(e.altKey)) return false;

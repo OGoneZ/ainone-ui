@@ -126,7 +126,7 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
           </button>
           <button onClick={onClose}>关闭</button>
         </div>
-        <p className="shortcut-note">注：macOS 上 Ctrl 与 ⌘ 等效；⌘M 因系统「最小化窗口」占用不参与绑定。</p>
+        <p className="shortcut-note">注：macOS 上 Ctrl 与 ⌘ 等效；个别组合键若被系统占用（如 ⌘M 最小化窗口），事件不会到达应用。</p>
       </DialogContent>
     </Dialog>
   );

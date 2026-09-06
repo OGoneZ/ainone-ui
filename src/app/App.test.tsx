@@ -139,17 +139,17 @@ describe("P25 App 全局快捷键", () => {
     expect(screen.getByRole("button", { name: "收起侧栏" })).toBeInTheDocument();
   });
 
-  it("Ctrl+M 切换右侧栏显隐", async () => {
+  it("Ctrl+K 切换右侧栏显隐", async () => {
     mockTauriIpc({ handlers: defaultHandlers() });
     render(<App />);
     // 打开一个会话让 RightRail 挂载
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "你好" }));
     await screen.findByTestId("right-rail");
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", code: "KeyM", ctrlKey: true, bubbles: true, cancelable: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true }));
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByTestId("right-rail")).not.toBeInTheDocument();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", code: "KeyM", ctrlKey: true, bubbles: true, cancelable: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true }));
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.getByTestId("right-rail")).toBeInTheDocument();
   });

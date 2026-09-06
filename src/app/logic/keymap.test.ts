@@ -42,9 +42,9 @@ describe("P25 matchBinding", () => {
     expect(matchBinding({ code: "KeyD", ctrlKey: true, shiftKey: true }, bind("KeyD", { ctrl: true }))).toBe(false);
   });
 
-  it("meta+M 永不匹配（macOS 系统最小化不可拦）", () => {
-    expect(matchBinding({ code: "KeyM", metaKey: true }, bind("KeyM", { ctrl: true }))).toBe(false);
-    expect(matchBinding({ code: "KeyM", metaKey: true }, bind("KeyM", { meta: true }))).toBe(false);
+  it("meta 修饰与 ctrl 同语义等价", () => {
+    expect(matchBinding({ code: "KeyM", metaKey: true }, bind("KeyM", { ctrl: true }))).toBe(true);
+    expect(matchBinding({ code: "KeyM", metaKey: true }, bind("KeyM", { meta: true }))).toBe(true);
     // Ctrl+M 正常命中
     expect(matchBinding({ code: "KeyM", ctrlKey: true }, bind("KeyM", { ctrl: true }))).toBe(true);
   });

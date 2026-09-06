@@ -30,11 +30,11 @@ describe("ShortcutsModal", () => {
     expect(screen.getByText("会话（多击）")).toBeInTheDocument();
   });
 
-  it("键位 chip 展示默认键位（Ctrl+B / Ctrl+M）", () => {
+  it("键位 chip 展示默认键位（Ctrl+B / Ctrl+K）", () => {
     render(<ShortcutsModal open={true} onClose={() => {}} />);
     const kbds = [...document.querySelectorAll(".shortcut-keys kbd")].map((k) => k.textContent);
     expect(kbds).toContain("Ctrl+B");
-    expect(kbds).toContain("Ctrl+M");
+    expect(kbds).toContain("Ctrl+K");
     expect(kbds).toContain("Ctrl+N");
     expect(kbds).toContain("Ctrl+T");
   });
