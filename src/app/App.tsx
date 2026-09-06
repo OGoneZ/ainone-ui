@@ -405,7 +405,18 @@ function App() {
       const node = allNodes[nodeIdx];
       if (!node || m0.getActiveTabset()?.getId() === node.id) return;
       lastPaneSwitchAt = now;
-      activateTabsetAndComposer(node.id);
+      // p20o：点击 tab 面板内容时，聚焦目标必须是**被点击的面板**（e.target 所在
+      // 的 tab），而不是该 tabset 的当前选中 tab——tabset 内叠多个 tab 时（如右侧
+      // 窗格 = 终端 + chat 两个 tab，当前显示 chat），按旧逻辑 selectTab(选中项)
+      // 会把 tabset 切回它的选中 tab（终端）= 用户看到的「点 session 自动跳到终端」。
+      // 通道 A（tab 条/空窗格）无面板概念，维持 selectedIdx 语义。
+      const clickedTabKey = tab?.id.startsWith("flexlayout-tab-") ? tab.id.slice("flexlayout-tab-".length) : undefined;
+      let clickedIdx = -1;
+      if (clickedTabKey) {
+        const children = (m0.getNodeById(node.id) as unknown as { getChildren: () => { getId(): string }[] } | null)?.getChildren();
+        clickedIdx = children ? children.findIndex((c) => c.getId() === clickedTabKey) : -1;
+      }
+      activateTabsetAndComposer(node.id, clickedIdx >= 0 ? clickedIdx : undefined);
     }
     function onPanePointerDown(e: PointerEvent) {
       paneSwitchFromEvent(e);
