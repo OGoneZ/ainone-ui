@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "@/acp/session";
+import type * as acp from "@agentclientprotocol/sdk";
 import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { FilePreview } from "@/sidebar/FilePreview";
@@ -61,9 +62,14 @@ import "@/chat/chat.css";
 import "@/chat/message/messages.css";
 import "@/chat/composer/composer.css";
 
+// 权限决策类型：selected = 用户选了某个 optionId；cancelled = 超时/turn 收口的
+// 协议原生取消（RequestPermissionOutcome 支持 { outcome: "cancelled" }）
+type PermDecision = { kind: "selected"; optionId: string } | { kind: "cancelled" };
+// P24e：权限请求超时（对标 DeepChat DEFAULT_PERMISSION_TIMEOUT_MS）
+const PERM_TIMEOUT_MS = 60_000;
+
 interface Props {
-  tabKey: string;
-  adapter: AdapterWithStatus;
+  tabKey: string;  adapter: AdapterWithStatus;
   resumeSessionId?: string;
   /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
   cwd?: string;
@@ -141,8 +147,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }, [atMenu, workspaceCwd, atTree]);
 
   const sessionRef = useRef<AcpSession | null>(null);
-  // F-21-4：决策值 = ACP optionId 原样回传（不再客户端猜 allow/reject 前缀，L12 废弃）
-  const permResolver = useRef<((optionId: string) => void) | null>(null);
+  // F-21-4：决策值 = ACP optionId 原样回传（不再客户端猜 allow/reject 前缀，L12 废弃）。
+  // P24e：决策升级为 PermDecision——cancelled 是协议原生 outcome（RequestPermissionOutcome），
+  // 替代旧的「猜 reject 选项」收口启发式（无 reject 类选项时会误选可能是 allow 的首选项）
+  const permResolver = useRef<((d: PermDecision) => void) | null>(null);
+  // P24e 权限请求 60s 超时兜底：harness 撤回权限请求时不发任何通知，
+  // 悬挂的 PermCard 会永远卡在界面上（DeepChat P0-1 同款修复）
+  const permTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 恢复会话时已写过索引，续聊不应重写标题 → 标记为“已 prompt”
   const promptedOnce = useRef(Boolean(resumeSessionId));
   // steering：运行中打断时，待发消息暂存于此，当前 turn 结束后自动续跑
@@ -378,6 +389,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }, 15_000);
     return () => {
       if (recycleTimerRef.current) clearInterval(recycleTimerRef.current);
+      // P24e 路径 c：卸载时收口未决权限请求（清 timer + cancelled，防悬挂响应）
+      if (permTimerRef.current) {
+        clearTimeout(permTimerRef.current);
+        permTimerRef.current = null;
+      }
+      permResolver.current?.({ kind: "cancelled" });
+      permResolver.current = null;
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("ainone:ref-file", onRefFile);
       window.removeEventListener("ainone:open-file", onOpenFile);
@@ -419,12 +437,28 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             options: params.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind ?? null })),
           };
           patch(tabKey, { perm });
-          const optionId = await new Promise<string>((resolve) => {
+          // P24e：60s 超时兜底——harness 撤回请求不发通知，超时回协议原生
+          // cancelled，不让 PermCard 永远卡在界面上（三条清 timer 路径：
+          // a) onPerm 正常决策；b) finally turn 收口；c) 组件卸载 cleanup）
+          if (permTimerRef.current) clearTimeout(permTimerRef.current);
+          permTimerRef.current = setTimeout(() => {
+            logger.warn("chat", "perm-timeout", { title: perm.title, timeoutMs: PERM_TIMEOUT_MS });
+            permResolver.current?.({ kind: "cancelled" });
+            permResolver.current = null;
+          }, PERM_TIMEOUT_MS);
+          const decision = await new Promise<PermDecision>((resolve) => {
             permResolver.current = resolve;
           });
+          if (permTimerRef.current) {
+            clearTimeout(permTimerRef.current);
+            permTimerRef.current = null;
+          }
           patch(tabKey, { perm: null });
+          if (decision.kind === "cancelled") {
+            return { outcome: { outcome: "cancelled" } as acp.RequestPermissionResponse["outcome"] };
+          }
           // optionId 由 PermCard 原样回传；兜底 options[0]（harness 撤销选项的极端情况）
-          const target = params.options.find((o) => o.optionId === optionId);
+          const target = params.options.find((o) => o.optionId === decision.optionId);
           return {
             outcome: {
               outcome: "selected",
@@ -916,14 +950,15 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         patch(tabKey, { busy: false, turnStartedAt: undefined });
         runRef.current = null;
         // H10：turn 结束时未决的权限请求/提问卡一并收口（turn 已中止，
-        // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）
+        // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）。
+        // P24e：收口语义统一为协议原生 cancelled（替代旧「猜 reject 选项」启发式——
+        // 无 reject 类选项时会误选可能是 allow 的首选项）
         if (permResolver.current) {
-          // H10 兜底语义：turn 已中止，按「拒绝」收口——优先 reject 类选项，无则首选项
-          const rt = useSessionStore.getState().runtime[tabKey];
-          const fallbackReject =
-            rt?.perm?.options.find((o) => o.kind?.startsWith("reject")) ??
-            rt?.perm?.options[0];
-          permResolver.current(fallbackReject?.optionId ?? "");
+          if (permTimerRef.current) {
+            clearTimeout(permTimerRef.current);
+            permTimerRef.current = null;
+          }
+          permResolver.current({ kind: "cancelled" });
           permResolver.current = null;
         }
         if (askResolver.current) {
@@ -985,9 +1020,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
   }
 
-  // F-21-4：PermCard 决策入口（optionId 原样转传 resolver）
+  // F-21-4：PermCard 决策入口（optionId 原样转传 resolver；P24e 路径 a：清超时 timer）
   function onPerm(optionId: string) {
-    permResolver.current?.(optionId);
+    if (permTimerRef.current) {
+      clearTimeout(permTimerRef.current);
+      permTimerRef.current = null;
+    }
+    permResolver.current?.({ kind: "selected", optionId });
     permResolver.current = null;
   }
 
