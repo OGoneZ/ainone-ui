@@ -226,12 +226,12 @@ pub fn classify_response(status: u16, body: &str) -> Result<String, String> {
 }
 
 /// 纯函数：拼 anthropic /v1/messages 请求体。
-/// max_tokens 2048：实测网关模型（glm-5.3-flash）思考块消耗输出预算——
-/// 1024 时可能全被 thinking_delta 吃满、text_delta 一个没有（AC 实锤）。
+/// max_tokens 16384：给思考块留足预算（实测 glm-5.3-flash 思考消耗可达数百块），
+/// 解释类回答本身很短，上限仅防极端跑飞；OpenAI 协议则不带该字段（服务端默认）。
 pub fn build_anthropic_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
-        "max_tokens": 2048,
+        "max_tokens": 16384,
         "messages": [{ "role": "user", "content": text }],
     })
 }
