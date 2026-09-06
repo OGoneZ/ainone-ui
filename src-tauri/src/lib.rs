@@ -87,6 +87,8 @@ pub fn run() {
             quickask::quickask_config_get,
             quickask::quickask_config_save,
             asr::asr_transcribe,
+            asr::asr_config_get,
+            asr::asr_config_save,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

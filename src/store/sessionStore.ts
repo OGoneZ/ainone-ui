@@ -66,6 +66,8 @@ interface SessionStore {
   drop: (key: string) => void;
   /** 绑定会话 id（session/new 或 load 后） */
   bindSession: (key: string, sessionId: string) => void;
+  /** 清除会话 id（回溯/编辑重发后：下次重建必须 session/new，避免 load 恢复全量历史） */
+  bindSessionClear: (key: string) => void;
   /** 更新采集到的 usage（F-8-4） */
   setUsage: (key: string, usage: { used: number; size: number; cost: number | null }) => void;
   /** 更新采集到的 provider 路由（F-8-4） */
@@ -156,6 +158,13 @@ export const useSessionStore = create<SessionStore>()(
           const cur = s.runtime[key];
           if (!cur) return {};
           return { runtime: { ...s.runtime, [key]: { ...cur, sessionId } } };
+        }),
+
+      bindSessionClear: (key) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur || cur.sessionId === null) return {};
+          return { runtime: { ...s.runtime, [key]: { ...cur, sessionId: null } } };
         }),
 
       setMessages: (key, messages) =>

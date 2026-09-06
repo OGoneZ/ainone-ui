@@ -62,13 +62,13 @@ describe("QueueDock（DEC-50）", () => {
     );
   });
 
-  it("「立即发」→ 回调该条文本（移出队列发生在 ChatPanel.sendNowSteer，AC-P16-9）", async () => {
+  it("「立即发」→ 回调该条文本+id（移出队列发生在 ChatPanel.sendNowSteer，AC-P16-9；H14 按 id 删条目）", async () => {
     useQueueStore.setState({ queues: { t1: [item("a", "插队任务"), item("b", "其他")] } });
     const onSendNow = vi.fn();
     render(<QueueDock tabKey="t1" busy onSendNow={onSendNow} />);
     await userEvent.click(screen.getByRole("button", { name: /命令队列 2 条/ }));
     await userEvent.click(screen.getAllByRole("button", { name: "立即发送" })[0]);
-    await waitFor(() => expect(onSendNow).toHaveBeenCalledWith("插队任务"));
+    await waitFor(() => expect(onSendNow).toHaveBeenCalledWith("插队任务", "a"));
   });
 
   it("store.merge 直接断言合并落账（拖拽动画不做 jsdom 断言，AC-P16-8）", async () => {

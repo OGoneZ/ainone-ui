@@ -393,6 +393,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     if (sessionRef.current) return sessionRef.current;
     // L7：hadSession = 回收/回溯后重建链路 → 这才是 reopen 时点
     const hadSession = recycledRef.current;
+    // H9（F3）：新建会话的 sessionId 只在 store 里（prop 的 resumeSessionId
+    // 仅恢复侧栏历史时才有）。空闲回收 dispose 后重建必须走 session/load，
+    // 否则 session/new 清零 harness 上下文——UI 消息完好但模型失忆，无感知。
+    // 回溯/编辑重发链路（sessionRef 已断 + store sessionId 已被截断后重建）
+    // 见下：截断时同步清 bindSession，落空即回 session/new，语义一致。
+    const storeSessionId = useSessionStore.getState().runtime[tabKey]?.sessionId;
+    const resumeId = resumeSessionId ?? storeSessionId ?? undefined;
     setStarting(true);
     try {
       const s = await openSession(
@@ -403,8 +410,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             permResolver.current = resolve;
           });
           patch(tabKey, { pending: null });
+          // L12：kind 前缀匹配（allow_once/allow_always 都算允许）——精确匹配
+          // allow_once 会在 harness 只提供 allow_always 时落空，回落 options[0]
+          // 可能把「允许」发成拒绝（F2）。always 选项 UI 暂不暴露，选它=同语义。
           const target = params.options.find((o) =>
-            decision === "allow" ? o.kind === "allow_once" : o.kind === "reject_once",
+            decision === "allow" ? o.kind?.startsWith("allow") : o.kind?.startsWith("reject"),
           );
           return {
             outcome: {
@@ -413,7 +423,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             },
           };
         },
-        resumeSessionId,
+        resumeId,
         (words: CommandWord[]) => setCommands(adapter.id, words),
         cwd,
         // F-12-2 结构化提问：把 Elicitation 请求转成 store 状态 → AskCard 渲染
@@ -427,6 +437,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             properties?: Record<string, Record<string, unknown>>;
           };
           const props = schema.properties ?? {};
+          // H11（F4）：记录每个字段的 schema 类型——AskCard 收集的是字符串，
+          // 提交前按类型转换成 ACP ElicitationContentValue 要求的原生类型
+          //（number/integer→数字，boolean→布尔），避免依赖 harness 容错。
+          const propTypes: Record<string, string> = {};
           const questions: AskQuestion[] = Object.entries(props).map(([key, raw]) => {
             const p = raw as {
               title?: string | null;
@@ -436,6 +450,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
               items?: { enum?: string[] } | null;
             };
             const title = p.title ?? key;
+            propTypes[title] = p.type ?? "string";
             if (p.type === "array") {
               return { question: title, options: p.items?.enum ?? [], multi: true };
             }
@@ -459,7 +474,22 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             return { action: "decline" };
           }
           logger.info("chat", "ask-answer", { picked: Object.keys(answers).length });
-          return { action: "accept", content: answers };
+          // H11：按 schema 类型把字符串答案转回原生类型
+          const content: Record<string, unknown> = {};
+          for (const [q, a] of Object.entries(answers)) {
+            const t = propTypes[q] ?? "string";
+            if (Array.isArray(a)) {
+              content[q] = a;
+            } else if (t === "number" || t === "integer") {
+              const n = Number(a);
+              content[q] = Number.isFinite(n) ? n : a;
+            } else if (t === "boolean") {
+              content[q] = a === "true" || a === "是";
+            } else {
+              content[q] = a;
+            }
+          }
+          return { action: "accept", content };
         },
       );
       sessionRef.current = s;
@@ -470,7 +500,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       }
       // M9：resume 会话（promptedOnce 初值 true）永远不拉 providers → 侧栏
       // apiType/baseUrl 恒空。ensureSession 建链后补拉一次（幂等，失败静默）。
-      if (resumeSessionId) {
+      if (resumeId) {
         void s
           .listProviders()
           .then((providers) => {
@@ -507,19 +537,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       });
       useSessionStore.getState().setMessages(tabKey, truncated);
       persistedRef.current = truncated.length;
-      const sid = sessionRef.current?.sessionId ?? resumeSessionId;
       // H7：同 doRewind——await 截断完成，避免与新消息 append 竞态
-      if (sid) {
-        try {
-          await logTruncate(sid, truncated.length);
-        } catch (e) {
-          logger.error("chat", "log-truncate 失败", { sid, keepLines: truncated.length, error: String(e) });
-          toast.error("日志截断失败，恢复会话时可能看到旧历史");
-        }
-      }
-      // 断开当前子进程，下次 prompt 重新 session/load 恢复（与回溯同链路，DEC-35）
-      sessionRef.current?.dispose().catch(() => {});
-      sessionRef.current = null;
+      await truncateAndDetach(truncated.length);
       setInput("");
       setAtMenu(null);
       setFiles([]);
@@ -565,11 +584,18 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // P16 F-16-3（DEC-50）：「立即发」——打断当前 turn 并把该条作为 steering 立即发出。
   // M2 顺序保持：先赋值 pendingTextRef 再 stop（stop 返回后 finally 立即消费 ref）；
   // 该条先从队列移除，避免 finally 消费队列时重复发送。
-  async function sendNowSteer(text: string) {
-    const q = useQueueStore.getState().queues[tabKey] ?? [];
-    const entry = q.find((i) => i.text === text);
-    if (entry) useQueueStore.getState().remove(tabKey, entry.id);
-    logger.info("queue", "steer-from-queue", { id: entry?.id, busy });
+  // H14（F4）：按 id 删条目（按文本匹配在重复文本时只会删到第一条）。
+  async function sendNowSteer(text: string, id?: string) {
+    if (id !== undefined) {
+      useQueueStore.getState().remove(tabKey, id);
+      logger.info("queue", "steer-from-queue", { id, busy });
+    } else {
+      // 兼容仅文本入口：找不到 id 时按文本兜底
+      const q = useQueueStore.getState().queues[tabKey] ?? [];
+      const entry = q.find((i) => i.text === text);
+      if (entry) useQueueStore.getState().remove(tabKey, entry.id);
+      logger.info("queue", "steer-from-queue", { id: entry?.id, busy });
+    }
     if (busy) {
       pendingTextRef.current = text;
       await stop();
@@ -577,6 +603,29 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
     appendUser(tabKey, text);
     await runPrompt(text);
+  }
+
+  // —— 回溯/编辑重发的进程断开链路（DEC-35）共用：截 store 消息 + 截日志 ——
+  // + 清 store sessionId（H9 配套：截断后重建必须走 session/new，
+  //   session/load 只会恢复 harness 全量历史，截断就白做了）。
+  // 失败时明确提示不静默（H7）。
+  async function truncateAndDetach(keepCount: number) {
+    const sid = sessionRef.current?.sessionId ?? resumeSessionId;
+    if (sid) {
+      try {
+        await logTruncate(sid, keepCount);
+      } catch (e) {
+        logger.error("chat", "log-truncate 失败", { sid, keepLines: keepCount, error: String(e) });
+        toast.error("日志截断失败，恢复会话时可能看到旧历史");
+      }
+    }
+    // 清 sessionId：下次 ensureSession 落空 → session/new（load 会全量恢复历史）
+    useSessionStore.getState().bindSessionClear(tabKey);
+    // 断开当前子进程
+    sessionRef.current?.dispose().catch(() => {});
+    sessionRef.current = null;
+    // 提示词不变：load 语义下「上下文已丢弃」本就虚假（F1 调研），降级提示
+    toast.info("已在本地截断历史；模型侧上下文可能仍保留（协议限制）");
   }
 
   // —— F-8-3 文件引用：按钮选择 / 拖拽 同一条「待发送附件」路径 ——
@@ -686,22 +735,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const truncated = truncateToMessageIndex(messages, target);
     useSessionStore.getState().setMessages(tabKey, truncated);
     persistedRef.current = truncated.length;
-    const sid = sessionRef.current?.sessionId ?? resumeSessionId;
     // H7：先 await 截断完成再继续（原 fire-and-forget 有「先 append 后 truncate」
-    // 竞态——回溯后立即发消息时新消息可能被一并截掉）；失败明确提示不静默。
-    if (sid) {
-      try {
-        await logTruncate(sid, truncated.length);
-      } catch (e) {
-        logger.error("chat", "log-truncate 失败", { sid, keepLines: truncated.length, error: String(e) });
-        toast.error("日志截断失败，恢复会话时可能看到旧历史");
-      }
-    }
-    // 断开当前子进程，下次 prompt 时重新 session/load 恢复（不丢已截断历史）
-    sessionRef.current?.dispose().catch(() => {});
-    sessionRef.current = null;
+    // 竞态——回溯后立即发消息时新消息可能被一并截掉）
+    await truncateAndDetach(truncated.length);
     toast.success(`已回溯到第 ${target + 1} 条消息之前`);
   }
+
 
   // —— F-8-7 快问：选中 → 快速解释 → 悬浮窗（不进入会话、不写日志）——
   // P11 F-R7：useCallback 稳定引用，避免 memo 化的 MessageLine 因回调新引用而失效
@@ -843,6 +882,17 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       } finally {
         patch(tabKey, { busy: false, turnStartedAt: undefined });
         runRef.current = null;
+        // H10：turn 结束时未决的权限请求/提问卡一并收口（turn 已中止，
+        // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）
+        if (permResolver.current) {
+          permResolver.current("reject");
+          permResolver.current = null;
+        }
+        if (askResolver.current) {
+          askResolver.current(null);
+          askResolver.current = null;
+        }
+        patch(tabKey, { pending: null, ask: null });
         // F-9-1 计划栏：turn 结束清除 plan，不悬挂下一轮（AC-P9-3）
         useSessionStore.getState().setPlan(tabKey, null);
         // 落盘增量（turn 结束一次性追加，避免流式期间高频 IO）
@@ -854,10 +904,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           void runPrompt(queued);
         } else {
           // F-9-3 命令队列：turn 结束后自动按序消费下一条（AC-P9-9）。
-          // M1：用户主动停止（stopReason=cancelled/user）→ 不续发，队列保留。
+          // M1：用户主动停止（stopReason=cancelled）→ 不续发，队列保留。
+          // （L13："user" 不在 ACP StopReason 枚举里，死分支移除）
           const reason = stopReasonRef.current ?? "end_turn";
           stopReasonRef.current = null;
-          const userCancelled = reason === "cancelled" || reason === "user";
+          const userCancelled = reason === "cancelled";
           const head = userCancelled ? null : useQueueStore.getState().dequeue(tabKey);
           if (head) {
             logger.info("queue", "consume", { id: head.id });
@@ -1216,7 +1267,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         tabKey={tabKey}
         busy={busy}
         onSendNow={sendNowSteer}
-      />
-    </div>
+      />    </div>
   );
 }

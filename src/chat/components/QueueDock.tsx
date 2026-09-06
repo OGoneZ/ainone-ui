@@ -39,8 +39,9 @@ interface Props {
   tabKey: string;
   /** busy 时徽标呼吸提示（消费会自动发生）+「立即发」可用性不受影响 */
   busy: boolean;
-  /** 「立即发」：打断当前 turn 并把该条作为 steering 立即发出（M2 先赋值再 stop） */
-  onSendNow: (text: string) => void;
+  /** 「立即发」：打断当前 turn 并把该条作为 steering 立即发出（M2 先赋值再 stop）；
+      第二参为条目 id（按 id 删队列，重复文本不误删） */
+  onSendNow: (text: string, id: string) => void;
 }
 
 export function QueueDock({ tabKey, busy, onSendNow }: Props) {
@@ -187,7 +188,7 @@ export function QueueDock({ tabKey, busy, onSendNow }: Props) {
                   }}
                   onSendNow={() => {
                     logger.info("queue", "immediate-send", { id: it.id });
-                    onSendNow(it.text);
+                    onSendNow(it.text, it.id);
                   }}
                 />
               ))}
@@ -236,7 +237,7 @@ function DockItem({
   onCommitEdit: () => void;
   onCancelEdit: () => void;
   onRemove: () => void;
-  onSendNow: (text: string) => void;
+  onSendNow: (text: string, id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
@@ -274,7 +275,7 @@ function DockItem({
           {text}
         </button>
       )}
-      <button type="button" className="queue-dock-act" aria-label="立即发送" title="立即发送（打断当前任务）" onClick={() => onSendNow(text)}>
+      <button type="button" className="queue-dock-act" aria-label="立即发送" title="立即发送（打断当前任务）" onClick={() => onSendNow(text, id)}>
         <SendIcon style={{ width: 12, height: 12 }} />
       </button>
       <button type="button" className="queue-dock-act" aria-label="删除" title="删除" onClick={onRemove}>

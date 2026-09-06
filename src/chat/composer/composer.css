@@ -51,7 +51,8 @@
 /* 外观单一归宿：基础盒模型在此；背景/边框由下方 F-12-6b 毛玻璃渐进增强块统一管理 */
 .quick-pop {
   min-width: 240px;
-  max-width: 360px;
+  width: max-content;
+  max-width: min(480px, 72vw);
   border-radius: var(--radius);
   box-shadow: var(--shadow-pop);
   padding: 10px;
@@ -70,17 +71,21 @@
   color: var(--text-secondary);
   border-left: 2px solid var(--bg-3);
   padding-left: 8px;
-  max-height: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-height: 96px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  word-break: break-word;
 }
 
 .quick-pop-body {
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
-  max-height: 200px;
+  /* 选中内容多、解释长时区内滚动（F：上限 40vh），不顶出屏幕 */
+  max-height: min(40vh, 360px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  word-break: break-word;
 }
 
 .quick-pop-error {

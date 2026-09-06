@@ -269,9 +269,17 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
         if (msg === null) break;
         dispatchUpdate(msg, onOutgoing);
       }
-      // 排空残余 update（usage_update 等），避免串到下一轮
-      drainQueue();
       const resp = await promptPromise;
+      // H12（F4）：response resolve 与最后几条 update（usage_update 等）存在竞速——
+      // 不能直接丢弃：把队列里残余 update 派发完再收口（有界：队列此刻不再增长）
+      for (;;) {
+        const msg = await Promise.race([
+          nextUpdate(),
+          new Promise<null>((r) => setTimeout(() => r(null), 250)),
+        ]);
+        if (msg === null) break;
+        dispatchUpdate(msg, onOutgoing);
+      }
       console.info("[acp] session/prompt 结束 stopReason=", resp.stopReason);
       onOutgoing({ type: "turn_stop", stopReason: resp.stopReason });
     },

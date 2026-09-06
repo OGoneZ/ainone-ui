@@ -38,23 +38,34 @@ export async function openSession(
   });
   const proc = await spawnHarness(adapter.program, adapter.args, cwd);
 
-  return createAcpSession({
-    streams: { stdin: proc.stdin, stdout: proc.stdout, stderr: proc.stderr },
-    cwd,
-    onPermission,
-    onElicitation,
-    resumeSessionId,
-    onCommands,
-    // P4 启动守卫：进程秒退/握手超时时给出带 stderr 尾迹的明确错误
-    closed: proc.closed,
-    stderrTail: proc.stderrTail,
-    ipc: {
-      fsRead: (path) => invoke<string>("fd_read", { path }),
-      fsWrite: (path, content) => invoke("fd_write", { path, content }),
-      kill: () => invoke("agent_kill", { agentId: proc.agentId }),
-      // P8 F-8-1：空闲超时回收 kill 带活动时间（Rust 侧留痕，再落回收日志）
-      recycle: (lastActivityMs) =>
-        invoke("agent_kill_idle", { agentId: proc.agentId, lastActivityMs }),
-    },
-  });
+  try {
+    return await createAcpSession({
+      streams: { stdin: proc.stdin, stdout: proc.stdout, stderr: proc.stderr },
+      cwd,
+      onPermission,
+      onElicitation,
+      resumeSessionId,
+      onCommands,
+      // P4 启动守卫：进程秒退/握手超时时给出带 stderr 尾迹的明确错误
+      closed: proc.closed,
+      stderrTail: proc.stderrTail,
+      ipc: {
+        fsRead: (path) => invoke<string>("fd_read", { path }),
+        fsWrite: (path, content) => invoke("fd_write", { path, content }),
+        kill: () => invoke("agent_kill", { agentId: proc.agentId }),
+        // P8 F-8-1：空闲超时回收 kill 带活动时间（Rust 侧留痕，再落回收日志）
+        recycle: (lastActivityMs) =>
+          invoke("agent_kill_idle", { agentId: proc.agentId, lastActivityMs }),
+      },
+    });
+  } catch (e) {
+    // 会话建立失败（load 的 sessionId 不存在 / 握手失败）→ kill 子进程，
+    // 否则僵死进程挂在 Rust 进程表里（H8）
+    logger.warn("session", "openSession 失败，清理子进程", {
+      agentId: proc.agentId,
+      error: String(e),
+    });
+    invoke("agent_kill", { agentId: proc.agentId }).catch(() => {});
+    throw e;
+  }
 }
