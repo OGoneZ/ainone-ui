@@ -21,6 +21,9 @@ export interface TerminalPanelProps {
   tabKey: string;
   cwd?: string;
   active: boolean;
+  /** P26f：shell 正常退出（code 0）时由面板回调 App 关闭本 tab（App 负责焦点移交）。
+   *  异常退出（code≠0）不回调，保留「进程已退出」状态条供查看/重启。 */
+  onNormalExit?: () => void;
 }
 
 /** 读 CSS 变量并转 xterm theme（lightningcss 不允许 js 直接拿 color-mix，token 均为裸值） */
@@ -53,7 +56,7 @@ function readTheme(dark: boolean): Record<string, string> {
   };
 }
 
-export function TerminalPanel({ tabKey, cwd, active }: TerminalPanelProps) {
+export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const ptyRef = useRef<TerminalSession | null>(null);
@@ -62,6 +65,9 @@ export function TerminalPanel({ tabKey, cwd, active }: TerminalPanelProps) {
   const [exited, setExited] = useState(false);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [spawnError, setSpawnError] = useState<string | null>(null);
+  // P26f：onNormalExit 走 ref（openTerminal 的 useCallback 依赖不含它，避免引用变化误重建）
+  const onNormalExitRef = useRef<(() => void) | undefined>(undefined);
+  onNormalExitRef.current = onNormalExit;
   const ensure = useTerminalStore((s) => s.ensure);
   const markExited = useTerminalStore((s) => s.markExited);
   const drop = useTerminalStore((s) => s.drop);
@@ -113,6 +119,9 @@ export function TerminalPanel({ tabKey, cwd, active }: TerminalPanelProps) {
           setExited(true);
           setExitCode(code);
           markExited(tabKey, code);
+          // P26f：正常退出（Ctrl+D / exit）→ 自动关掉 tab；异常退出保留状态条。
+          // onNormalExitRef 避免回调引用变化重建 openTerminal（会误 kill 重启）
+          onNormalExitRef.current?.();
         });
         applyTheme();
         fit.fit();

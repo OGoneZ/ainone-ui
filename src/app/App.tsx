@@ -528,11 +528,55 @@ function App() {
   }, [activeKey, activeTab, activeAdapter, keymapOverrides]);
 
   // flexlayout tab 内容工厂：tab.id = tabKey，按 component 分派 ChatPanel / TerminalPanel（P23）
+  /** P26f：关掉指定 tab 并做焦点移交（p20r 逻辑抽出复用——Ctrl+D 关窗与
+   *  终端正常退出自动关窗共用一条链路，含「最近存活窗格」焦点移交） */
+  function closeTabAndRetarget(tabKeyToClose: string) {
+    const m = getModel();
+    const node = m.getNodeById(tabKeyToClose);
+    if (!node) return;
+    // 先记下被删 tab 所在 tabset 的屏幕位置，删掉后在该位置附近找最近的其他
+    // tabset（WARP/编辑器关闭后焦点移交的惯例）
+    const parent = node.getParent();
+    const closingTabset = parent && parent.getType() === "tabset" ? parent : null;
+    const closingNode = closingTabset as unknown as
+      | { getRect?: () => { x: number; y: number; width: number; height: number } }
+      | null;
+    const rect = closingNode?.getRect?.();
+    m.doAction(Actions.deleteTab(tabKeyToClose));
+    // doAction 同步更新 model；等 React 渲染出新布局后再 activate（textarea 才存在）
+    const retarget = () => {
+      // 删除后 activeTabset 仍在（同 tabset 还有别的 tab）→ 只需聚焦它；
+      // tabset 整个消失（删的是唯一 tab）→ 按屏幕距离找最近存活者
+      const m1 = getModel();
+      let nextId = m1.getActiveTabset()?.getId();
+      if (!nextId && rect && (rect.width > 0 || rect.height > 0)) {
+        let bestId: string | undefined;
+        let bestDist = Infinity;
+        m1.visitNodes((n: unknown) => {
+          const n2 = n as { getType(): string; getId(): string; getRect?: () => { x: number; y: number; width: number; height: number } };
+          if (n2.getType() !== "tabset") return;
+          const r = n2.getRect?.();
+          if (!r || r.width === 0) return;
+          const dx = Math.max(0, Math.max(rect.x - (r.x + r.width), r.x - (rect.x + rect.width)));
+          const dy = Math.max(0, Math.max(rect.y - (r.y + r.height), r.y - (rect.y + rect.height)));
+          const d = dx * dx + dy * dy;
+          if (d < bestDist) {
+            bestDist = d;
+            bestId = n2.getId();
+          }
+        });
+        nextId = bestId || undefined;
+      }
+      if (nextId) activateTabsetAndComposer(nextId);
+    };
+    setTimeout(retarget, 80);
+  }
+
   const factory = (node: TabNode) => {
     const t = tabs.find((x) => x.key === node.getId());
     if (!t) return null;
     if (t.kind === "terminal" || node.getComponent() === "terminal") {
-      return <TerminalPanel key={t.key} tabKey={t.key} cwd={t.cwd} active={t.key === activeKey} />;
+      return <TerminalPanel key={t.key} tabKey={t.key} cwd={t.cwd} active={t.key === activeKey} onNormalExit={() => closeTabAndRetarget(t.key)} />;
     }
     const ad = adapters.find((a) => a.id === t.adapterId);
     if (!ad) return null;
