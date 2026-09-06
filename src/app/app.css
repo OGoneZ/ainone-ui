@@ -25,36 +25,8 @@
   font-size: 0.9em;
 }
 
-/* —— 顶栏工具行 —— */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.toolbar label {
-  font-size: 0.9em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toolbar .theme-select {
-  font-size: 0.85em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* P22 右上角按钮组：打赏入口推到右侧（与设置并排，设置在其左） */
-.toolbar .donate-btn {
-  margin-left: auto;
-}
-
-.toolbar .settings-btn {
-  margin-left: 0;
-}
+/* P26 R1：顶栏工具行删除——主题样式随迁设置弹窗（.settings-theme-row），
+   打赏/设置样式见 .sidebar-footer-item；.hint 上方 margin 由工作区行距承担 */
 
 select {
   font-family: inherit;
@@ -77,11 +49,23 @@ select {
   width: 240px; /* F-21-6：运行时被 App.tsx inline width 覆盖（拖宽持久化值） */
   position: relative; /* 拖宽把手定位锚 */
   flex-shrink: 0;
-  overflow-y: auto;
+  /* P26 R4：改 flex 列容器——.sidebar-scroll 承担滚动（原整体 overflow-y:auto 上移），
+     footer 固定底部不随列表滚；aside 自身不再滚动（AC-R4-2） */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--bg-3);
   border-radius: var(--radius-sm);
   padding: 10px;
   background: var(--bg-1);
+}
+
+/* P26 R4：会话列表滚动区（高度让位给 footer，内容溢出时内部滚动） */
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .sidebar-head {
@@ -150,6 +134,50 @@ select {
   align-items: center;
   gap: 8px;
   padding: 6px 0;
+}
+
+/* P26 R4 侧栏底部动作区：上打赏作者、下设置（展开态带文字，折叠态仅图标） */
+.sidebar-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -10px -10px; /* 抵消 aside padding，让分隔线/背景通到边缘 */
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--bg-3);
+}
+
+.sidebar-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  font-family: inherit;
+  text-align: left;
+}
+
+.sidebar-footer-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-collapsed .sidebar-footer {
+  margin: auto -6px -6px; /* 折叠态 padding 6px 0，抵消后通到边缘 */
+  padding: 6px 0 4px;
+  border-top: 1px solid var(--bg-3);
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-collapsed .sidebar-footer-item {
+  padding: 4px;
+  justify-content: center;
 }
 
 /* —— 工作区分组 —— */
@@ -557,6 +585,19 @@ button:disabled {
   color: var(--text-secondary);
   border-bottom: 1px solid var(--bg-3);
   padding-bottom: 6px;
+}
+
+/* P26 R3 外观分区：主题行（label + select 两端对齐） */
+.settings-theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9em;
+}
+
+.settings-theme-row select {
+  font-size: 0.9em;
 }
 
 /* 分区内的一张配置卡（快问 / 语音服务） */

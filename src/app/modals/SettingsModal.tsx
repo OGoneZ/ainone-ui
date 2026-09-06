@@ -17,6 +17,9 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  /** P26 R3：主题（受控于 App 的 theme state，持久化/系统跟随 effect 留在 App） */
+  theme: string;
+  onThemeChange: (t: string) => void;
 }
 
 interface EditableAdapter {
@@ -67,7 +70,7 @@ function sourceBadge(source: string): { text: string; auto: boolean } | null {
   return null; // manual / 空 = 自定义
 }
 
-export function SettingsModal({ open, onClose, onSaved }: Props) {
+export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: Props) {
   const [items, setItems] = useState<EditableAdapter[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -210,7 +213,20 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
         {error && <p className="modal-error">{error}</p>}
 
         <div className="settings-body">
-          {/* ============ 分区一：模型服务 ============ */}
+          {/* ============ 分区一：外观（P26 R3 自工具栏迁入） ============ */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">外观</h3>
+            <label className="settings-theme-row">
+              主题
+              <select value={theme} onChange={(e) => onThemeChange(e.target.value)}>
+                <option value="auto">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </label>
+          </section>
+
+          {/* ============ 分区二：模型服务 ============ */}
           <section className="settings-section">
             <h3 className="settings-section-title">模型服务</h3>
 

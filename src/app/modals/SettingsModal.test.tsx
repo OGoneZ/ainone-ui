@@ -41,7 +41,7 @@ afterEach(cleanup);
 describe("SettingsModal", () => {
   it("加载 adapter 列表并渲染名称", async () => {
     const calls = mockTauriIpc({ handlers: defaultHandlers() });
-    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
     // 名称渲染（输入框 value）
     expect(await screen.findByDisplayValue("Oh My Pi")).toBeInTheDocument();
@@ -52,7 +52,7 @@ describe("SettingsModal", () => {
 
   it("F-8-7 快问模型配置区渲染（P22 重排版：分区标题 + 卡片标题 + 输入框）", async () => {
     mockTauriIpc({ handlers: defaultHandlers() });
-    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
     // 分区标题 + 配置卡标题 + 输入框占位
     expect(await screen.findByText("模型服务")).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("SettingsModal", () => {
 
   it("P22 语音服务配置区渲染", async () => {
     mockTauriIpc({ handlers: defaultHandlers() });
-    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
     expect(await screen.findByText("语音服务")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("https://asr.zhubaoduo.com/v1/audio/transcriptions")).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe("SettingsModal", () => {
       source: "auto:claude-code",
     });
     mockTauriIpc({ handlers: defaultHandlers() });
-    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
     expect(await screen.findByText("自动：Claude Code")).toBeInTheDocument();
     // 接口地址占位随协议切换
@@ -90,7 +90,7 @@ describe("SettingsModal", () => {
 
   it("保存校验：清空 id 后保存 → 提示错误，不调 adapters_save", async () => {
     const calls = mockTauriIpc({ handlers: defaultHandlers() });
-    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} />);
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
     const user = userEvent.setup();
     // 有多个 adapter 行，各有 id 输入框；取第一个
@@ -106,7 +106,7 @@ describe("SettingsModal", () => {
     const onSaved = vi.fn();
     const onClose = vi.fn();
     const calls = mockTauriIpc({ handlers: defaultHandlers() });
-    render(<SettingsModal open={true} onClose={onClose} onSaved={onSaved} />);
+    render(<SettingsModal open={true} onClose={onClose} onSaved={onSaved} theme="auto" onThemeChange={() => {}} />);
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "保存" }));
@@ -114,5 +114,19 @@ describe("SettingsModal", () => {
     expect(calls.some((c) => c.cmd === "adapters_save")).toBe(true);
     expect(onSaved).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("SettingsModal 外观分区（P26 R3 主题自工具栏迁入）", () => {
+  it("渲染「外观」分区与主题下拉，切换时回调 onThemeChange", async () => {
+    const onThemeChange = vi.fn();
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={onThemeChange} />);
+
+    expect(await screen.findByText("外观")).toBeInTheDocument();
+    const select = screen.getByDisplayValue("跟随系统") as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    await userEvent.setup().selectOptions(select, "dark");
+    expect(onThemeChange).toHaveBeenCalledWith("dark");
   });
 });
