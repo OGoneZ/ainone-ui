@@ -31,7 +31,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
   }),
 }));
 
-// F-8-7 快问：mock 配置与调用（组件内挂载即读配置）
+// F-8-7 快问：mock 配置与调用（组件内挂载即读配置）；quickAsk 模拟流式两段增量
 vi.mock("../ipc/quickask", () => ({
   quickAskConfigGet: vi.fn().mockResolvedValue({
     base_url: "https://qa.example.com/v1",
@@ -39,7 +39,11 @@ vi.mock("../ipc/quickask", () => ({
     timeout_ms: 30000,
     has_api_key: false,
   }),
-  quickAsk: vi.fn().mockResolvedValue("这是快问的解释"),
+  quickAsk: vi.fn(async (_text: string, onDelta?: (d: string) => void) => {
+    onDelta?.("这是快问的");
+    onDelta?.("解释");
+    return "这是快问的解释";
+  }),
 }));
 
 // logger 内部走 @tauri-apps/plugin-log（依赖 Tauri invoke），jsdom 无 Tauri 运行时 → mock 掉
@@ -220,7 +224,7 @@ describe("ChatPanel 交互行为", () => {
     ).toBeInTheDocument();
   });
 
-  it("F-8-7 快问：选中 → 悬浮窗「快速解释」→ 解释结果不进入会话（AC-P8-10）", async () => {
+  it("F-8-7 快问：选中 → 悬浮窗「快速解释」→ 流式渲染且不进入会话（AC-P8-10）", async () => {
     mockOpen.mockResolvedValue(
       fakeSession([
         { type: "agent_text", text: "某个需要解释的疑难名词" },
@@ -242,7 +246,7 @@ describe("ChatPanel 交互行为", () => {
     // 悬浮窗出现，点「快速解释」
     await user.click(await screen.findByRole("button", { name: "快速解释" }));
 
-    // 悬浮窗显示解释内容
+    // 流式增量逐块渲染（mock 两段 delta），最终全文可见
     expect(await screen.findByText("这是快问的解释")).toBeInTheDocument();
 
     // 解释内容不进入会话消息列表（程序化检查 store：无 user 气泡包含解释）

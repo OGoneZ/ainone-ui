@@ -185,8 +185,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-8-7 快问：选中的待解释文本 + 悬浮窗口坐标
   const [quickSel, setQuickSel] = useState<string | null>(null);
   const [quickAnchor, setQuickAnchor] = useState({ x: 120, y: 80 });
-  // F-8-7 悬浮窗：null=关闭；加载中/结果/错误三态
-  const [quickPop, setQuickPop] = useState<{ state: "loading" | "ok" | "error"; text: string } | null>(null);
+  // F-8-7 悬浮窗：null=关闭；流式中/结果/错误三态（P27：loading→streaming，text 增量累积）
+  const [quickPop, setQuickPop] = useState<{ state: "streaming" | "ok" | "error"; text: string } | null>(null);
   // F-11-6 快问悬浮窗点外关闭：DOM ref
   const quickPopRef = useRef<HTMLDivElement | null>(null);
   const quickSelRef = useRef<string | null>(null);
@@ -880,9 +880,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     if (!quickSel) return;
     const text = quickSel;
     logger.info("chat", "quick-ask", { textLen: text.length });
-    setQuickPop({ state: "loading", text: "" });
+    setQuickPop({ state: "streaming", text: "" });
     try {
-      const out = await quickAsk(text);
+      // P27 流式：Rust 侧 SSE 逐块推增量，悬浮窗实时渲染（不再整段等完）
+      const out = await quickAsk(text, (delta) => {
+        setQuickPop((prev) =>
+          prev && (prev.state === "streaming" || prev.state === "ok")
+            ? { state: "streaming", text: prev.text + delta }
+            : prev,
+        );
+      });
       setQuickPop({ state: "ok", text: out });
     } catch (e) {
       setQuickPop({ state: "error", text: String(e) });
