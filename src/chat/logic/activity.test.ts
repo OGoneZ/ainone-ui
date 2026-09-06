@@ -86,3 +86,59 @@ describe("buildActivityGroups（F-12-3，DEC-36）", () => {
     expect(input).toHaveLength(3);
   });
 });
+
+describe("buildActivityGroups（p22e 实时总耗时字段）", () => {
+  const tw = (text: string, startTs?: number, ms?: number): BlockMsg => ({
+    kind: "thought",
+    text,
+    ...(startTs !== undefined ? { startTs } : {}),
+    ...(ms !== undefined ? { ms } : {}),
+  });
+  const tl = (id: string, status = "completed", startTs?: number, ms?: number): BlockMsg => ({
+    kind: "tool",
+    toolCallId: id,
+    title: `工具${id}`,
+    status,
+    content: [],
+    ...(startTs !== undefined ? { startTs } : {}),
+    ...(ms !== undefined ? { ms } : {}),
+  });
+
+  it("firstStartTs = 组内第一块 startTs（墙钟起点）", () => {
+    const r = buildActivityGroups([tw("想", 1000, 500), tl("a", "completed", 1500, 2000)]);
+    const g = r[0] as Extract<RenderItem, { type: "activity_group" }>;
+    expect(g.firstStartTs).toBe(1000);
+  });
+
+  it("全封口组：endAt = 最后封口块 startTs+ms（墙钟终点，非 ms 之和）", () => {
+    // 思考 1000→1500，间隙 5000（text 生成等），工具 6500→10000
+    // 墙钟总耗时 = 9000；ms 之和 = 4500（旧口径）——两者不同是本需求的核心
+    const r = buildActivityGroups([tw("想", 1000, 500), tl("a", "completed", 6500, 3500)]);
+    const g = r[0] as Extract<RenderItem, { type: "activity_group" }>;
+    expect(g.endAt).toBe(10000);
+    expect(g.running).toBe(false);
+  });
+
+  it("运行中 tool 不入组（独立渲染项）→ 组不会以运行中 tool 结尾", () => {
+    const r = buildActivityGroups([tw("想", 1000, 500), tl("a", "in_progress", 6500)]);
+    const g = r[0] as Extract<RenderItem, { type: "activity_group" }>;
+    expect(g.running).toBe(false); // 组内全是封口块
+    expect(g.endAt).toBe(1500);
+    expect(r).toHaveLength(2); // 运行中 tool 是独立 block 项
+    expect(r[1].type).toBe("block");
+  });
+
+  it("组尾流式 thought（无 ms）→ running=true", () => {
+    const r = buildActivityGroups([tl("a", "completed", 1000, 500), tw("流式思考", 2000)]);
+    const g = r[0] as Extract<RenderItem, { type: "activity_group" }>;
+    expect(g.running).toBe(true);
+  });
+
+  it("旧日志块缺 startTs → firstStartTs/endAt undefined（渲染层回退 ms 之和）", () => {
+    const r = buildActivityGroups([tw("旧思考", undefined, 800), tl("a", "completed", undefined, 1200)]);
+    const g = r[0] as Extract<RenderItem, { type: "activity_group" }>;
+    expect(g.firstStartTs).toBeUndefined();
+    expect(g.endAt).toBeUndefined();
+    expect(g.ms).toBe(2000); // 旧口径保留
+  });
+});

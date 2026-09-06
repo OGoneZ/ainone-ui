@@ -1270,7 +1270,6 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   adapter={adapter}
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
-                  turnStartedAt={rt?.turnStartedAt}
                   onSelect={onSelectText}
                   onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}

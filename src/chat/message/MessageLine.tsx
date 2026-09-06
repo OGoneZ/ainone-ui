@@ -31,7 +31,6 @@ export const MessageLine = memo(function MessageLine({
   adapter,
   busy,
   isLast,
-  turnStartedAt,
   onSelect,
   onFork,
   onRewind,
@@ -43,8 +42,6 @@ export const MessageLine = memo(function MessageLine({
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
-  /** P16b：turn 起点时间戳（store）——运行中末条消息显示实时总耗时 */
-  turnStartedAt?: number;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
   onRewind?: () => void;
@@ -106,12 +103,10 @@ export const MessageLine = memo(function MessageLine({
               onAddDiffComment={onAddDiffComment}
             />
           ) : (
-            <ActivityGroupCard key={i} item={item} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+            <ActivityGroupCard key={i} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
           ),
         )}
-        {/* P16b：turn 总耗时——从首个事件到 turn 结束的墙钟秒，实时跳动；
-            与工具/思考结果无关（finally 清 turnStartedAt 停表） */}
-        {busy && isLast && turnStartedAt ? <TurnElapsed startTs={turnStartedAt} /> : null}
+        {/* p22e：turn 总耗时并入活动组卡实时走秒（原单独 ⏱ 行删除）；纯 text 轮次不显示计时 */}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {onFork && (
@@ -152,17 +147,33 @@ export const MessageLine = memo(function MessageLine({
 /** F-12-3 活动组卡：折叠态摘要 + 展开态时间线（含 F-12-4 文件变更子卡） */
 function ActivityGroupCard({
   item,
+  live,
   onSelect,
   diffComments,
   onAddDiffComment,
 }: {
   item: Extract<RenderItem, { type: "activity_group" }>;
+  /** 当前 turn 运行中且是末条消息——running 组卡只在此时走秒（历史消息异常无 ms 的 thought 不走秒） */
+  live: boolean;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const seconds = (item.ms / 1000).toFixed(0);
+  // p22e 实时总耗时：墙钟口径——运行中从组首块 startTs 起持续走秒（不管内部各段耗时），
+  // 组内最后一块封口后冻结为「起点→终点」的墙钟差。旧日志无 startTs → 回退 ms 之和。
+  const wallLive = item.running && live && item.firstStartTs !== undefined;
+  const liveElapsed = useElapsedTicker(wallLive ? item.firstStartTs : undefined);
+  const frozenSeconds =
+    item.firstStartTs !== undefined && item.endAt !== undefined
+      ? Math.max(0, Math.round((item.endAt - item.firstStartTs) / 1000))
+      : null;
+  // 显示优先级：实时秒 > 墙钟冻结值 > 旧口径 ms 之和（无 startTs 的历史数据）
+  const seconds = wallLive
+    ? String(liveElapsed)
+    : frozenSeconds !== null
+      ? String(frozenSeconds)
+      : (item.ms / 1000).toFixed(0);
   const parts: string[] = [];
   if (item.thoughts > 0) parts.push(`思考 ${item.thoughts} 次`);
   if (item.tools > 0) parts.push(`工具 ${item.tools} 个`);
@@ -263,16 +274,6 @@ function FileChangeRow({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-/** P16b turn 实时总耗时行：无论思考/工具处于什么状态，秒表一直走 */
-function TurnElapsed({ startTs }: { startTs: number }) {
-  const elapsed = useElapsedTicker(startTs);
-  return (
-    <div className="turn-elapsed" data-testid="turn-elapsed" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
-      ⏱ 用时 {elapsed} 秒
     </div>
   );
 }

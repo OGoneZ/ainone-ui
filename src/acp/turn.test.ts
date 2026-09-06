@@ -27,7 +27,7 @@ describe("turn 事件累加（F-4-2 thinking 折叠）", () => {
     acc = applyEvent(acc, { type: "agent_thought", text: "想" }, now); // now→1，记时 1
     acc = applyEvent(acc, { type: "agent_thought", text: "法" }, now); // 非首段，不推进时钟
     acc = applyEvent(acc, { type: "agent_text", text: "回复" }, now); // now→2，正文封口 ms=2-1=1
-    expect(acc.blocks[0]).toEqual({ kind: "thought", text: "想法", ms: 1 });
+    expect(acc.blocks[0]).toEqual({ kind: "thought", text: "想法", ms: 1, startTs: 2 }); // p22e：新段落 startTs（首个事件 turnStart=1，thought 记时=2）
     expect(acc.blocks[1]).toEqual({ kind: "text", text: "回复" });
   });
 
@@ -37,7 +37,7 @@ describe("turn 事件累加（F-4-2 thinking 折叠）", () => {
     let acc = newTurn();
     acc = applyEvent(acc, { type: "agent_thought", text: "一段" }, now); // 记时 1
     acc = applyEvent(acc, { type: "turn_stop", stopReason: "end_turn" }, now); // now→2，ms=1
-    expect(acc.blocks).toEqual([{ kind: "thought", text: "一段", ms: 1 }]);
+    expect(acc.blocks).toEqual([{ kind: "thought", text: "一段", ms: 1, startTs: 2 }]);
   });
 
   it("工具调用封口 thinking，tool_update 按 id 改写", () => {
@@ -51,7 +51,7 @@ describe("turn 事件累加（F-4-2 thinking 折叠）", () => {
       { type: "tool_update", toolCallId: "a", status: "completed", content: [{ kind: "text", text: "ok" }] },
       now,
     );
-    expect(acc.blocks[0]).toEqual({ kind: "thought", text: "查", ms: 1 });
+    expect(acc.blocks[0]).toEqual({ kind: "thought", text: "查", ms: 1, startTs: 2 });
     expect((acc.blocks[1] as { status: string }).status).toBe("completed");
     expect((acc.blocks[1] as { content: unknown[] }).content).toHaveLength(1);
   });
