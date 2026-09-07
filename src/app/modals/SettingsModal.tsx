@@ -12,6 +12,7 @@ import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
 import { asrConfigGet, asrConfigSave, type AsrConfigView } from "@/ipc/asr";
+import { ModelSwitchPanel } from "@/sidebar/ModelSwitchPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface Props {
@@ -363,6 +364,16 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     setItems((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
   }
 
+  /** P29 S6：模型切换面板（ModelSwitchPanel 复用）——设置页无活跃会话上下文，
+   *  只做「探测网关模型列表 → 点选 → 持久写回配置文件」，会话级同步传 null。 */
+  const [modelPanel, setModelPanel] = useState<{ adapterId: string; adapterName: string; baseUrl: string } | null>(null);
+
+  function openModelPanel(id: string) {
+    const item = items.find((a) => a.id === id);
+    if (!item?.cfgEndpoint) return;
+    setModelPanel({ adapterId: item.id, adapterName: item.name, baseUrl: item.cfgEndpoint });
+  }
+
   function addRow() {
     const id = `custom-${Date.now()}`;
     setItems((prev) => [
@@ -484,6 +495,17 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
         )}
         {a.cfgOpen && preset && (
           <div className="adapter-cfg" data-testid={`cfg-form-${a.id}`}>
+            {/* P29 S6：模型选择走 ModelSwitchPanel 同款探测（可探到网关模型列表时优先） */}
+            {a.cfgEndpoint && (
+              <button
+                className="adapter-cfg-probe"
+                onClick={() => openModelPanel(a.id)}
+                disabled={a.cfgBusy}
+                data-testid={`cfg-probe-${a.id}`}
+              >
+                探测可用模型（来自 {a.cfgEndpoint}）…
+              </button>
+            )}
             <div className="settings-grid">
               <label className="ns-label">
                 接口地址（endpoint）
@@ -703,6 +725,30 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
           <button onClick={save}>保存</button>
           <button onClick={onClose}>关闭</button>
         </div>
+
+        {/* P29 S6：模型切换面板（复用元数据面板的 ModelSwitchPanel）——
+            从卡片「配置模型 → 探测可用模型」进入；写回成功后同步表单回显 */}
+        {modelPanel && (
+          <ModelSwitchPanel
+            open={true}
+            onClose={() => setModelPanel(null)}
+            adapterId={modelPanel.adapterId}
+            adapterName={modelPanel.adapterName}
+            baseUrl={modelPanel.baseUrl}
+            currentModel={null}
+            configOptions={null}
+            onSessionModelChange={null}
+            onWritten={() => {
+              // 写回后重读配置回显（model 已变）
+              const target = modelPanel.adapterId;
+              harnessConfigRead(target)
+                .then((v) => {
+                  update(target, { cfgModel: v.model, cfgHasKey: v.hasApiKey || undefined });
+                })
+                .catch(() => {});
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
