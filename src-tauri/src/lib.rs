@@ -71,6 +71,7 @@ pub fn run() {
             adapters::adapter_status,
             adapters::default_cwd,
             connector::bridge_install,
+            connector::cli_install,
             agent::agent_spawn,
             agent::agent_stdin_write,
             agent::agent_kill,
