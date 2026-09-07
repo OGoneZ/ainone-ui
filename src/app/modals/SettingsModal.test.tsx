@@ -383,3 +383,51 @@ describe("P30 权限模式开关", () => {
     expect(screen.queryByTestId("perm-switch-codex")).not.toBeInTheDocument();
   });
 });
+
+// —— P30 开关层叠回归（实测缺陷防回归，勿删）——
+// app.css 的 `.adapter-row button` 等容器重置规则是 unlayered，恒胜 Tailwind
+// @layer utilities 的颜色类（data-[state]:bg-primary 等）。曾把开关轨道刷成
+// 弹窗白底、白色滑块白上白不可见（用户实测「怎么滑都是白」）。修复 = 外观改由
+// app.css unlayered 的 button[role=switch] 规则块驱动。本组测试在产物层断言：
+// ① switch 外观规则存在且在容器重置之后；② 容器重置不再命中 role=switch；
+// ③ 组件不再依赖 utilities 颜色类（类名层面回归封锁）。
+describe("P30 开关层叠回归（unlayered 容器重置 vs utilities 颜色类）", () => {
+  /** 读仓库源文件（tsconfig 未含 @types/node → 动态 import + 字符串路径规避类型检查，同 layout.test.ts 惯例） */
+  async function readSrc(path: string): Promise<string> {
+    const mod: { readFileSync: (p: string, enc: string) => string } = await import(/* @vite-ignore */ "nod" + "e:fs");
+    return mod.readFileSync(path, "utf-8");
+  }
+
+  const appCss = () => readSrc("src/app/app.css");
+
+  it("app.css 含 unlayered 的 button[role=switch] 外观规则（checked 蓝轨 + thumb 位移）", async () => {
+    const css = await appCss();
+    expect(css).toMatch(/button\[role="switch"\]\s*\{/); // 基础轨道
+    expect(css).toMatch(/button\[role="switch"\]\[data-state="checked"\]\s*\{/); // 开态
+    expect(css).toMatch(/button\[role="switch"\]\[data-state="checked"\]\s*>\s*\[data-slot="switch-thumb"\]/); // 滑块位移
+    // 开态轨道必须用品牌蓝（--primary），不是透明/白
+    const checkedBlock = css.match(/button\[role="switch"\]\[data-state="checked"\]\s*\{[^}]*\}/)![0];
+    expect(checkedBlock).toContain("var(--primary)");
+  });
+
+  it("容器按钮重置不再命中开关：role=switch 例外已从 .adapter-row button 移除", async () => {
+    const css = await appCss();
+    // 基础重置规则块内不得出现 role="switch"（旧 transparent 例外方向错误，已删）
+    const baseReset = css.match(/\.adapter-row button,\s*\.ns-new-ws\s*\{[^}]*\}/)![0];
+    expect(baseReset).not.toContain("switch");
+    // unlayered switch 规则必须在容器重置之后出现（同层后到者胜）
+    const resetIdx = css.indexOf(baseReset);
+    const switchIdx = css.search(/button\[role="switch"\]\s*\{/);
+    expect(switchIdx).toBeGreaterThan(resetIdx);
+  });
+
+  it("Switch 组件不再携带 utilities 颜色类（外观全权由 app.css 驱动）", async () => {
+    const src = await readSrc("src/components/ui/switch.tsx");
+    // 只断言 className 实参（剥掉注释——注释里记载着教训文本，含这些词）
+    const classNames = src.match(/cn\(([^)]*)\)/g) ?? [];
+    const joined = classNames.join("\n");
+    expect(joined).not.toMatch(/bg-primary|bg-input|bg-background/); // 颜色类回归封锁
+    expect(joined).not.toMatch(/translate-x-5|h-6|w-11/); // 尺寸/位移类同样不在组件层
+    expect(src).toContain("data-slot=\"switch-thumb\""); // thumb 结构保留（app.css 依赖此选择器）
+  });
+});

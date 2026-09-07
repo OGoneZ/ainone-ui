@@ -683,14 +683,54 @@ textarea {
   background-color: var(--bg-1);
 }
 
-/* P30：radix 滑动开关排除在按钮外观重置外——此规则 unlayered，恒胜 Switch
-   组件的 Tailwind @layer utilities 类（bg-primary/bg-input/圆角/去内边距），
-   不排除会把轨道刷成白底灰边 + padding 撑变形（滑块白上白不可见的根因） */
-.adapter-row button[role="switch"],
-.adapter-perm button[role="switch"] {
+/* —— P30 滑动开关（[role=switch]，radix Switch）——
+ * 放在 unlayered 层全权定义外观：.adapter-row button 等容器重置规则同为
+ * unlayered，恒胜 Tailwind @layer utilities 的颜色类（data-[state]:bg-primary
+ * 等）——第一版只在 utilities 层上色，轨道被容器重置刷成白底、滑块白上白
+ * 不可见（实测缺陷）。外观（含 thumb 的 data-state）全部由本块驱动，彻底
+ * 免疫容器层叠；色值走语义变量（--primary 品牌蓝 / --bg-3 关态灰）。 */
+button[role="switch"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
   padding: 0;
   border: none;
-  background-color: transparent;
+  border-radius: 9999px;
+  background-color: var(--bg-3);
+  cursor: pointer;
+  transition: background-color var(--motion-default, 200ms) var(--ease-out-soft, ease-out);
+}
+
+button[role="switch"][data-state="checked"] {
+  background-color: var(--primary);
+}
+
+button[role="switch"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+button[role="switch"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button[role="switch"] > [data-slot="switch-thumb"] {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--bg-1);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  transform: translateX(2px);
+  transition: transform var(--motion-default, 200ms) var(--ease-out-soft, ease-out);
+}
+
+button[role="switch"][data-state="checked"] > [data-slot="switch-thumb"] {
+  transform: translateX(22px);
 }
 
 .modal-actions button:hover:not(:disabled),
