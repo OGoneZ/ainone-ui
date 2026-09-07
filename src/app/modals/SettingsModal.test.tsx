@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 // SettingsModal 交互测试：adapter 列表加载、保存校验（id/program 非空）。
+// P29 卡片化：预置卡片不再渲染 id/program 输入框（走名称/状态徽标 + 一键安装 +
+// 配置模型），保存校验测试改用「新增 harness」的自定义行。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -28,8 +30,9 @@ const ADAPTERS = [
 function defaultHandlers() {
   return {
     adapters_list: () => ADAPTERS,
-    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/usr/local/bin/omp", source: "ProcessPath", bridge: null }),
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/usr/local/bin/omp", source: "ProcessPath", bridge: null, cli: null, auth: { state: "none", detail: "" } }),
     adapters_save: () => null,
+    harness_config_read: () => ({ endpoint: "", hasApiKey: false, model: "", sourceFile: "/tmp/x", present: false }),
   };
 }
 
@@ -43,29 +46,32 @@ describe("SettingsModal", () => {
     const calls = mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
-    // 名称渲染（输入框 value）
-    expect(await screen.findByDisplayValue("Oh My Pi")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Codex")).toBeInTheDocument();
+    // 名称渲染（P29 卡片化：预置行改为文本名称）
+    expect(await screen.findByText("Oh My Pi")).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
     // 确实调了 adapters_list
     expect(calls.some((c) => c.cmd === "adapters_list")).toBe(true);
   });
 
-  it("F-8-7 快问模型配置区渲染（P22 重排版：分区标题 + 卡片标题 + 输入框）", async () => {
+  it("F-8-7 快问模型配置区渲染（P29 折叠进「更多服务」）", async () => {
     mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
-    // 分区标题 + 配置卡标题 + 输入框占位
-    expect(await screen.findByText("模型服务")).toBeInTheDocument();
+    // 折叠区默认收起——展开后出现快问配置
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("more-toggle"));
     expect(screen.getByText("快问模型")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("https://api.openai.com/v1")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("gpt-4o-mini")).toBeInTheDocument();
   });
 
-  it("P22 语音服务配置区渲染", async () => {
+  it("P22 语音服务配置区渲染（P29 折叠进「更多服务」）", async () => {
     mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
-    expect(await screen.findByText("语音服务")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("more-toggle"));
+    expect(screen.getByText("语音服务")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("https://asr.zhubaoduo.com/v1/audio/transcriptions")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("mano-asr")).toBeInTheDocument();
   });
@@ -83,18 +89,32 @@ describe("SettingsModal", () => {
     mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("more-toggle"));
     expect(await screen.findByText("自动：Claude Code")).toBeInTheDocument();
     // 接口地址占位随协议切换
     expect(screen.getByPlaceholderText("https://gw.example.com")).toBeInTheDocument();
   });
 
-  it("保存校验：清空 id 后保存 → 提示错误，不调 adapters_save", async () => {
+  it("P29 卡片化：预置卡片暴露状态徽标 + 配置模型，不暴露 id/program 输入框", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    expect(await screen.findByTestId("adapter-card-omp")).toBeInTheDocument();
+    expect(screen.getByTestId("status-omp")).toBeInTheDocument();
+    expect(screen.getByTestId("cfg-toggle-omp")).toBeInTheDocument();
+    // 预置卡片无 id/program 编辑框（防误改）
+    expect(screen.queryByPlaceholderText("program")).not.toBeInTheDocument();
+  });
+
+  it("P29 保存校验：自定义行清空 id 后保存 → 提示错误，不调 adapters_save", async () => {
     const calls = mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
     const user = userEvent.setup();
-    // 有多个 adapter 行，各有 id 输入框；取第一个
-    const idInput = (await screen.findAllByPlaceholderText("id"))[0];
+    // 新增自定义行（预置行无 id 输入框）
+    await user.click(await screen.findByRole("button", { name: "新增 harness" }));
+    const idInput = await screen.findByPlaceholderText("id");
     await user.clear(idInput);
     await user.click(screen.getByRole("button", { name: "保存" }));
 
@@ -128,6 +148,113 @@ describe("SettingsModal 外观分区（P26 R3 主题自工具栏迁入）", () =
     expect(select).toBeInTheDocument();
     await userEvent.setup().selectOptions(select, "dark");
     expect(onThemeChange).toHaveBeenCalledWith("dark");
+  });
+});
+
+// —— P29：四态徽标 / 一键安装串联 / 配置模型表单 ——
+
+// installCli / installBridge / refreshAdapterStatus 经 vi.mock 可编程（不在 mockIpc 里）
+vi.mock("@/ipc/adapters", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/ipc/adapters")>();
+  return {
+    ...actual,
+    installBridge: vi.fn().mockResolvedValue(undefined),
+    installCli: vi.fn().mockResolvedValue(undefined),
+    refreshAdapterStatus: vi.fn(async (a: any) => ({
+      ...a,
+      state: "ready",
+      available: true,
+      resolvedPath: "/usr/local/bin/omp",
+      source: "ProcessPath",
+      bridge: null,
+      cli: null,
+      auth: { state: "none", detail: "" },
+    })),
+  };
+});
+
+const OMP_CLI_INSTALLABLE = [
+  { id: "omp", name: "Oh My Pi", program: "omp", args: ["acp"], cwd: ".", logo: "#7c3aed" },
+];
+
+function p29Handlers() {
+  return {
+    adapters_list: () => OMP_CLI_INSTALLABLE,
+    // 探测结果：cli_installable（omp 已登记 CLI_INSTALLERS、bun/npm 在）
+    adapter_status: () => ({
+      available: false, state: "cli_installable", resolvedPath: null, source: null,
+      bridge: null, cli: { display: "Oh My Pi", installable: true }, auth: { state: "none", detail: "" },
+    }),
+    adapters_save: () => null,
+    harness_config_read: () => ({ endpoint: "https://old.example.com", hasApiKey: true, model: "old-model", sourceFile: "/home/x/.omp/agent/models.yml", present: true }),
+  };
+}
+
+describe("P29 设置页卡片化", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    // 默认探测结果：cli_installable（omp 已登记 CLI_INSTALLERS、bun/npm 在）
+    const { refreshAdapterStatus } = await import("@/ipc/adapters");
+    vi.mocked(refreshAdapterStatus).mockImplementation(async (a: any) => ({
+      ...a,
+      state: "cli_installable" as const,
+      available: false,
+      resolvedPath: null,
+      source: null,
+      bridge: null,
+      cli: { display: "Oh My Pi", installable: true },
+      auth: { state: "none", detail: "" },
+    }));
+  });
+  afterEach(cleanup);
+
+  it("四态徽标：cli_installable 显示「未安装 · 一键安装（CLI + 桥接器）」与「一键安装」按钮", async () => {
+    mockTauriIpc({ handlers: p29Handlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    expect(await screen.findByTestId("status-omp")).toHaveTextContent(/未安装 · 一键安装/);
+    const btn = screen.getByTestId("install-omp");
+    expect(btn).toHaveTextContent("一键安装");
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("cli_installable 点一键安装 → installCli → refresh → refresh 后转 ready 不再装桥", async () => {
+    mockTauriIpc({ handlers: p29Handlers() });
+    const { installCli, refreshAdapterStatus } = await import("@/ipc/adapters");
+    // 前一次调用 = 组件加载探测（beforeEach 默认 cli_installable）→ 渲染出「一键安装」按钮；
+    // 本测试内重写 mock：点安装后的刷新改报 ready（CLI 装好了）
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const btn = await screen.findByTestId("install-omp");
+
+    vi.mocked(refreshAdapterStatus).mockImplementation(async (a: any) => ({
+      ...a,
+      state: "ready" as const, available: true, resolvedPath: "/x/omp", source: "home",
+      bridge: null, cli: null, auth: { state: "none", detail: "" },
+    }));
+    const user = userEvent.setup();
+    await user.click(btn);
+    expect(installCli).toHaveBeenCalledWith("omp", expect.any(Function));
+    await vi.waitFor(() => expect(screen.getByTestId("status-omp")).toHaveTextContent(/✓ 可用/));
+  });
+
+  it("配置模型：展开读取回显 → 保存调 harness_config_save → 显示已写入路径", async () => {
+    const calls = mockTauriIpc({ handlers: p29Handlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("cfg-toggle-omp"));
+    // 读取回显
+    await vi.waitFor(() => expect(screen.getByTestId("cfg-form-omp")).toBeInTheDocument());
+    expect(await screen.findByDisplayValue("https://old.example.com")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("old-model")).toBeInTheDocument();
+    // 修改模型后保存
+    await user.clear(screen.getByDisplayValue("old-model"));
+    await user.type(screen.getByPlaceholderText("model-id"), "new-model");
+    await user.click(screen.getByTestId("cfg-save-omp"));
+    await vi.waitFor(() => expect(screen.getByText(/已写入/)).toBeInTheDocument());
+    const saveCall = calls.find((c) => c.cmd === "harness_config_save");
+    expect(saveCall).toBeTruthy();
+    expect(saveCall!.args.input.model).toBe("new-model");
   });
 });
 
