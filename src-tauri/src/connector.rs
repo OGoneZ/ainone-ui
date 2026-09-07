@@ -51,17 +51,17 @@ pub const BRIDGES: &[BridgeSpec] = &[
         cli_env: Some("PI_ACP_PI_COMMAND"), // dist/index.js 的 pi 命令覆盖点
         legacy_flat: false,
     },
-    // codex 预留入口（懒装家族第三席）：@agentclientprotocol/codex-acp@1.10.0 已实测
+    // codex 接入（懒装家族第三席）：@agentclientprotocol/codex-acp@1.10.0 已实测
     // --omit=optional 后 17M/19 包 + CODEX_PATH 指向用户 codex 握手通过；
-    // 等官方桥形态探索定稿后取消注释即接入（其余机制零改动）。
-    // BridgeSpec {
-    //     program: "codex-acp",
-    //     pkg: "@agentclientprotocol/codex-acp",
-    //     version: "1.10.0",
-    //     cli_program: "codex",
-    //     cli_env: Some("CODEX_PATH"),
-    //     legacy_flat: false,
-    // },
+    // spawn 侧 bridge_env_inject 的 codex-acp 分支（AINONE_CODEX_API_KEY 注入）随本表生效。
+    BridgeSpec {
+        program: "codex-acp",
+        pkg: "@agentclientprotocol/codex-acp",
+        version: "1.10.0",
+        cli_program: "codex",
+        cli_env: Some("CODEX_PATH"),
+        legacy_flat: false,
+    },
 ];
 
 /// 按适配器 program 名查桥登记（非懒装程序返回 None → 走普通 PATH 语义）。
@@ -623,8 +623,13 @@ mod tests {
     fn bridge_spec_lookup() {
         assert!(bridge_spec("claude-agent-acp").is_some());
         assert_eq!(bridge_spec("pi-acp").unwrap().pkg, "pi-acp");
-        // codex 预留未接入；omp/opencode 是原生 ACP 不入表
-        assert!(bridge_spec("codex-acp").is_none());
+        // codex 已接入懒装家族：CODEX_PATH 注入 + 官方 env_key 机制（keys.json）
+        let codex = bridge_spec("codex-acp").expect("codex-acp 应已登记");
+        assert_eq!(codex.pkg, "@agentclientprotocol/codex-acp");
+        assert_eq!(codex.version, "1.10.0");
+        assert_eq!(codex.cli_program, "codex");
+        assert_eq!(codex.cli_env, Some("CODEX_PATH"));
+        // omp/opencode 是原生 ACP 不入表
         assert!(bridge_spec("omp").is_none());
     }
 
