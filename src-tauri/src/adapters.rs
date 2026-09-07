@@ -264,14 +264,14 @@ pub fn default_cwd() -> String {
 mod tests {
     use super::*;
 
-    fn omp_with(model_args: Vec<String>) -> Adapter {
+    fn adapter(id: &str, args: Vec<&str>, logo: Option<&str>) -> Adapter {
         Adapter {
-            id: "omp".into(),
-            name: "Oh My Pi".into(),
-            program: "omp".into(),
-            args: model_args,
+            id: id.into(),
+            name: id.into(),
+            program: id.into(),
+            args: args.into_iter().map(String::from).collect(),
             cwd: ".".into(),
-            logo: Some("#7c3aed".into()),
+            logo: logo.map(String::from),
         }
     }
 
@@ -288,50 +288,6 @@ mod tests {
         }
         let omp = defaults().into_iter().find(|a| a.id == "omp").unwrap();
         assert_eq!(omp.args, vec!["acp".to_string()]);
-    }
-
-    #[test]
-    fn migrate_resets_legacy_duo_king_only() {
-        // 老预置精确值 duo-king-6.6 → 重置为 ["acp"]
-        let mut list = vec![omp_with(vec![
-            "acp".into(),
-            "--model".into(),
-            "duo-king-6.6".into(),
-        ])];
-        migrate_in_place(&mut list);
-        assert_eq!(list[0].args, vec!["acp".to_string()]);
-    }
-
-    #[test]
-    fn migrate_keeps_user_customized_model() {
-        // 用户自己改的模型名（非 legacy 值）→ 不碰
-        let mut list = vec![omp_with(vec![
-            "acp".into(),
-            "--model".into(),
-            "my-model".into(),
-        ])];
-        migrate_in_place(&mut list);
-        assert_eq!(list[0].args, vec!["acp", "--model", "my-model"]);
-        // 用户主动删掉参数的也保持
-        let mut cleared = vec![omp_with(vec![])];
-        migrate_in_place(&mut cleared);
-        assert!(cleared[0].args.is_empty());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn adapter(id: &str, args: Vec<&str>, logo: Option<&str>) -> Adapter {
-        Adapter {
-            id: id.into(),
-            name: id.into(),
-            program: id.into(),
-            args: args.into_iter().map(String::from).collect(),
-            cwd: ".".into(),
-            logo: logo.map(String::from),
-        }
     }
 
     #[test]
