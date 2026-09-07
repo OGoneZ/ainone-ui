@@ -540,6 +540,73 @@ pub fn harness_config_save(app: tauri::AppHandle, input: HarnessConfigInput) -> 
     Ok(path.to_string_lossy().into_owned())
 }
 
+// ---------------------------------------------------------------------------
+// P30 权限模式开关（仅 claude-code）：settings.json 的 permissions.defaultMode 单键合并写
+// ---------------------------------------------------------------------------
+
+/// 开关支持的两种模式（用户认可的语义）：
+///   bypass = "bypassPermissions"（全部工具直接放行，无分类器——auto 模式依赖的
+///            权限分类器在模型通道故障时会拦死所有 Bash，这是加此开关的根因）
+///   auto   = "auto"（Claude 自动判权限，依赖分类器）
+pub const PERMISSION_MODE_BYPASS: &str = "bypassPermissions";
+pub const PERMISSION_MODE_AUTO: &str = "auto";
+
+/// 纯函数：读 settings.json 文本里的 permissions.defaultMode（缺失/损坏 → None）。
+pub fn read_permission_mode(raw: Option<&str>) -> Option<String> {
+    let raw = raw?;
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    v.get("permissions")?
+        .get("defaultMode")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// 纯函数：合并写 permissions.defaultMode 单键（无则创建 permissions 对象）。
+/// 其余键/键序逐字节不动（json_merge_set preserve_order）。损坏 JSON → Err 不写盘。
+pub fn write_permission_mode(raw: Option<&str>, mode: &str) -> Result<String, String> {
+    let base_raw = raw.unwrap_or("{}");
+    json_merge_set(base_raw, &[("permissions.defaultMode", serde_json::Value::String(mode.into()))])
+}
+
+/// 读取当前权限模式回显（开关初值；未配置 → None → 前端按默认开渲染）。
+#[tauri::command]
+pub fn permission_mode_read(app: tauri::AppHandle, adapter_id: String) -> Result<Option<String>, String> {
+    if adapter_id != "claude-code" {
+        return Ok(None);
+    }
+    let home = home_dir()?;
+    let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
+    let raw = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
+    Ok(read_permission_mode(raw.as_deref()))
+}
+
+/// 保存权限模式（开 = bypassPermissions，关 = auto；前端限制二值，后端再校验白名单）。
+/// 单键合并写 + 写前备份（与其他配置代写同一纪律）。
+#[tauri::command]
+pub fn permission_mode_save(app: tauri::AppHandle, adapter_id: String, mode: String) -> Result<String, String> {
+    if adapter_id != "claude-code" {
+        return Err(format!("{adapter_id} 不支持权限模式开关"));
+    }
+    if mode != PERMISSION_MODE_BYPASS && mode != PERMISSION_MODE_AUTO {
+        return Err(format!("不支持的权限模式: {mode}"));
+    }
+    let home = home_dir()?;
+    let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    }
+    let existing = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
+    // 损坏文件报错不覆盖（与配置代写同一纪律）
+    let new_text = write_permission_mode(existing.as_deref(), &mode)?;
+    if existing.is_some() {
+        let bak = path.with_extension("ainone-bak");
+        std::fs::copy(&path, &bak).map_err(|e| format!("备份失败: {e}"))?;
+    }
+    std::fs::write(&path, new_text).map_err(|e| format!("写入配置失败: {e}"))?;
+    log::info!("[harness-config] {} permissions.defaultMode → {mode}（{}）", adapter_id, path.display());
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -763,5 +830,67 @@ base_url = "https://old/v1"
             "/h/.codex/config.toml"
         );
         assert!(config_file_for("custom-x", home).is_none());
+    }
+
+    // ---------------- P30 权限模式开关（回归：单键合并写不动其他键） ----------------
+
+    #[test]
+    fn permission_mode_read_detects_existing_value() {
+        assert_eq!(
+            read_permission_mode(Some(r#"{"permissions":{"defaultMode":"auto"},"model":"m"}"#)),
+            Some("auto".into())
+        );
+        // 无 permissions 对象 → None（前端按默认开渲染）
+        assert_eq!(read_permission_mode(Some(r#"{"model":"m"}"#)), None);
+        // 损坏 JSON → None（不 panic）
+        assert_eq!(read_permission_mode(Some("{broken")), None);
+        assert_eq!(read_permission_mode(None), None);
+    }
+
+    #[test]
+    fn permission_mode_write_creates_when_missing() {
+        // 键不存在 → 创建 permissions.defaultMode（用户「没有就新增」的诉求）
+        let out = write_permission_mode(Some(r#"{"cleanupPeriodDays":30,"model":"m"}"#), PERMISSION_MODE_BYPASS).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["permissions"]["defaultMode"], "bypassPermissions");
+        assert_eq!(v["model"], "m", "无关键必须保留");
+        assert_eq!(v["cleanupPeriodDays"], 30);
+        // 全新文件（None）→ 最小合法 JSON
+        let out2 = write_permission_mode(None, PERMISSION_MODE_AUTO).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
+        assert_eq!(v2["permissions"]["defaultMode"], "auto");
+    }
+
+    #[test]
+    fn permission_mode_write_replaces_only_target_key() {
+        // 用户「有就修改那一个键」：替换 defaultMode，permissions 内其他键（allow/deny）与
+        // 顶层键（env/hooks/键序）逐字节不动——这是本开关与全量覆盖写的分界线
+        let raw = r#"{
+  "cleanupPeriodDays": 36500,
+  "env": {"ANTHROPIC_BASE_URL": "https://x"},
+  "permissions": {
+    "allow": ["Bash(ls:*)"],
+    "defaultMode": "auto"
+  },
+  "model": "glm-5.3",
+  "hooks": {"SessionStart": []}
+}"#;
+        let out = write_permission_mode(Some(raw), PERMISSION_MODE_BYPASS).unwrap();
+        assert!(out.contains("\"allow\""), "permissions.allow 必须保留");
+        assert!(out.contains("Bash(ls:*)"));
+        assert!(out.contains("\"ANTHROPIC_BASE_URL\""));
+        assert!(out.contains("\"hooks\""));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["permissions"]["defaultMode"], "bypassPermissions");
+        // 键序保留：cleanupPeriodDays 仍在 env 前（preserve_order）
+        let cp = out.find("cleanupPeriodDays").unwrap();
+        let env = out.find("ANTHROPIC_BASE_URL").unwrap();
+        assert!(cp < env, "原键序应保留: {out}");
+    }
+
+    #[test]
+    fn permission_mode_write_rejects_corrupt_input() {
+        // 损坏 settings.json → Err，调用方保证不覆盖用户文件
+        assert!(write_permission_mode(Some("{broken"), PERMISSION_MODE_BYPASS).is_err());
     }
 }

@@ -7,13 +7,14 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Adapter, AdapterState, BridgeInfo, CliInstallInfo, AuthInfo } from "@/ipc/adapters";
-import { installBridge, installCli, refreshAdapterStatus, harnessConfigRead, harnessConfigSave } from "@/ipc/adapters";
+import { installBridge, installCli, refreshAdapterStatus, harnessConfigRead, harnessConfigSave, permissionModeRead, permissionModeSave } from "@/ipc/adapters";
 import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
 import { asrConfigGet, asrConfigSave, type AsrConfigView } from "@/ipc/asr";
 import { ModelSwitchPanel } from "@/sidebar/ModelSwitchPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 
 interface Props {
   open: boolean;
@@ -50,6 +51,10 @@ interface EditableAdapter {
   installTail?: string;
   /** P29：CLI 安装中（区别于装桥） */
   installingCli?: boolean;
+  /** P30 权限模式开关（仅 claude-code）：null = 读取中；true = bypassPermissions（免确认放行全部工具）；false = auto（分类器判权限） */
+  permBypass?: boolean | null;
+  permMsg?: string | null;
+  permErr?: string | null;
   /** P29：配置模型表单展开态 */
   cfgOpen?: boolean;
   cfgEndpoint?: string;
@@ -338,6 +343,34 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     }
   }
 
+  /** P30 权限模式开关：打开设置时读回显（仅 claude-code 预置卡片渲染开关） */
+  useEffect(() => {
+    if (!open) return;
+    items.forEach((a) => {
+      if (a.id !== "claude-code" || a.permBypass !== undefined) return;
+      update(a.id, { permBypass: null });
+      permissionModeRead(a.id)
+        .then((mode) => update(a.id, { permBypass: mode !== "auto" }))
+        // 读取失败（文件异常等）→ null，开关禁用展示「—」
+        .catch(() => update(a.id, { permBypass: null }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, items.length]);
+
+  /** P30 切换权限模式：开 = bypassPermissions / 关 = auto（单键合并写 settings.json） */
+  async function togglePermBypass(id: string, next: boolean) {
+    const item = items.find((a) => a.id === id);
+    if (!item) return;
+    update(id, { permBypass: next, permMsg: null, permErr: null });
+    try {
+      const written = await permissionModeSave(id, next ? "bypassPermissions" : "auto");
+      update(id, { permMsg: `已写入 ${written}` });
+    } catch (e) {
+      // 写失败 → 回滚开关视觉态
+      update(id, { permBypass: !next, permErr: String(e instanceof Error ? e.message : e) });
+    }
+  }
+
   /** P29：保存配置（合并写 harness 原生配置文件；key 留空 = 保留既有） */
   async function saveConfig(id: string) {
     const item = items.find((a) => a.id === id);
@@ -492,6 +525,32 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                 ? `✗ 程序启动失败：${a.probe.message}`
                 : `✗ 握手失败：${a.probe.message}`}
           </p>
+        )}
+        {a.id === "claude-code" && a.permBypass !== undefined && (
+          <div className="adapter-perm" style={{ gridColumn: "1 / -1" }}>
+            {/* P30 bypass permissions 开关：默认开（免确认，绕过 auto 分类器——
+                分类器依赖的模型通道故障时会拦死所有 Bash）。只写 settings.json 的
+                permissions.defaultMode 单键，其余键不动；关 = auto。 */}
+            <label className="flex items-center justify-between gap-3 cursor-pointer select-none" style={{ margin: 0 }}>
+              <span className="flex flex-col">
+                <span className="font-medium">跳过权限确认（bypass permissions）</span>
+                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  {a.permBypass
+                    ? "开：全部工具直接放行，不再询问（写入 defaultMode=bypassPermissions）"
+                    : "关：由 Claude 自动判定权限（defaultMode=auto）"}
+                </span>
+              </span>
+              <Switch
+                checked={a.permBypass === true}
+                disabled={a.permBypass === null}
+                onCheckedChange={(v) => togglePermBypass(a.id, v)}
+                data-testid={`perm-switch-${a.id}`}
+                aria-label="跳过权限确认"
+              />
+            </label>
+            {a.permMsg && <p className="ok settings-hint" style={{ color: "var(--success)", margin: 0 }}>{a.permMsg}</p>}
+            {a.permErr && <p className="bad settings-hint" style={{ color: "var(--danger)", margin: 0 }}>{a.permErr}</p>}
+          </div>
         )}
         {a.cfgOpen && preset && (
           <div className="adapter-cfg" data-testid={`cfg-form-${a.id}`}>

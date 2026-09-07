@@ -315,3 +315,70 @@ describe("Dialog 点遮罩关闭（P26 WKWebView mousedown 兜底）", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+// —— P30 权限模式开关（仅 claude-code）：读回显 + 切换写 settings.json 单键 ——
+
+const CLAUDE_ADAPTER = [
+  { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: "#d97706" },
+];
+
+function permHandlers(mode: unknown) {
+  return {
+    adapters_list: () => CLAUDE_ADAPTER,
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/bin/claude-agent-acp", source: "Home", bridge: null, cli: null, auth: { state: "subscription", detail: "已登录订阅" } }),
+    permission_mode_read: () => mode,
+    permission_mode_save: (a: { mode: string }) => `/Users/x/.claude/settings.json (mode=${a.mode})`,
+  };
+}
+
+describe("P30 权限模式开关", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(cleanup);
+
+  it("claude-code 卡片渲染开关；settings 已是 auto → 开关为关", async () => {
+    mockTauriIpc({ handlers: permHandlers("auto") });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const sw = await screen.findByTestId("perm-switch-claude-code");
+    expect(sw).toHaveAttribute("data-state", "unchecked");
+    expect(screen.getByText(/defaultMode=auto/)).toBeInTheDocument();
+  });
+
+  it("未配置 defaultMode（null）→ 开关默认为开（bypass）", async () => {
+    mockTauriIpc({ handlers: permHandlers(null) });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const sw = await screen.findByTestId("perm-switch-claude-code");
+    expect(sw).toHaveAttribute("data-state", "checked");
+  });
+
+  it("切换开 → permission_mode_save(bypassPermissions)；切回关 → save(auto)", async () => {
+    const calls = mockTauriIpc({ handlers: permHandlers("auto") });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const sw = await screen.findByTestId("perm-switch-claude-code");
+    expect(sw).toHaveAttribute("data-state", "unchecked");
+    // 关 → 开：写 bypassPermissions
+    await userEvent.setup().click(sw);
+    expect(calls.find((c) => c.cmd === "permission_mode_save")?.args.mode).toBe("bypassPermissions");
+    expect(await screen.findByText(/已写入/)).toBeInTheDocument();
+    // 开 → 关：写回 auto
+    await userEvent.setup().click(screen.getByTestId("perm-switch-claude-code"));
+    const saves = calls.filter((c) => c.cmd === "permission_mode_save");
+    expect(saves).toHaveLength(2);
+    expect(saves[1].args.mode).toBe("auto");
+  });
+
+  it("非 claude-code 卡片不渲染开关", async () => {
+    mockTauriIpc({
+      handlers: {
+        ...defaultHandlers(),
+        permission_mode_read: () => null,
+      },
+    });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    await screen.findByText("Oh My Pi");
+    await screen.findByText("Codex");
+    expect(screen.queryByTestId("perm-switch-omp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("perm-switch-codex")).not.toBeInTheDocument();
+  });
+});

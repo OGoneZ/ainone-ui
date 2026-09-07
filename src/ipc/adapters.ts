@@ -150,6 +150,16 @@ export async function harnessConfigSave(input: HarnessConfigInput): Promise<stri
   return invoke<string>("harness_config_save", { input });
 }
 
+/** P30 权限模式开关（仅 claude-code）：读当前 permissions.defaultMode（未配置 → null） */
+export async function permissionModeRead(adapterId: string): Promise<string | null> {
+  return invoke<string | null>("permission_mode_read", { adapterId });
+}
+
+/** P30 权限模式开关：开 = bypassPermissions，关 = auto（单键合并写 + 备份）。resolve = 写入路径 */
+export async function permissionModeSave(adapterId: string, mode: "bypassPermissions" | "auto"): Promise<string> {
+  return invoke<string>("permission_mode_save", { adapterId, mode });
+}
+
 /** 覆盖保存全部适配器 */
 export async function saveAdapters(adapters: Adapter[]): Promise<void> {
   await invoke("adapters_save", { adapters });

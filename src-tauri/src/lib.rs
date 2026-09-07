@@ -79,6 +79,8 @@ pub fn run() {
             connector::cli_install,
             harness_config::harness_config_read,
             harness_config::harness_config_save,
+            harness_config::permission_mode_read,
+            harness_config::permission_mode_save,
             harness_meta::harness_meta,
             harness_meta::harness_settings_write,
             harness_meta::models_probe,

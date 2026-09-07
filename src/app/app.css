@@ -683,6 +683,16 @@ textarea {
   background-color: var(--bg-1);
 }
 
+/* P30：radix 滑动开关排除在按钮外观重置外——此规则 unlayered，恒胜 Switch
+   组件的 Tailwind @layer utilities 类（bg-primary/bg-input/圆角/去内边距），
+   不排除会把轨道刷成白底灰边 + padding 撑变形（滑块白上白不可见的根因） */
+.adapter-row button[role="switch"],
+.adapter-perm button[role="switch"] {
+  padding: 0;
+  border: none;
+  background-color: transparent;
+}
+
 .modal-actions button:hover:not(:disabled),
 .adapter-row button:hover:not(:disabled),
 .ns-new-ws:hover:not(:disabled) {
