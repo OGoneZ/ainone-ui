@@ -32,6 +32,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive version from tag
+        id: ver
+        # 版本号直取 tag（vX.Y.Z → X.Y.Z）
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches tauri.conf.json
+        # 门禁：tag 版本必须与 tauri.conf.json 的 version 完全一致，不等直接失败。
+        # 防止「tag 打了 v0.2.0 而 conf 还是 0.1.0」的异步分叉（产物文件名内嵌
+        # conf 版本、app「关于」显示 conf 版本，与 tag 错位）。不一致 = 开发者
+        # 忘了 bump，打回对齐后重新打 tag，无任何自动改写补丁。
+        env:
+          EXPECTED: ${{ steps.ver.outputs.version }}
+        run: |
+          ACTUAL=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "tag version: $EXPECTED / tauri.conf.json version: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::tag 版本($EXPECTED)与 tauri.conf.json 版本($ACTUAL)不一致——先 bump src-tauri/tauri.conf.json（及 package.json）到 $EXPECTED，再重新打 tag"
+            exit 1
+          fi
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -73,11 +93,12 @@ jobs:
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1
-        # 注意：签名/公证 env 只在 Apple secrets 实际配置后才注入。secrets 引用
-        # 会把空字符串设进环境，tauri bundler 检测到 APPLE_CERTIFICATE 非空才
-        # 走 keychain setup——空串同样触发 `security import`，对空数据导入必炸
-        # "SecKeychainItemImport: parameters not valid"（首发三跑实锤）。
-        # 未来配好证书后把这段 env 注释还原即可。
+        # 版本一致性由上面的 Verify 门禁保证（tag == conf 才放行），产物文件名内嵌
+        # 的就是 conf 版本 = tag 版本，无需 --config 注入、无需改文件名补丁。
+        # 注意：签名/公证 env 只在 Apple secrets 实际配置后才注入。secrets 引用会把
+        # 空字符串设进环境，tauri bundler 判 APPLE_CERTIFICATE 非空即走 keychain
+        # setup——空串触发 security import 必炸 SecKeychainItemImport（首发三跑实锤）。
+        # 未来配好证书后把下面这段 env 注释还原即可。
         # env:
         #   APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
         #   APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -112,9 +133,8 @@ jobs:
 
       - name: Read version
         id: ver
-        # 版本号取 tag（vX.Y.Z → X.Y.Z），而非 tauri.conf.json——tag 是发布意图，
-        # conf 是仓库基线，两者允许异步前进。R2 目录 / 产物 URL / latest.json
-        # 全部以 tag 版本为准，互相对齐。
+        # 版本号取 tag（vX.Y.Z → X.Y.Z）。tag 是发布意图，R2 目录 / URL /
+        # latest.json 全部以 tag 版本为准，互相对齐。
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: List bundles (debug)
@@ -126,15 +146,18 @@ jobs:
           BASE_URL: https://pkg.zhubaoduo.com/v${{ steps.ver.outputs.version }}
         run: |
           cd bundles
-          # 产物布局：macOS → dmg/aarch64|x64；Windows → nsis/*.exe；Linux → deb/*.deb, appimage/*.AppImage
+          # 产物布局（targets "all" 全格式）：macOS → dmg×2 架构；Windows → nsis/*.exe + msi/*.msi；
+          # Linux → deb/*.deb + rpm/*.rpm + appimage/*.AppImage。七产物全上架，与门户七卡对齐
           DMG_ARM=$(find . -path '*aarch64*' -name '*.dmg' | head -1)
           DMG_X64=$(find . -path '*x64*' -name '*.dmg' | head -1)
           NSIS=$(find . -path '*nsis*' -name '*.exe' | head -1)
+          MSI=$(find . -name '*.msi' | head -1)
           DEB=$(find . -name '*.deb' | head -1)
+          RPM=$(find . -name '*.rpm' | head -1)
           APPIMAGE=$(find . -name '*.AppImage' | head -1)
 
-          # 任一平台产物缺失即失败（fail loud，不许半份清单上架）
-          for f in "$DMG_ARM" "$DMG_X64" "$NSIS" "$DEB" "$APPIMAGE"; do
+          # 任一产物缺失即失败（fail loud，不许半份清单上架）
+          for f in "$DMG_ARM" "$DMG_X64" "$NSIS" "$MSI" "$DEB" "$RPM" "$APPIMAGE"; do
             [ -z "$f" ] && { echo "ERROR: bundle missing"; exit 1; }
           done
 
@@ -146,16 +169,20 @@ jobs:
             --arg arm "$(url "$DMG_ARM")"     --arg armSha "$(sha "$DMG_ARM")" \
             --arg x64 "$(url "$DMG_X64")"     --arg x64Sha "$(sha "$DMG_X64")" \
             --arg nsis "$(url "$NSIS")"       --arg nsisSha "$(sha "$NSIS")" \
+            --arg msi "$(url "$MSI")"         --arg msiSha "$(sha "$MSI")" \
             --arg deb "$(url "$DEB")"         --arg debSha "$(sha "$DEB")" \
+            --arg rpm "$(url "$RPM")"         --arg rpmSha "$(sha "$RPM")" \
             --arg appimage "$(url "$APPIMAGE")" --arg appimageSha "$(sha "$APPIMAGE")" \
             '{
               version: $v,
               publishedAt: (now | todateiso8601),
               platforms: {
-                "darwin-aarch64":        {url: $arm,     sha256: $armSha},
-                "darwin-x86_64":         {url: $x64,     sha256: $x64Sha},
-                "windows-x86_64":        {url: $nsis,    sha256: $nsisSha},
-                "linux-x86_64-deb":      {url: $deb,     sha256: $debSha},
+                "darwin-aarch64":     {url: $arm,      sha256: $armSha},
+                "darwin-x86_64":      {url: $x64,      sha256: $x64Sha},
+                "windows-x86_64":     {url: $nsis,     sha256: $nsisSha},
+                "windows-x86_64-msi": {url: $msi,      sha256: $msiSha},
+                "linux-x86_64-deb":   {url: $deb,      sha256: $debSha},
+                "linux-x86_64-rpm":   {url: $rpm,      sha256: $rpmSha},
                 "linux-x86_64-appimage": {url: $appimage, sha256: $appimageSha}
               }
             }' > latest.json
