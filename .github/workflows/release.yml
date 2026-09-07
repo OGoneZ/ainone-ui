@@ -12,7 +12,9 @@ permissions:
 jobs:
   build:
     strategy:
-      fail-fast: false
+      # 任一平台失败立即取消其余矩阵作业：发版语义是「全平台齐活才发布」，
+      # 一条腿挂了其余继续跑只是浪费 runner 分钟数（v0.2.0 门禁误伤实锤）
+      fail-fast: true
       matrix:
         include:
           - os: macos-latest
@@ -42,6 +44,8 @@ jobs:
         # 防止「tag 打了 v0.2.0 而 conf 还是 0.1.0」的异步分叉（产物文件名内嵌
         # conf 版本、app「关于」显示 conf 版本，与 tag 错位）。不一致 = 开发者
         # 忘了 bump，打回对齐后重新打 tag，无任何自动改写补丁。
+        # shell: bash 显式指定——Windows 作业默认 pwsh，bash 语法会 ParserError。
+        shell: bash
         env:
           EXPECTED: ${{ steps.ver.outputs.version }}
         run: |
