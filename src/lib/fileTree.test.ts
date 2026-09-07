@@ -7,6 +7,7 @@ import {
   joinDirPath,
   collectModifiedPaths,
   EXCLUDED_DIRS,
+  EXCLUDED_FILES,
 } from "./fileTree";
 import type { ChatMsg } from "@/acp/message-log";
 
@@ -33,6 +34,27 @@ describe("filterExcluded", () => {
       { name: "src", is_dir: true },
       { name: "README.md", is_dir: false },
     ]);
+  });
+
+  it("P29 AC-R1-2：点开头条目保留（VS Code 式），.git 目录与 .DS_Store 文件排除", () => {
+    const entries = [
+      { name: ".github", is_dir: true },
+      { name: ".vscode", is_dir: true },
+      { name: ".git", is_dir: true },
+      { name: ".env", is_dir: false },
+      { name: ".gitignore", is_dir: false },
+      { name: ".DS_Store", is_dir: false },
+    ];
+    const kept = filterExcluded(entries).map((e) => e.name);
+    // 隐藏文件目录/文件可见
+    expect(kept).toContain(".github");
+    expect(kept).toContain(".vscode");
+    expect(kept).toContain(".env");
+    expect(kept).toContain(".gitignore");
+    // 排除清单命中不显示
+    expect(kept).not.toContain(".git");
+    expect(kept).not.toContain(".DS_Store");
+    for (const f of EXCLUDED_FILES) expect(EXCLUDED_FILES).toContain(f);
   });
 });
 
