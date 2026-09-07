@@ -74,6 +74,7 @@ pub fn run() {
             connector::bridge_install,
             harness_meta::harness_meta,
             harness_meta::harness_settings_write,
+            harness_meta::models_probe,
             agent::agent_spawn,
             agent::agent_stdin_write,
             agent::agent_kill,

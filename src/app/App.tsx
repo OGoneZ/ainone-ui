@@ -121,6 +121,8 @@ function App() {
   useEffect(() => {
     saveRailState(railState);
   }, [railState]);
+  // P29 R5：活跃会话句柄（ChatPanel 建链上抛 → RightRail → MetadataPanel 模型切换）
+  const [activeSession, setActiveSession] = useState<{ setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null>(null);
   // F-21-6 左侧栏宽度（拖宽把手，持久化；clamp 200~min(520,40vw)）
   const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-sidebar-width")) || 240, 200, sidebarMaxWidth()),
@@ -592,6 +594,7 @@ function App() {
         onFork={(fromId, toId) => handleFork(fromId, toId, t.adapterId, t.workspaceId, t.cwd)}
         onForkNavigate={(toId) => handleForkNavigate(toId, t.adapterId, t.workspaceId, t.cwd)}
         onRewind={() => {}}
+        onActiveSession={t.key === activeKey ? setActiveSession : undefined}
       />
     );
   };
@@ -1211,6 +1214,7 @@ function App() {
               adapter={activeAdapter}
               sessionId={activeTab.sessionId ?? null}
               cwd={activeTab.cwd}
+              session={activeSession}
               messages={activeMessages}
               open={railState.open}
               tab={railState.tab}

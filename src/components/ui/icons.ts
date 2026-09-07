@@ -20,6 +20,7 @@ import {
   CircleCheck,
   Coffee,
   Copy,
+  ArrowLeftRight,
   FileDiff,
   FileText,
   Folder,
@@ -70,6 +71,7 @@ export const SettingsIcon = Settings; // 设置
 export const SendIcon = ArrowUp; // 发送
 export const StopIcon = Square; // 停止
 export const ArrowRightIcon = ArrowRight; // 建议 prompt hover 箭头
+export const SwitchIcon = ArrowLeftRight; // P29 模型/URL 切换入口
 
 // 通用符号
 export const ChevronDownIcon = ChevronDown;

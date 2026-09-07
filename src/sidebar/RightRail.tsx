@@ -24,6 +24,8 @@ interface Props {
   adapter: AdapterWithStatus;
   sessionId: string | null;
   cwd?: string;
+  /** P29 R5：活跃会话句柄（模型切换 set_config_option 用；无会话 = null） */
+  session: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null;
   /** 当前会话消息（文件树「M」徽标数据源） */
   messages: ChatMsg[];
   /** P25：开合与 tab 受控（state 提升到 App，Ctrl+K 才够得到；持久化仍在 App） */
@@ -63,7 +65,7 @@ export function saveRailState(s: RailState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
-export function RightRail({ tabKey, adapter, sessionId, cwd, messages, open, tab, onSwitchTab, onToggle }: Props) {
+export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, open, tab, onSwitchTab, onToggle }: Props) {
   // F-21-6 右栏宽度（拖宽把手，独立 key 持久化；clamp 220~min(520,40vw)）
   const [width, setWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-rightrail-width")) || 260, 220, sidebarMaxWidth()),
@@ -172,6 +174,7 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, messages, open, tab
             sessionId={sessionId}
             cwd={cwd}
             embedded
+            session={session}
           />
         ) : tab === "files" ? (
           <div className="rail-files">

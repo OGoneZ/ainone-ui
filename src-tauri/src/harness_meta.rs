@@ -332,6 +332,145 @@ pub(crate) fn write_omp(raw: &str, base_url: Option<&str>) -> Result<String, Str
     Ok(s)
 }
 
+// ---------- 模型列表探测 ----------
+
+/// 探测错误结构化（前端按 kind 展示可操作文案）
+#[derive(Debug, Serialize)]
+pub struct ProbeError {
+    pub kind: String, // "bad_url" | "timeout" | "http" | "bad_json" | "network"
+    pub message: String,
+}
+
+/// 纯函数：拼 /v1/models URL（trim 尾斜杠；不带 /v1 补 /v1）。
+pub(crate) fn models_url(base: &str) -> String {
+    let b = base.trim().trim_end_matches('/');
+    if b.ends_with("/v1") {
+        format!("{b}/models")
+    } else {
+        format!("{b}/v1/models")
+    }
+}
+
+/// 纯函数：解析 OpenAI 格式模型列表 {data:[{id:...}]}（两个实测网关均此格式）。
+pub(crate) fn parse_models_json(raw: &str) -> Result<Vec<String>, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("响应不是合法 JSON: {e}"))?;
+    let arr = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .ok_or_else(|| "响应缺少 data 数组（非 OpenAI 格式 /models）".to_string())?;
+    let mut ids: Vec<String> = arr
+        .iter()
+        .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+        .filter(|s| !s.is_empty())
+        .collect();
+    ids.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    ids.dedup();
+    Ok(ids)
+}
+
+/// 探测远端网关支持哪些模型：GET {base}/v1/models。
+/// key 由 Rust 侧按 harness 配置自取（明文不过 WebView）；protocol 决定鉴权头。
+pub async fn probe_models(
+    adapter_id: &str,
+    base_url: &str,
+    home: Option<&Path>,
+) -> Result<Vec<String>, ProbeError> {
+    let url = models_url(base_url);
+    let kind = config_kind(adapter_id).ok_or_else(|| ProbeError {
+        kind: "bad_url".into(),
+        message: format!("{adapter_id} 未配置协议，无法探测"),
+    })?;
+    // 鉴权头按协议分叉：anthropic → x-api-key；openai → Bearer。key 从静态配置自取。
+    let mut req = reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .header("Accept", "application/json");
+    match kind {
+        HarnessConfigKind::Claude => {
+            let key = claude_api_key(home)
+                .ok_or_else(|| ProbeError { kind: "bad_url".into(), message: "未找到 ANTHROPIC_AUTH_TOKEN，无法鉴权".into() })?;
+            req = req
+                .header("x-api-key", &key)
+                .header("anthropic-version", "2023-06-01")
+                .header("Authorization", format!("Bearer {key}"));
+        }
+        HarnessConfigKind::Codex | HarnessConfigKind::Omp => {
+            let key = match kind {
+                HarnessConfigKind::Codex => codex_api_key(home),
+                HarnessConfigKind::Omp => omp_api_key(home),
+                _ => None,
+            }
+            .ok_or_else(|| ProbeError { kind: "bad_url".into(), message: "未找到 API key，无法鉴权".into() })?;
+            req = req.header("Authorization", format!("Bearer {key}"));
+        }
+    }
+    let resp = req.send().await.map_err(|e| {
+        if e.is_timeout() {
+            ProbeError { kind: "timeout".into(), message: "请求超时（10s）".into() }
+        } else if e.is_connect() {
+            ProbeError { kind: "network".into(), message: format!("无法连接 {url}: {e}") }
+        } else {
+            ProbeError { kind: "network".into(), message: format!("请求失败: {e}") }
+        }
+    })?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| ProbeError {
+        kind: "network".into(),
+        message: format!("读取响应失败: {e}"),
+    })?;
+    if !status.is_success() {
+        let tail: String = text.chars().take(200).collect();
+        return Err(ProbeError {
+            kind: "http".into(),
+            message: format!("HTTP {status}: {tail}"),
+        });
+    }
+    parse_models_json(&text).map_err(|m| ProbeError { kind: "bad_json".into(), message: m })
+}
+
+fn claude_api_key(home: Option<&Path>) -> Option<String> {
+    let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
+    let raw = std::fs::read_to_string(home.join(".claude/settings.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("env")
+        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+        .and_then(|k| k.as_str())
+        .map(String::from)
+        .filter(|k| !k.trim().is_empty())
+}
+
+fn codex_api_key(home: Option<&Path>) -> Option<String> {
+    let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
+    let raw = std::fs::read_to_string(home.join(".codex/auth.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("OPENAI_API_KEY")
+        .and_then(|k| k.as_str())
+        .map(String::from)
+        .filter(|k| !k.trim().is_empty())
+}
+
+fn omp_api_key(home: Option<&Path>) -> Option<String> {
+    let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
+    let raw = std::fs::read_to_string(home.join(".omp/agent/models.yml")).ok()?;
+    for line in raw.lines() {
+        let t = line.trim();
+        if t.starts_with("apiKey:") {
+            let v = t["apiKey:".len()..].trim().trim_matches('"');
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 探测网关模型列表（命令入口；key 全程 Rust 侧流转）。
+#[tauri::command]
+pub async fn models_probe(adapter_id: String, base_url: String) -> Result<Vec<String>, ProbeError> {
+    probe_models(&adapter_id, &base_url, None).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,5 +631,42 @@ wire_api = "responses"
         assert!(r.path.ends_with("models.yml"));
         assert!(std::fs::read_to_string(dir.join(".omp/agent/models.yml")).unwrap().contains("n.example.com"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // —— P29 R5：/v1/models 探测纯函数 ——
+
+    #[test]
+    fn models_url_normalizes() {
+        assert_eq!(models_url("https://gw.example.com/"), "https://gw.example.com/v1/models");
+        assert_eq!(models_url("https://gw.example.com/v1"), "https://gw.example.com/v1/models");
+        assert_eq!(models_url("https://gw.example.com"), "https://gw.example.com/v1/models");
+        assert_eq!(models_url(" https://x.cn/v1 "), "https://x.cn/v1/models");
+    }
+
+    #[test]
+    fn parse_models_openai_shape() {
+        let raw = r#"{"data":[{"id":"duo-king-6.6","object":"model"},{"id":"claude-opus-4-7","object":"model"}],"object":"list","success":true}"#;
+        let ids = parse_models_json(raw).unwrap();
+        assert_eq!(ids, vec!["claude-opus-4-7", "duo-king-6.6"]); // 排序（忽略大小写）
+    }
+
+    #[test]
+    fn parse_models_dedup_and_empty_id_filtered() {
+        let raw = r#"{"data":[{"id":"a"},{"id":"a"},{"id":""},{"id":"B"}]}"#;
+        let ids = parse_models_json(raw).unwrap();
+        // 排序忽略大小写：a/B 同键时稳定序保留首个 "a"，"B" 因去重后仅一次排在其后
+        assert_eq!(ids, vec!["a", "B"]);
+    }
+
+    #[test]
+    fn parse_models_bad_json_and_missing_data() {
+        assert!(parse_models_json("not json").is_err());
+        assert!(parse_models_json(r#"{"object":"list"}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn probe_models_unsupported_adapter_errors() {
+        let e = probe_models("pi", "https://x.example.com", None).await.unwrap_err();
+        assert_eq!(e.kind, "bad_url");
     }
 }

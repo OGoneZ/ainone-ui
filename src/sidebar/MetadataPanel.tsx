@@ -11,14 +11,16 @@
 // F-15-6：session ID / 工作区 cwd / 分支 / baseUrl / 模型 点击复制，
 // toast「已复制」反馈；非 git 仓库分支显示「—」不可复制。
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSessionStore } from "@/store/sessionStore";
 import { usagePercent, extractModel, extractSessionModel, stripModelSuffix } from "@/acp/metadata";
 import { fetchHarnessMeta, type HarnessMeta } from "@/ipc/harnessMeta";
-import { ChevronRightIcon, CloseIcon, CopyIcon } from "@/components/ui/icons";
+import { ChevronRightIcon, CloseIcon, CopyIcon, SwitchIcon } from "@/components/ui/icons";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import type { AdapterWithStatus } from "@/ipc/adapters";
+import type { AcpSessionConfigOption } from "@/store/sessionStore";
+import { ModelSwitchPanel } from "./ModelSwitchPanel";
 
 interface Props {
   tabKey: string;
@@ -27,11 +29,13 @@ interface Props {
   cwd?: string;
   /** F-11-7：作为 RightRail tab 内容嵌入（隐藏自身头部与折叠钮，由 Rail 统一管理） */
   embedded?: boolean;
+  /** P29 R5：活跃会话句柄（set_config_option 即时切模型用；无会话 = null） */
+  session: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null;
 }
 
 const STORAGE_KEY = "ainone-metadata-open";
 
-export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, embedded = false }: Props) {
+export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, embedded = false, session: liveSession = null }: Props) {
   const usage = useSessionStore((s) => s.runtime[tabKey]?.usage ?? null);
   const meta = useSessionStore((s) => s.runtime[tabKey]?.meta ?? null);
   const branch = useSessionStore((s) => s.runtime[tabKey]?.branch ?? null);
@@ -69,13 +73,52 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
   const baseUrl = meta?.baseUrl ?? staticMeta?.base_url ?? null;
   const baseUrlSource = meta?.baseUrl ? "session" : staticMeta?.base_url ? "config" : null;
 
+  // P29 R5：模型/URL 切换面板开合
+  const [modelPanelOpen, setModelPanelOpen] = useState(false);
+
+  /** 写回后刷新静态元数据 + 通知外层 */
+  const [writeTick, setWriteTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    fetchHarnessMeta(adapter.id)
+      .then((m) => {
+        if (alive) setStaticMeta(m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [adapter.id, writeTick]);
+  /** 会话级切模型：session/set_config_option（configId=model；omp/pi 即时生效） */
+  const sessionModelChange = useCallback(
+    async (m: string) => {
+      const opt = configOptions?.find((o) => o.category === "model" && o.type === "select");
+      const fn = liveSession?.setConfigOption;
+      if (!opt || !fn) return;
+      const next = (await fn.call(liveSession, opt.id, m)) as AcpSessionConfigOption[] | null;
+      if (next) useSessionStore.getState().setConfigOptions(tabKey, next);
+    },
+    [configOptions, tabKey, liveSession],
+  );
+
   // F-11-7：嵌入 RightRail → 直接渲染内容（Rail 负责开合，不再有自己的折叠态）
   if (embedded) {
     return (
       <div className="meta-embedded">
         <dl className="meta-list">
-          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} />
+          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} />
         </dl>
+        <ModelSwitchPanel
+          open={modelPanelOpen}
+          onClose={() => setModelPanelOpen(false)}
+          adapterId={adapter.id}
+          adapterName={adapter.name}
+          baseUrl={baseUrl}
+          currentModel={model}
+          configOptions={configOptions}
+          onSessionModelChange={sessionModelChange}
+          onWritten={() => setWriteTick((t) => t + 1)}
+        />
       </div>
     );
   }
@@ -109,8 +152,19 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
       </div>
 
       <dl className="meta-list">
-        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} />
+        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} />
       </dl>
+      <ModelSwitchPanel
+        open={modelPanelOpen}
+        onClose={() => setModelPanelOpen(false)}
+        adapterId={adapter.id}
+        adapterName={adapter.name}
+        baseUrl={baseUrl}
+        currentModel={model}
+        configOptions={configOptions}
+        onSessionModelChange={sessionModelChange}
+        onWritten={() => setWriteTick((t) => t + 1)}
+      />
     </aside>
   );
 }
@@ -169,6 +223,7 @@ function MetaItems({
   branch,
   baseUrl,
   baseUrlSource,
+  onOpenModelPanel,
 }: {
   usage: { used: number; size: number; cost: number | null } | null;
   meta: { apiType?: string; baseUrl?: string } | null;
@@ -181,6 +236,8 @@ function MetaItems({
   baseUrl: string | null;
   /** P29 R4：baseUrl 来源（"session"=会话路由 / "config"=本机配置；AC-R4-3） */
   baseUrlSource: "session" | "config" | null;
+  /** P29 R5：点击模型行打开切换面板 */
+  onOpenModelPanel: () => void;
 }) {
   return (
     <>
@@ -240,7 +297,22 @@ function MetaItems({
             )}
           </dd>
         </div>
-        <CopyableItem label="模型" value={model} />
+        <div className="meta-item">
+          <dt>模型</dt>
+          <dd>
+            <button
+              type="button"
+              className={model ? "meta-copy-btn" : "meta-copy-btn meta-copy-disabled"}
+              disabled={!model}
+              title={model ? "点击切换模型" : undefined}
+              aria-label="切换模型"
+              onClick={() => model && onOpenModelPanel()}
+            >
+              <span className="meta-mono">{model ?? "—"}</span>
+              {model && <SwitchIcon style={{ width: 12, height: 12, strokeWidth: 1.75, flexShrink: 0 }} />}
+            </button>
+          </dd>
+        </div>
     </>
   );
 }

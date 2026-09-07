@@ -27,7 +27,7 @@ afterEach(cleanup);
 describe("MetadataPanel", () => {
   it("默认折叠：点击展开 → 显示字段（AC-P8-21）", async () => {
     render(
-      <MetadataPanel tabKey="k1" adapter={adapter} sessionId="s-123" cwd="/a/b" />,
+      <MetadataPanel tabKey="k1" adapter={adapter} sessionId="s-123" cwd="/a/b" session={null} />,
     );
     const user = userEvent.setup();
 
@@ -44,7 +44,7 @@ describe("MetadataPanel", () => {
 
   it("折叠状态持久化：展开后 localStorage 记 1（AC-P8-21）", async () => {
     render(
-      <MetadataPanel tabKey="k1" adapter={adapter} sessionId="s" cwd="/x" />,
+      <MetadataPanel tabKey="k1" adapter={adapter} sessionId="s" cwd="/x" session={null} />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByLabelText("展开元数据侧栏"));
@@ -55,7 +55,7 @@ describe("MetadataPanel", () => {
     useSessionStore.getState().ensure("k1", "omp");
     useSessionStore.getState().setUsage("k1", { used: 500, size: 1000, cost: 1.25 });
     render(
-      <MetadataPanel tabKey="k1" adapter={adapter} sessionId="s" cwd="/x" />,
+      <MetadataPanel tabKey="k1" adapter={adapter} sessionId="s" cwd="/x" session={null} />,
     );
 
     const user = userEvent.setup();

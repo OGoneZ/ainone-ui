@@ -87,9 +87,12 @@ interface Props {
   onForkNavigate?: (newSessionId: string) => void;
   /** F-8-6 回溯：启用用户消息「回溯到这里」入口 */
   onRewind?: (index: number) => void;
+  /** P29 R5：活跃会话句柄上抛（App → RightRail → MetadataPanel 模型切换用）。
+   *  建链/回收/重建时回调；null = 无活跃会话。 */
+  onActiveSession?: (s: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null) => void;
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, active = true}: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, onActiveSession, active = true}: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -432,6 +435,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       const isBusy = useSessionStore.getState().runtime[tabKey]?.busy ?? false;
       if (shouldRecycleSession(lastActivityRef.current, Date.now(), RECYCLE_THRESHOLD_MS, isBusy)) {
         sessionRef.current = null;
+        // P29：回收后活跃会话句柄失效
+        onActiveSession?.(null);
         // L7：时点修正——这里是「执行回收」，reopen 发生在下一次 ensureSession；
         // 原埋点把 recycle 记成 reopen，日志时间轴误导。
         logger.info("session", "recycle", { sessionId: s.sessionId });
@@ -591,6 +596,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       bindSession(tabKey, s.sessionId);
       // P29：session/new 存档的 configOptions（category="model" 即模型选择器）进 store
       if (s.configOptions) useSessionStore.getState().setConfigOptions(tabKey, s.configOptions);
+      // P29 R5：活跃会话句柄上抛（模型切换面板的 set_config_option 通道）
+      onActiveSession?.({ setConfigOption: s.setConfigOption ?? undefined });
       // 日志身份固化：全新会话（无恢复来源）首次建链时把 logSid 锚定为
       // harness sessionId；此后即使恢复链降级换 sessionId，日志文件身份不变
       if (logSidRef.current === null) logSidRef.current = s.sessionId;
