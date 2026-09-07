@@ -21,7 +21,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+# P29 任务三配置合并写：serde_json preserve_order 保键序（只改指定键不重排用户配置）；
+# toml_edit 格式保留式 TOML 编辑（codex config.toml 用户注释不丢，Cargo 官方同款）
+toml_edit = "0.22"
 tauri-plugin-shell = "2.3.6"
 tokio = { version = "1.53.1", features = ["process", "io-util", "rt-multi-thread", "sync", "macros", "time"] }
 tauri-plugin-dialog = "2.7.3"

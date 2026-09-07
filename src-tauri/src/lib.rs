@@ -15,6 +15,8 @@ mod env_path;
 mod fs;
 mod fslist;
 mod gitmeta;
+mod harness_config;
+mod harness_keys;
 mod harness_meta;
 mod harness_probe;
 mod quickask;
@@ -59,6 +61,8 @@ pub fn run() {
             terminal::init_state(app);
             // 启动即后台抓取 login shell PATH（8s 超时，永不阻塞 UI）
             env_path::fetch_login_shell_path_async();
+            // P29：全局 AppHandle 存档——spawn 注入 codex keys env 等非命令上下文用
+            agent::store_app_handle(app.handle().clone());
             log::info!("ainone-ui 启动完成");
             Ok(())
         })
@@ -72,6 +76,9 @@ pub fn run() {
             adapters::adapter_status,
             adapters::default_cwd,
             connector::bridge_install,
+            connector::cli_install,
+            harness_config::harness_config_read,
+            harness_config::harness_config_save,
             harness_meta::harness_meta,
             harness_meta::harness_settings_write,
             harness_meta::models_probe,

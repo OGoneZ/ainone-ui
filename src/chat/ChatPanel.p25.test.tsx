@@ -61,7 +61,7 @@ const adapter: AdapterWithStatus = {
   args: [],
   cwd: ".",
   logo: "#7c3aed",
-  available: true, state: "ready" as const, resolvedPath: null, source: null, bridge: null,
+  available: true, state: "ready" as const, resolvedPath: null, source: null, bridge: null, cli: null, auth: { state: "none", detail: "" },
 };
 
 const input = () => screen.getByLabelText("消息输入");

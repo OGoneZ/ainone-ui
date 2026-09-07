@@ -37,10 +37,10 @@ const upsert = vi.mocked(wsMod.workspacesUpsert);
 const installBridge = vi.mocked(adaptersMod.installBridge);
 
 const adapters: AdapterWithStatus[] = [
-  { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: null, available: true, state: "ready", resolvedPath: null, source: null, bridge: null },
+  { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: null, available: true, state: "ready", resolvedPath: null, source: null, bridge: null, cli: null, auth: { state: "none", detail: "" } },
   // P28：pi 走懒装桥语义——CLI 本体在、桥未装 → installable（可点、开始对话先装）
-  { id: "pi", name: "Pi", program: "pi-acp", args: [], cwd: ".", logo: null, available: false, state: "installable", resolvedPath: null, source: null, bridge: { pkg: "pi-acp", version: "0.0.33", cliProgram: "pi", cliAvailable: true, runtimeAvailable: true } },
-  { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: null, available: false, state: "absent", resolvedPath: null, source: null, bridge: { pkg: "@agentclientprotocol/claude-agent-acp", version: "0.73.0", cliProgram: "claude", cliAvailable: false, runtimeAvailable: true } },
+  { id: "pi", name: "Pi", program: "pi-acp", args: [], cwd: ".", logo: null, available: false, state: "installable", resolvedPath: null, source: null, bridge: { pkg: "pi-acp", version: "0.0.33", cliProgram: "pi", cliAvailable: true, runtimeAvailable: true }, cli: null, auth: { state: "none", detail: "" } },
+  { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: null, available: false, state: "absent", resolvedPath: null, source: null, bridge: { pkg: "@agentclientprotocol/claude-agent-acp", version: "0.73.0", cliProgram: "claude", cliAvailable: false, runtimeAvailable: true }, cli: null, auth: { state: "none", detail: "" } },
 ];
 const workspaces: Workspace[] = [
   { id: "ws-1", name: "dev", cwd: "/Users/me/dev", created_ms: 1 },
@@ -103,7 +103,7 @@ describe("NewSessionModal（P26c 两步向导）", () => {
         open={true}
         adapters={[
           ...adapters,
-          { id: "codex", name: "Codex", program: "codex-acp", args: [], cwd: ".", logo: null, available: false, state: "absent", resolvedPath: null, source: null, bridge: { pkg: "@agentclientprotocol/codex-acp", version: "1.10.0", cliProgram: "codex", cliAvailable: false, runtimeAvailable: true } },
+          { id: "codex", name: "Codex", program: "codex-acp", args: [], cwd: ".", logo: null, available: false, state: "absent", resolvedPath: null, source: null, bridge: { pkg: "@agentclientprotocol/codex-acp", version: "1.10.0", cliProgram: "codex", cliAvailable: false, runtimeAvailable: true }, cli: null, auth: { state: "none", detail: "" } },
         ]}
         workspaces={workspaces}
         onClose={() => {}}

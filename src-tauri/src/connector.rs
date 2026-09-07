@@ -69,6 +69,125 @@ pub fn bridge_spec(program: &str) -> Option<&'static BridgeSpec> {
     BRIDGES.iter().find(|s| s.program == program)
 }
 
+// ---------------------------------------------------------------------------
+// CLI 一键安装（P29 任务一）：与桥安装解耦的两层补齐中的第一层。
+// 装的是 harness 本体 CLI，全部免 sudo 用户级落点；装完由 find_program 真值
+// 验证（CLI 无版本 marker）。失败不清理任何东西——CLI 装到系统用户目录，
+// 保留已装部分，下次打开按真实状态判定，断点续补。
+// ---------------------------------------------------------------------------
+
+/// CLI 安装候选的类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CliCandidateKind {
+    /// 官方安装脚本：curl -fsSL <url> -o <tmp> && sh <tmp>（两步 argv，不跑 shell 管道）
+    Script { url: &'static str },
+    /// 包管理器全局安装（bun 优先 npm 回退，与桥安装同回退序）
+    Package { runtime: Runtime, pkg: &'static str },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Runtime {
+    Bun,
+    Npm,
+}
+
+impl Runtime {
+    fn program(self) -> &'static str {
+        match self {
+            Runtime::Bun => "bun",
+            Runtime::Npm => "npm",
+        }
+    }
+}
+
+impl CliCandidateKind {
+    /// 测试与文案用：Package 的包名（Script 无包名，返回 url）。
+    pub fn pkg_name(&self) -> &'static str {
+        match self {
+            CliCandidateKind::Script { url } => url,
+            CliCandidateKind::Package { pkg, .. } => pkg,
+        }
+    }
+}
+
+/// 一条 CLI 安装登记项。新增 harness 的 CLI 安装 = 在 CLI_INSTALLERS 加一行。
+#[derive(Debug, Clone, Copy)]
+pub struct CliSpec {
+    /// find_program 检索名（装完验证用）
+    pub program: &'static str,
+    /// 错误/文案用显示名
+    pub display: &'static str,
+    /// 有序候选链：先脚本后包管理器（脚本无 node/bun 依赖）
+    pub candidates: &'static [CliCandidateKind],
+}
+
+pub const CLI_INSTALLERS: &[CliSpec] = &[
+    CliSpec {
+        program: "claude",
+        display: "Claude Code",
+        candidates: &[CliCandidateKind::Script {
+            url: "https://claude.ai/install.sh",
+        }],
+    },
+    CliSpec {
+        program: "opencode",
+        display: "OpenCode",
+        candidates: &[CliCandidateKind::Script {
+            url: "https://opencode.ai/install",
+        }],
+    },
+    CliSpec {
+        program: "codex",
+        display: "Codex",
+        candidates: &[
+            CliCandidateKind::Package { runtime: Runtime::Bun, pkg: "@openai/codex" },
+            CliCandidateKind::Package { runtime: Runtime::Npm, pkg: "@openai/codex" },
+        ],
+    },
+    CliSpec {
+        program: "omp",
+        display: "Oh My Pi",
+        candidates: &[
+            CliCandidateKind::Package { runtime: Runtime::Bun, pkg: "@oh-my-pi/pi-coding-agent" },
+            CliCandidateKind::Package { runtime: Runtime::Npm, pkg: "@oh-my-pi/pi-coding-agent" },
+        ],
+    },
+    CliSpec {
+        program: "pi",
+        display: "Pi",
+        candidates: &[
+            CliCandidateKind::Package { runtime: Runtime::Bun, pkg: "@mariozechner/pi-coding-agent" },
+            CliCandidateKind::Package { runtime: Runtime::Npm, pkg: "@mariozechner/pi-coding-agent" },
+        ],
+    },
+];
+
+pub fn cli_spec(program: &str) -> Option<&'static CliSpec> {
+    CLI_INSTALLERS.iter().find(|s| s.program == program)
+}
+
+/// 候选当前是否可用（Script 恒可用；Package 需对应 runtime 在）。
+/// 纯函数——runtime 可用性由调用方注入，便于单测。
+pub fn candidate_available(candidate: &CliCandidateKind, bun_in: bool, npm_in: bool) -> bool {
+    match candidate {
+        CliCandidateKind::Script { .. } => true,
+        CliCandidateKind::Package { runtime, .. } => match runtime {
+            Runtime::Bun => bun_in,
+            Runtime::Npm => npm_in,
+        },
+    }
+}
+
+/// 纯函数：CLI 是否存在可用的安装候选（四态判定中 cli_installable 的判据）。
+pub fn cli_installable(spec: &CliSpec, bun_in: bool, npm_in: bool) -> bool {
+    spec.candidates
+        .iter()
+        .any(|c| candidate_available(c, bun_in, npm_in))
+}
+
+/// opencode 官方脚本支持 --no-modify-path（不写 shell profile），兑现「不替用户改配置」。
+const OPENCODE_SCRIPT_ARGS: &[&str] = &["--no-modify-path"];
+
 /// 已安装桥的信息（spawn 时由 agent.rs 消费）
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolvedBridge {
@@ -292,6 +411,204 @@ pub async fn bridge_install(
     install_bridge(&app, spec, Some(on_event)).await.map(|_| ())
 }
 
+/// CLI 安装事件（与 BridgeEvent 同形：逐行输出 + 完成标记，前端可共用渲染）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", content = "payload", rename_all = "camelCase")]
+pub enum CliInstallEvent {
+    Progress(String),
+    Done,
+}
+
+/// CLI 安装命令（P29 任务一）。复用桥安装的锁/进度/超时机制；与装桥解耦——
+/// 失败不清理（CLI 装到用户目录），装完以 find_program 真值验证。
+#[tauri::command]
+pub async fn cli_install(
+    app: AppHandle,
+    program: String,
+    on_event: Channel<CliInstallEvent>,
+) -> Result<(), String> {
+    let spec = cli_spec(&program).ok_or_else(|| format!("{program} 没有 CLI 安装登记"))?;
+    install_cli(&app, spec, Some(on_event)).await
+}
+
+/// 已装 CLI 就直接返回（幂等）；否则按候选链依次尝试。
+/// 候选可用性前置判定：全不可用直接报缺失运行时，不空跑。
+pub async fn install_cli(
+    app: &AppHandle,
+    spec: &CliSpec,
+    on_event: Option<Channel<CliInstallEvent>>,
+) -> Result<(), String> {
+    if crate::env_path::find_program(spec.program).is_some() {
+        return Ok(());
+    }
+    let bun_in = crate::env_path::find_program("bun").is_some();
+    let npm_in = crate::env_path::find_program("npm").is_some();
+    if !cli_installable(spec, bun_in, npm_in) {
+        return Err(format!(
+            "无法安装 {}：缺少 bun 或 npm（脚本安装候选不存在）。请先安装 bun（curl -fsSL https://bun.sh/install | bash）或 Node.js ≥20。",
+            spec.display
+        ));
+    }
+
+    // 串行化并发安装（与桥安装共用一把锁：两者都会起包管理器子进程，
+    // 同刻并发会互相拖慢且日志交错；锁粒度粗一点换来行为可预期）
+    let _guard = install_lock().lock().await;
+    if crate::env_path::find_program(spec.program).is_some() {
+        return Ok(()); // 等锁期间别的调用装完了
+    }
+
+    let mut last_err = String::new();
+    let n = spec.candidates.len();
+    for (idx, candidate) in spec.candidates.iter().enumerate() {
+        if !candidate_available(candidate, bun_in, npm_in) {
+            continue;
+        }
+        let is_last = idx + 1 == n;
+        log::info!("[cli] 安装 {} 候选 {}/{}", spec.display, idx + 1, n);
+        match run_cli_candidate(app, spec, candidate, &on_event).await {
+            Ok(()) => {
+                if let Some(ch) = &on_event {
+                    let _ = ch.send(CliInstallEvent::Done);
+                }
+                return crate::env_path::find_program(spec.program)
+                    .map(|_| ())
+                    .ok_or_else(|| format!("安装流程结束但未找到 {} 命令（请检查安装输出）", spec.display));
+            }
+            Err(e) => {
+                last_err = e;
+                log::warn!("[cli] {} 候选失败: {last_err}", spec.display);
+                // 不清理：CLI 装到用户目录，半成品由各安装器自管；
+                // 已装部分保留，失败即停在该候选链尽头的报错。
+            }
+        }
+        if !is_last {
+            continue;
+        }
+    }
+    Err(format!("{} CLI 安装失败：{last_err}", spec.display))
+}
+
+/// 跑一个安装候选：Script = curl 下载到临时文件后 sh 执行（两步 argv，
+/// 不跑 shell 管道，URL 固定无注入面）；Package = bun/npm 全局安装。
+async fn run_cli_candidate(
+    app: &AppHandle,
+    spec: &CliSpec,
+    candidate: &CliCandidateKind,
+    on_event: &Option<Channel<CliInstallEvent>>,
+) -> Result<(), String> {
+    match candidate {
+        CliCandidateKind::Script { url } => {
+            let tmp = std::env::temp_dir().join(format!("ainone-cli-install-{}-{}.sh", spec.program, std::process::id()));
+            std::fs::remove_file(&tmp).ok();
+            let curl = crate::env_path::find_program("curl")
+                .map(|h| h.path)
+                .ok_or("缺少 curl，无法下载安装脚本")?;
+            let sh = crate::env_path::find_program("sh")
+                .map(|h| h.path)
+                .or_else(|| crate::env_path::find_program("bash").map(|h| h.path))
+                .ok_or("缺少 sh/bash，无法执行安装脚本")?;
+            let download = RunSpec {
+                argv: vec![
+                    curl.to_string_lossy().into_owned(),
+                    "-fsSL".into(),
+                    (*url).into(),
+                    "-o".into(),
+                    tmp.to_string_lossy().into_owned(),
+                ],
+            };
+            progress_line(on_event, &format!("下载安装脚本 {url}…"));
+            run_argv(app, &download, on_event).await.map_err(|e| format!("下载失败: {e}"))?;
+            let mut script_argv = vec![sh.to_string_lossy().into_owned(), tmp.to_string_lossy().into_owned()];
+            if spec.program == "opencode" {
+                script_argv.extend(OPENCODE_SCRIPT_ARGS.iter().map(|s| s.to_string()));
+            }
+            let exec = RunSpec { argv: script_argv };
+            let r = run_argv(app, &exec, on_event).await;
+            std::fs::remove_file(&tmp).ok();
+            r
+        }
+        CliCandidateKind::Package { runtime, pkg } => {
+            let hit = crate::env_path::find_program(runtime.program())
+                .map(|h| h.path)
+                .ok_or_else(|| format!("未找到 {}", runtime.program()))?;
+            let mut argv = vec![hit.to_string_lossy().into_owned()];
+            match runtime {
+                Runtime::Bun => argv.extend(["add".to_string(), "--global".to_string(), (*pkg).to_string()]),
+                Runtime::Npm => argv.extend([
+                    "install".to_string(),
+                    "--global".to_string(),
+                    "--no-audit".to_string(),
+                    "--no-fund".to_string(),
+                    (*pkg).to_string(),
+                ]),
+            }
+            run_argv(app, &RunSpec { argv }, on_event).await
+        }
+    }
+}
+
+/// 一次进程调用的参数（统一走 run_argv：增强 PATH env + 逐行进度 + 15min 超时）。
+struct RunSpec {
+    argv: Vec<String>,
+}
+
+fn progress_line(on_event: &Option<Channel<CliInstallEvent>>, line: &str) {
+    if let Some(ch) = on_event {
+        let clipped: String = line.chars().take(160).collect();
+        let _ = ch.send(CliInstallEvent::Progress(clipped));
+    }
+}
+
+/// 跑一轮安装进程：逐行转发输出（stdout/stderr 合流语义由安装器保证，
+/// 这里两路各自转发），15 分钟超时 kill，退出码非零报错。
+/// 与 run_install（桥安装）的差异：argv 直接给定、失败不清理、事件类型为 CliInstallEvent。
+async fn run_argv(
+    _app: &AppHandle,
+    spec: &RunSpec,
+    on_event: &Option<Channel<CliInstallEvent>>,
+) -> Result<(), String> {
+    use tokio::io::AsyncBufReadExt;
+    use tokio::process::Command;
+
+    let (program, args) = spec.argv.split_first().ok_or("空 argv")?;
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .env("PATH", crate::env_path::enhanced_path())
+        .env("HOME", std::env::var("HOME").unwrap_or_default())
+        .env("npm_config_progress", "false")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = cmd.spawn().map_err(|e| format!("启动 {program} 失败: {e}"))?;
+    let stdout = child.stdout.take().ok_or("无法读取安装输出")?;
+    let stderr = child.stderr.take().ok_or("无法读取安装错误输出")?;
+
+    async fn pump<R: tokio::io::AsyncRead + Unpin>(r: R, on_event: &Option<Channel<CliInstallEvent>>) {
+        use tokio::io::BufReader;
+        let mut lines = BufReader::new(r).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            progress_line(on_event, t);
+        }
+    }
+    let read_loop = async {
+        tokio::join!(pump(stdout, on_event), pump(stderr, on_event));
+        child.wait().await
+    };
+    let status = tokio::time::timeout(std::time::Duration::from_secs(900), read_loop)
+        .await
+        .map_err(|_| "安装超时（15 分钟）".to_string())?
+        .map_err(|e| format!("等待安装进程失败: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("退出状态 {status}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +676,41 @@ mod tests {
         // 非 legacy 桥（pi-acp）即使同布局也不算
         assert!(resolve_in(&base, bridge_spec("pi-acp").unwrap()).is_none());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn cli_spec_lookup() {
+        assert!(cli_spec("claude").is_some());
+        assert!(cli_spec("opencode").is_some());
+        assert_eq!(cli_spec("codex").unwrap().candidates.len(), 2);
+        assert_eq!(cli_spec("pi").unwrap().candidates[0].pkg_name(), "@mariozechner/pi-coding-agent");
+        // 未登记程序（如自定义 harness 的 program）→ None
+        assert!(cli_spec("my-agent").is_none());
+    }
+
+    #[test]
+    fn candidate_availability_matrix() {
+        // 脚本候选恒可用（curl/sh 由 run_cli_candidate 届时报，不在判定层）
+        let script = CliCandidateKind::Script { url: "https://x/install" };
+        assert!(candidate_available(&script, false, false));
+        // 包候选按 runtime 在否
+        let bun_pkg = CliCandidateKind::Package { runtime: Runtime::Bun, pkg: "p" };
+        let npm_pkg = CliCandidateKind::Package { runtime: Runtime::Npm, pkg: "p" };
+        assert!(candidate_available(&bun_pkg, true, false));
+        assert!(!candidate_available(&bun_pkg, false, true));
+        assert!(candidate_available(&npm_pkg, false, true));
+        assert!(!candidate_available(&npm_pkg, true, false));
+    }
+
+    #[test]
+    fn cli_installable_any_candidate_hits() {
+        // codex：bun 或 npm 任一在即可装
+        let codex = cli_spec("codex").unwrap();
+        assert!(cli_installable(codex, true, false));
+        assert!(cli_installable(codex, false, true));
+        assert!(!cli_installable(codex, false, false));
+        // claude 只有脚本候选 → 恒 installable（缺 curl/sh 由执行层报）
+        let claude = cli_spec("claude").unwrap();
+        assert!(cli_installable(claude, false, false));
     }
 }
