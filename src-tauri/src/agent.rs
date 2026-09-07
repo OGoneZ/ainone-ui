@@ -8,7 +8,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, RunEvent, State};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -223,6 +223,8 @@ fn spawn_bridge(
 
 /// 懒装桥的本体 CLI 定位：注入 spec.cli_env（各桥官方覆盖点，如 claude 的
 /// CLAUDE_CODE_EXECUTABLE）。用户没装本体时不注入，由桥报清晰错误引导安装。
+/// P29：codex 桥额外注入 AINONE_CODEX_API_KEY（配置代写把 key 存在应用侧 keys.json，
+/// 经 Codex 官方 env_key 机制生效；未存则不注入，由 Codex 报原生错误）。
 fn bridge_env_inject(program: &str) -> Vec<(String, String)> {
     let mut env = Vec::new();
     let Some(spec) = crate::connector::bridge_spec(program) else {
@@ -234,7 +236,32 @@ fn bridge_env_inject(program: &str) -> Vec<(String, String)> {
             hit.path.to_string_lossy().into_owned(),
         ));
     }
+    if program == "codex-acp" {
+        if let Some(dir) = codex_keys_dir() {
+            if let Some(pair) = crate::harness_keys::codex_key_env(Some(&dir)) {
+                env.push(pair);
+            }
+        }
+    }
     env
+}
+
+/// app 配置目录（codex keys.json 的宿主；取不到返回 None 不注入）。
+/// 全局 AppHandle 在 setup 时存档（store_app_handle），非命令上下文也能取。
+fn codex_keys_dir() -> Option<std::path::PathBuf> {
+    let app = global_app_handle()?;
+    app.path().app_config_dir().ok()
+}
+
+static GLOBAL_APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// setup 时存档全局 AppHandle（P29：spawn 环境注入需要非命令上下文的配置目录）。
+pub fn store_app_handle(app: AppHandle) {
+    let _ = GLOBAL_APP.set(app);
+}
+
+fn global_app_handle() -> Option<&'static AppHandle> {
+    GLOBAL_APP.get()
 }
 
 /// 把事件接收端逐条转发到前端 Channel；前端断开则停止。
