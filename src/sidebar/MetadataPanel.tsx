@@ -14,13 +14,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSessionStore } from "@/store/sessionStore";
 import { usagePercent, extractModel, extractSessionModel, stripModelSuffix } from "@/acp/metadata";
-import { fetchHarnessMeta, type HarnessMeta } from "@/ipc/harnessMeta";
+import { fetchHarnessMeta, supportsWrite, type HarnessMeta } from "@/ipc/harnessMeta";
 import { ChevronRightIcon, CloseIcon, CopyIcon, SwitchIcon } from "@/components/ui/icons";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import type { AcpSessionConfigOption } from "@/store/sessionStore";
 import { ModelSwitchPanel } from "./ModelSwitchPanel";
+import { UrlEditPanel } from "./UrlEditPanel";
 
 interface Props {
   tabKey: string;
@@ -75,6 +76,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
 
   // P29 R5：模型/URL 切换面板开合
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
+  const [urlPanelOpen, setUrlPanelOpen] = useState(false);
 
   /** 写回后刷新静态元数据 + 通知外层 */
   const [writeTick, setWriteTick] = useState(0);
@@ -106,7 +108,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
     return (
       <div className="meta-embedded">
         <dl className="meta-list">
-          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} />
+          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} onOpenUrlPanel={supportsWrite(adapter.id) ? () => setUrlPanelOpen(true) : undefined} />
         </dl>
         <ModelSwitchPanel
           open={modelPanelOpen}
@@ -119,6 +121,16 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
           onSessionModelChange={sessionModelChange}
           onWritten={() => setWriteTick((t) => t + 1)}
         />
+        {supportsWrite(adapter.id) && (
+          <UrlEditPanel
+            open={urlPanelOpen}
+            onClose={() => setUrlPanelOpen(false)}
+            adapterId={adapter.id}
+            adapterName={adapter.name}
+            baseUrl={baseUrl}
+            onWritten={() => setWriteTick((t) => t + 1)}
+          />
+        )}
       </div>
     );
   }
@@ -152,7 +164,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
       </div>
 
       <dl className="meta-list">
-        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} />
+        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} onOpenUrlPanel={supportsWrite(adapter.id) ? () => setUrlPanelOpen(true) : undefined} />
       </dl>
       <ModelSwitchPanel
         open={modelPanelOpen}
@@ -165,6 +177,16 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
         onSessionModelChange={sessionModelChange}
         onWritten={() => setWriteTick((t) => t + 1)}
       />
+      {supportsWrite(adapter.id) && (
+        <UrlEditPanel
+          open={urlPanelOpen}
+          onClose={() => setUrlPanelOpen(false)}
+          adapterId={adapter.id}
+          adapterName={adapter.name}
+          baseUrl={baseUrl}
+          onWritten={() => setWriteTick((t) => t + 1)}
+        />
+      )}
     </aside>
   );
 }
@@ -224,6 +246,7 @@ function MetaItems({
   baseUrl,
   baseUrlSource,
   onOpenModelPanel,
+  onOpenUrlPanel,
 }: {
   usage: { used: number; size: number; cost: number | null } | null;
   meta: { apiType?: string; baseUrl?: string } | null;
@@ -238,6 +261,8 @@ function MetaItems({
   baseUrlSource: "session" | "config" | null;
   /** P29 R5：点击模型行打开切换面板 */
   onOpenModelPanel: () => void;
+  /** P29 R6：点击 baseUrl 行打开编辑面板；undefined = 该 harness 不支持写回（只读） */
+  onOpenUrlPanel?: () => void;
 }) {
   return (
     <>
@@ -289,7 +314,21 @@ function MetaItems({
         <div className="meta-item">
           <dt>baseUrl</dt>
           <dd>
-            <CopyableValue value={baseUrl} label="baseUrl" />
+            {onOpenUrlPanel ? (
+              <button
+                type="button"
+                className={baseUrl ? "meta-copy-btn" : "meta-copy-btn meta-copy-disabled"}
+                disabled={!baseUrl}
+                title={baseUrl ? "点击编辑接口地址" : undefined}
+                aria-label="编辑接口地址"
+                onClick={() => baseUrl && onOpenUrlPanel()}
+              >
+                <span className="meta-mono">{baseUrl ?? "—"}</span>
+                {baseUrl && <SwitchIcon style={{ width: 12, height: 12, strokeWidth: 1.75, flexShrink: 0 }} />}
+              </button>
+            ) : (
+              <CopyableValue value={baseUrl} label="baseUrl" />
+            )}
             {baseUrl && baseUrlSource && (
               <span className="meta-tag" title={baseUrlSource === "session" ? "来自会话路由（providers/list）" : "来自本机配置文件"}>
                 {baseUrlSource === "session" ? "会话" : "配置"}
