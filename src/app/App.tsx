@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layout, Model, Actions, DockLocation, type TabNode, type Node } from "flexlayout-react";
 import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
-import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "@/ipc/sessions";
+import { sessionsList, sessionsDeletedList, sessionsUpsert, sessionsRemove, sessionsRestore, type SessionEntry } from "@/ipc/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "@/ipc/workspaces";
 import { ChatPanel } from "@/chat/ChatPanel";
 import { TerminalPanel } from "@/terminal/TerminalPanel";
@@ -30,6 +30,8 @@ import {
   SidebarExpandIcon,
   TerminalIcon,
   NewTerminalIcon,
+  DeleteIcon,
+  RestoreIcon,
 } from "@/components/ui/icons";
 import {
   ContextMenu,
@@ -38,6 +40,9 @@ import {
   ContextMenuItem,
 } from "@/components/ui/context-menu";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { resolveHistoryOpen, TERMINAL_ADAPTER_ID, type Tab } from "@/app/logic/tabs";
 import {
   setExternalDragPayload,
@@ -827,8 +832,44 @@ function App() {
     };
   }, []);
 
-  function deleteHistory(id: string) {
+  // P30 回收站：删除确认弹窗（deleted_at_ms 软删除 + 可恢复；「不再提示」持久化）
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string } | null>(null);
+  const [recycleOpen, setRecycleOpen] = useState(false);
+  const [recycleItems, setRecycleItems] = useState<SessionEntry[]>([]);
+  const DELETE_SKIP_KEY = "ainone-delete-confirm-skip";
+
+  function deleteHistory(id: string, title: string) {
+    if (localStorage.getItem(DELETE_SKIP_KEY) === "1") {
+      // 用户选过「以后不再提示」→ 直接软删除
+      sessionsRemove(id).then(reloadHistory);
+      return;
+    }
+    setDeleteConfirm({ id, title });
+  }
+
+  function confirmDelete() {
+    if (!deleteConfirm) return;
+    const { id } = deleteConfirm;
+    setDeleteConfirm(null);
     sessionsRemove(id).then(reloadHistory);
+  }
+
+  function openRecycle() {
+    sessionsDeletedList()
+      .then((items) => {
+        setRecycleItems(items);
+        setRecycleOpen(true);
+      })
+      .catch(() => toast.error("读取回收站失败"));
+  }
+
+  function restoreFromRecycle(id: string) {
+    sessionsRestore(id)
+      .then(() => sessionsDeletedList().then(setRecycleItems))
+      .then(reloadHistory)
+      // 恢复成功即关弹窗：用户直接看到条目回到侧栏（弹窗开着会 aria-hidden 主内容）
+      .then(() => setRecycleOpen(false))
+      .catch(() => toast.error("恢复失败"));
   }
 
   function newTab(adapterId: string, workspaceId?: string | null, cwd?: string) {
@@ -1001,6 +1042,16 @@ function App() {
               <div className="sidebar-head-actions">
                 {/* P26 R2：三按钮终态——终端（SquareTerminal 复杂图标）/ 新建会话 / 收起。
                     原 P23 简单 TerminalIcon 重复「新建终端」入口删除（AC-R2-3） */}
+                {/* P30 回收站入口：软删除的会话在此列出、可恢复 */}
+                <button
+                  className="add-ws"
+                  title="回收站"
+                  aria-label="回收站"
+                  data-testid="recycle-bin"
+                  onClick={openRecycle}
+                >
+                  <DeleteIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                </button>
                 <button
                   className="add-ws"
                   title="新建终端"
@@ -1120,7 +1171,7 @@ function App() {
                           className="history-del"
                           draggable={false}
                           aria-label="删除会话"
-                          onClick={() => deleteHistory(h.session_id)}
+                          onClick={() => deleteHistory(h.session_id, h.title)}
                         >
                           <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
                         </button>
@@ -1254,6 +1305,63 @@ function App() {
         onOpenChange={setGlobalSearchOpen}
         onPick={openFromHistory}
       />
+
+      {/* P30 删除确认弹窗：软删除可从回收站恢复；「不再提示」持久化 localStorage */}
+      <Dialog open={deleteConfirm !== null} onOpenChange={(o) => { if (!o) setDeleteConfirm(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>删除会话「{deleteConfirm?.title}」？</DialogTitle>
+          </DialogHeader>
+          <p className="perm-code">
+            会话将从侧栏移除，但记录不会丢失——以后可以从侧栏顶部的回收站恢复。
+          </p>
+          <DialogFooter className="items-center gap-2">
+            <label className="flex items-center gap-1.5 text-sm mr-auto cursor-pointer select-none">
+              <input
+                type="checkbox"
+                data-testid="delete-confirm-skip"
+                onChange={(e) => localStorage.setItem(DELETE_SKIP_KEY, e.target.checked ? "1" : "0")}
+              />
+              以后不再提示
+            </label>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>取消</Button>
+            <Button variant="destructive" onClick={confirmDelete} data-testid="delete-confirm-ok">删除</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* P30 回收站弹窗：软删除条目列表 + 恢复 */}
+      <Dialog open={recycleOpen} onOpenChange={setRecycleOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>回收站</DialogTitle>
+          </DialogHeader>
+          {recycleItems.length === 0 ? (
+            <p className="hint">回收站是空的。</p>
+          ) : (
+            <div className="ws-sessions" data-testid="recycle-list">
+              {recycleItems.map((h) => (
+                <div key={h.session_id} className="history-item">
+                  <SessionRowLeading
+                    adapter={adapterById.get(h.adapter_id)}
+                    st={"idle" as SessionStatus}
+                    isTerminal={h.kind === "terminal"}
+                  />
+                  <span className="history-open" title={h.session_id}>{h.title}</span>
+                  <button
+                    className="history-del"
+                    aria-label={`恢复会话 ${h.title}`}
+                    data-testid={`recycle-restore-${h.session_id}`}
+                    onClick={() => restoreFromRecycle(h.session_id)}
+                  >
+                    <RestoreIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* 全局 toast（sonner，右下 3s）：错误 / 复制成功提示（F-7-8） */}
       <Toaster

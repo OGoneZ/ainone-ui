@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openSession, type AcpSession } from "@/acp/session";
 import type * as acp from "@agentclientprotocol/sdk";
-import { type AskAnswer, type AskQuestion } from "../chat/logic/askCard";
+import { type AskAnswer, answersToContent, fieldsToQuestions, parseSchemaFields } from "../chat/logic/askCard";
 import { PlanBar } from "@/chat/components/PlanBar";
 import { FilePreview } from "@/sidebar/FilePreview";
 import { QueueDock } from "@/chat/components/QueueDock";
@@ -527,6 +527,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         (words: CommandWord[]) => setCommands(adapter.id, words),
         cwd,
         // F-12-2 结构化提问：把 Elicitation 请求转成 store 状态 → AskCard 渲染
+        // P30：schema 解析/键映射全部下沉 askCard.ts 纯函数（可单测防回归）——
+        // 回传 content 以 schema 原始属性键为键（question_<n>[_custom]），
+        // 桥的 per-question Other 字段并入所属题，不再渲染成独立问题
         async (params) => {
           // URL 模式 / 自定义模式本客户端不支持 → decline（不悬挂 agent）
           if (params.mode !== "form") {
@@ -536,33 +539,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           const schema = (params.requestedSchema ?? {}) as {
             properties?: Record<string, Record<string, unknown>>;
           };
-          const props = schema.properties ?? {};
-          // H11（F4）：记录每个字段的 schema 类型——AskCard 收集的是字符串，
-          // 提交前按类型转换成 ACP ElicitationContentValue 要求的原生类型
-          //（number/integer→数字，boolean→布尔），避免依赖 harness 容错。
-          const propTypes: Record<string, string> = {};
-          const questions: AskQuestion[] = Object.entries(props).map(([key, raw]) => {
-            const p = raw as {
-              title?: string | null;
-              type?: string;
-              enum?: string[] | null;
-              oneOf?: Array<{ const: string; title?: string }> | null;
-              items?: { enum?: string[] } | null;
-            };
-            const title = p.title ?? key;
-            propTypes[title] = p.type ?? "string";
-            if (p.type === "array") {
-              return { question: title, options: p.items?.enum ?? [], multi: true };
-            }
-            if (p.type === "string") {
-              const options = p.oneOf
-                ? p.oneOf.map((o) => o.title ?? o.const)
-                : (p.enum ?? []);
-              return { question: title, options, multi: false };
-            }
-            // number/integer/boolean → 自由文本输入（单选 Other 兜底渲染）
-            return { question: title, options: [], multi: false };
-          });
+          const fields = parseSchemaFields(schema.properties ?? {});
+          const questions = fieldsToQuestions(fields);
+          const propTypes: Record<string, string> = Object.fromEntries(
+            fields.filter((f) => !f.isCustomAnswer).map((f) => [f.title, f.type]),
+          );
           logger.info("chat", "ask-open", { questions: questions.length });
           patch(tabKey, { ask: { questions, mode: params.mode } });
           const answers = await new Promise<Record<string, AskAnswer> | null>((resolve) => {
@@ -574,22 +555,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             return { action: "decline" };
           }
           logger.info("chat", "ask-answer", { picked: Object.keys(answers).length });
-          // H11：按 schema 类型把字符串答案转回原生类型
-          const content: Record<string, unknown> = {};
-          for (const [q, a] of Object.entries(answers)) {
-            const t = propTypes[q] ?? "string";
-            if (Array.isArray(a)) {
-              content[q] = a;
-            } else if (t === "number" || t === "integer") {
-              const n = Number(a);
-              content[q] = Number.isFinite(n) ? n : a;
-            } else if (t === "boolean") {
-              content[q] = a === "true" || a === "是";
-            } else {
-              content[q] = a;
-            }
-          }
-          return { action: "accept", content };
+          return { action: "accept", content: answersToContent(questions, answers, propTypes) };
         },
       );
       sessionRef.current = s;

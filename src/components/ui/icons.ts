@@ -9,6 +9,7 @@
 // 注：lucide 已把 CheckCircle2 更名为 CircleCheck，此处按语义导出，映射表仍成立。
 
 import {
+  ArchiveRestore,
   ArrowRight,
   ArrowUp,
   BellRing,
@@ -84,6 +85,7 @@ export const SendIcon = ArrowUp; // 发送
 export const StopIcon = Square; // 停止
 export const ArrowRightIcon = ArrowRight; // 建议 prompt hover 箭头
 export const SwitchIcon = ArrowLeftRight; // P29 模型/URL 切换入口
+export const RestoreIcon = ArchiveRestore; // P30 回收站「恢复」按钮（箱中取出向上箭头）
 
 // 通用符号
 export const ChevronDownIcon = ChevronDown;
