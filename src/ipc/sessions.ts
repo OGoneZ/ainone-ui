@@ -12,6 +12,8 @@ export interface SessionEntry {
   workspace_id: string | null;
   /** 条目种类（P23）：terminal = 本地终端；缺省 = agent（旧索引无字段，兼容） */
   kind?: "agent" | "terminal";
+  /** 回收站标记（P30）：非空 = 已软删除（删除时刻 ms）；正常条目无此字段 */
+  deleted_at_ms?: number | null;
   mtime_ms: number;
 }
 
@@ -19,12 +21,28 @@ export async function sessionsList(): Promise<SessionEntry[]> {
   return invoke<SessionEntry[]>("sessions_list");
 }
 
+/** 回收站列表：只返回已软删除条目（最近删的在前） */
+export async function sessionsDeletedList(): Promise<SessionEntry[]> {
+  return invoke<SessionEntry[]>("sessions_deleted_list");
+}
+
 export async function sessionsUpsert(entry: SessionEntry): Promise<void> {
   await invoke("sessions_upsert", { entry });
 }
 
+/** 软删除：打 deleted_at_ms 标记（日志保留，可从回收站恢复） */
 export async function sessionsRemove(sessionId: string): Promise<void> {
   await invoke("sessions_remove", { sessionId });
+}
+
+/** 回收站恢复：清除软删除标记，条目回到侧栏 */
+export async function sessionsRestore(sessionId: string): Promise<void> {
+  await invoke("sessions_restore", { sessionId });
+}
+
+/** 回收站永久删除：从索引移除（JSONL 日志文件不动） */
+export async function sessionsPurge(sessionId: string): Promise<void> {
+  await invoke("sessions_purge", { sessionId });
 }
 
 /** 读回某会话的日志全量文本（不存在返回空串） */

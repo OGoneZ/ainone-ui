@@ -167,7 +167,9 @@ describe("F-12-2 提问卡数据流", () => {
 
     const resp = await promise;
     expect(resp.action).toBe("accept");
-    expect((resp as any).content).toEqual({ "用哪个方案？": "方案 B" });
+    // P30 键契约：回传以 schema 原始属性键为键（choice），不是问题标题——
+    // claude-agent-acp 桥按原始键回读，标题键会全 miss 被判「未回答」
+    expect((resp as any).content).toEqual({ choice: "方案 B" });
     // 卡片退出
     await waitFor(() => expect(screen.queryByTestId("ask-card")).not.toBeInTheDocument());
   });

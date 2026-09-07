@@ -3,7 +3,9 @@
 // Enter 确认（第一步=进第二步，第二步=创建）；↑↓ 移动列表高亮。
 // 每步列表只放业务选项（第二步尾部保留「新建工作区」），不放步骤操作项。
 // 鼠标：点选项仅选中（可改选），推进/回退用底部按钮。
-// 右键工作区「新建会话」时 presetWorkspaceId 预填，直接落在第二步。
+// 右键工作区「新建会话」时 presetWorkspaceId 预填工作目录：仍停在第一步选 harness，
+// 选好后「开始对话」直达创建（第二步不出现）——修复旧缺陷（直落第二步跳过 harness
+// 且自动选第一个默认值）。
 // P7 外壳迁 shadcn Dialog；P25 改 cmdk；P26 两步向导；P26c 左右键换步 + 删操作面板。
 // P28 三态：installable（懒装桥可装）不再灰掉——点「开始对话」先走安装（进度行
 // 展示安装器输出），装成再创建会话；absent 才禁用并说明缺什么。
@@ -51,7 +53,9 @@ export function NewSessionModal({
   const [installingCli, setInstallingCli] = useState(false);
   const [installTail, setInstallTail] = useState("");
   const [installError, setInstallError] = useState<string | null>(null);
-  // P26 两步向导：harness=选框架；workspace=选目录（presetWorkspaceId 存在时直接进第二步）
+  // P26 两步向导：harness=选框架；workspace=选目录。
+  // presetWorkspaceId 只预填工作目录，不跳步——用户仍需自选 harness（旧逻辑
+  // 「直落第二步」会跳过 harness 选型并自动用第一个默认值，属缺陷）。
   const [step, setStep] = useState<"harness" | "workspace">("harness");
   // P26b：cmdk root ref——无输入框模式下方向键监听在 root 的 onKeyDown，
   // root 必须持焦点方向键才可达（Dialog 默认把焦点给容器，真机实测高亮不动）
@@ -71,7 +75,7 @@ export function NewSessionModal({
     setAdapterId(adapters[0]?.id ?? "");
     setLocalWs(workspaces);
     setWorkspaceId(presetWorkspaceId !== undefined ? presetWorkspaceId : (workspaces[0]?.id ?? null));
-    setStep(presetWorkspaceId !== undefined ? "workspace" : "harness");
+    setStep("harness");
     setInstalling(false);
     setInstallingCli(false);
     setInstallError(null);
@@ -187,30 +191,34 @@ export function NewSessionModal({
   // P26c：左右键换步——cmdk root 的 onKeyDown 层处理（root 持焦点时可达）。
   // → 进第二步；← 在第二步回第一步。
   // P26d：↑↓ 移高亮时同步选中（受控 value=当前选中项；onValueChange 回写），
-  // Enter 语义 = 步骤直达：第一步进第二步、第二步确认创建（高亮在
-  // 「新建工作区」上时除外——那次 Enter 交给 cmdk 走选目录）。
+  // Enter 语义 = 步骤直达：第一步进第二步（presetWorkspaceId 预填时直达创建）、
+  // 第二步确认创建（高亮在「新建工作区」上时除外——那次 Enter 交给 cmdk 走选目录）。
   const onStepNavKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.defaultPrevented) return;
     if (e.key === "ArrowRight" && step === "harness") {
       e.preventDefault();
-      goNext();
+      if (presetWorkspaceId !== undefined) confirm();
+      else goNext();
     } else if (e.key === "ArrowLeft" && step === "workspace") {
       e.preventDefault();
       goBack();
     } else if (e.key === "Enter") {
       // 高亮项语义：
       //   第一步 harness 项 → cmdk onSelect 已选中，这里直接进第二步
+      //   （presetWorkspaceId 预填时直达创建）
       //   第二步工作区项 → 直接确认创建
       //   第二步「新建工作区」项 → 不拦截，cmdk onSelect 打开目录选择
       const highlight = (e.currentTarget as HTMLElement).querySelector('[cmdk-item][aria-selected="true"]');
       const v = highlight?.getAttribute("data-value") ?? "";
       if (v === "ns-new-ws") return;
       e.preventDefault();
-      if (step === "harness") goNext();
-      else confirm();
+      if (step === "harness") {
+        if (presetWorkspaceId !== undefined) confirm();
+        else goNext();
+      } else confirm();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, adapterId, workspaceId, creating]);
+  }, [step, adapterId, workspaceId, creating, presetWorkspaceId]);
 
   // ↑↓ 高亮即选中：从 cmdk 受控 value 回调同步业务选中
   function onHarnessValueChange(v: string) {
@@ -324,7 +332,7 @@ export function NewSessionModal({
           </Command>
         )}
 
-        {step === "workspace" && installing && (
+        {installing && (
           <div className="ns-hint" role="status" data-testid="ns-install-progress">
             <p>
               {installingCli
@@ -338,7 +346,7 @@ export function NewSessionModal({
             )}
           </div>
         )}
-        {step === "workspace" && installError && (
+        {installError && (
           <p className="ns-hint bad" data-testid="ns-install-error">
             {installingCli ? "CLI 安装失败" : "桥接器安装失败"}：{installError}
           </p>
@@ -374,9 +382,16 @@ export function NewSessionModal({
             </button>
           )}
           {step === "harness" ? (
-            <button onClick={goNext} disabled={!adapterId} data-testid="ns-next-btn">
-              下一步
-            </button>
+            presetWorkspaceId !== undefined ? (
+              // presetWorkspaceId 已预填工作目录——第二步不出现，选好 harness 直达创建
+              <button onClick={confirm} disabled={!adapterId || creating || installing} data-testid="ns-confirm-btn">
+                {installing ? "安装桥接器中…" : "开始对话"}
+              </button>
+            ) : (
+              <button onClick={goNext} disabled={!adapterId} data-testid="ns-next-btn">
+                下一步
+              </button>
+            )
           ) : (
             <button onClick={confirm} disabled={!adapterId || creating || installing} data-testid="ns-confirm-btn">
               {installing ? "安装桥接器中…" : "开始对话"}

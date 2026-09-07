@@ -559,6 +559,50 @@ fn progress_line(on_event: &Option<Channel<CliInstallEvent>>, line: &str) {
     }
 }
 
+/// 清洗安装器输出行（UI 尾迹展示用）：
+/// 1) 剥离 ANSI 转义序列（\x1b[…m 颜色/样式、\x1b]…\x07 标题等）——脚本在
+///    非 TTY 下也常打印颜色码，WebView 里渲染为乱码；
+/// 2) 丢弃行首孤立 "-e " 前缀——脚本用 `echo -e`，dash/sh 不支持 -e 时把
+///    "-e" 当字面量打出来（opencode 安装脚本实测出现）；
+/// 3) 去掉 \r 前的旧内容（spinner/进度条行：`xxx\ryyy` 只留 yyy）。
+fn sanitize_progress_line(line: &str) -> String {
+    // \r 处理：取最后一个 \r 之后的内容（进度条刷新语义 = 覆盖前行）
+    let line = match line.rfind('\r') {
+        Some(i) => &line[i + 1..],
+        None => line,
+    };
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // CSI 序列：\x1b[ … 直到字母；OSC：\x1b] … 直到 \x07 或 \x1b\\
+            if let Some(&n) = chars.peek() {
+                if n == '[' {
+                    for c2 in chars.by_ref() {
+                        if c2.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                if n == ']' {
+                    for c2 in chars.by_ref() {
+                        if c2 == '\x07' {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                continue; // 其他单字符转义（\x1b\\ 等）直接丢弃
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    let t = out.trim();
+    t.strip_prefix("-e ").unwrap_or(t).to_string()
+}
+
 /// 跑一轮安装进程：逐行转发输出（stdout/stderr 合流语义由安装器保证，
 /// 这里两路各自转发），15 分钟超时 kill，退出码非零报错。
 /// 与 run_install（桥安装）的差异：argv 直接给定、失败不清理、事件类型为 CliInstallEvent。
@@ -587,11 +631,11 @@ async fn run_argv(
         use tokio::io::BufReader;
         let mut lines = BufReader::new(r).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            let t = line.trim();
+            let t = sanitize_progress_line(&line);
             if t.is_empty() {
                 continue;
             }
-            progress_line(on_event, t);
+            progress_line(on_event, &t);
         }
     }
     let read_loop = async {
@@ -717,5 +761,25 @@ mod tests {
         // claude 只有脚本候选 → 恒 installable（缺 curl/sh 由执行层报）
         let claude = cli_spec("claude").unwrap();
         assert!(cli_installable(claude, false, false));
+    }
+
+    #[test]
+    fn sanitize_strips_ansi_and_e_prefix() {
+        // 实机观察：opencode 安装脚本在非 TTY 下仍打印 ANSI 颜色 + `echo -e` 被
+        // sh 当字面量打出 "-e " 前缀
+        assert_eq!(
+            sanitize_progress_line("\x1b[32m\x1b[0mInstalling opencode version: 1.18.29"),
+            "Installing opencode version: 1.18.29"
+        );
+        // 行首 -e 前缀（echo -e 降级为字面量）
+        assert_eq!(sanitize_progress_line("-e Installing opencode…"), "Installing opencode…");
+        // 正常文本不受影响
+        assert_eq!(sanitize_progress_line("bun add v1.3.14"), "bun add v1.3.14");
+        // 纯转义行 → 空（上层过滤空行）
+        assert_eq!(sanitize_progress_line("\x1b[36m\x1b[0m"), "");
+        // \r 刷新语义：留最后一段
+        assert_eq!(sanitize_progress_line("10%\r\n25%\r50%"), "50%");
+        // OSC 标题序列
+        assert_eq!(sanitize_progress_line("\x1b]0;title\x07done"), "done");
     }
 }

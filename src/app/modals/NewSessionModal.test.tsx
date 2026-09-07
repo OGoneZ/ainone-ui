@@ -218,7 +218,8 @@ describe("NewSessionModal（P26c 两步向导）", () => {
     expect(onConfirm).toHaveBeenCalledWith("omp", "ws-1", "/Users/me/dev");
   });
 
-  it("presetWorkspaceId 预填：直落第二步且对应工作区带 ✓", () => {
+  it("presetWorkspaceId 预填：仍从第一步选 harness，工作区已预选（开始对话直达创建）", async () => {
+    const onConfirm = vi.fn();
     render(
       <NewSessionModal
         open={true}
@@ -226,12 +227,35 @@ describe("NewSessionModal（P26c 两步向导）", () => {
         workspaces={workspaces}
         presetWorkspaceId="ws-1"
         onClose={() => {}}
-        onConfirm={vi.fn()}
+        onConfirm={onConfirm}
       />,
     );
-    expect(screen.getByText(/选择工作目录/)).toBeInTheDocument();
-    const dev = screen.getByText("dev").closest("[cmdk-item]");
-    expect(dev?.querySelector(".ns-item-check")).toBeTruthy();
+    // 不再跳过 harness：先选 harness（旧缺陷是直落第二步 + 自动选第一个默认值）
+    expect(screen.getByText(/选择 Harness/)).toBeInTheDocument();
+    expect(screen.queryByText(/选择工作目录/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("ns-confirm-btn")).toBeInTheDocument(); // 开始对话（非下一步）
+    expect(screen.queryByTestId("ns-next-btn")).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Pi"));
+    await user.click(screen.getByTestId("ns-confirm-btn"));
+    // 工作区用预填的 ws-1，未经过第二步
+    expect(onConfirm).toHaveBeenCalledWith("pi", "ws-1", "/Users/me/dev");
+  });
+
+  it("presetWorkspaceId 预填：键盘 Enter 在第一步直达创建（工作区取预填值）", async () => {
+    const onConfirm = vi.fn();
+    render(
+      <NewSessionModal
+        open={true}
+        adapters={adapters}
+        workspaces={workspaces}
+        presetWorkspaceId="ws-1"
+        onClose={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+    pressKey(document.body, "Enter");
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalledWith("omp", "ws-1", "/Users/me/dev"));
   });
 
   it("第二步新建工作区：选不存在目录 → upsert + onWorkspaceCreated；确认创建携带新工作区", async () => {
@@ -243,13 +267,13 @@ describe("NewSessionModal（P26c 两步向导）", () => {
         open={true}
         adapters={adapters}
         workspaces={workspaces}
-        presetWorkspaceId="ws-1"
         onClose={() => {}}
         onConfirm={onConfirm}
         onWorkspaceCreated={onCreated}
       />,
     );
     const user = userEvent.setup();
+    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByText(/新建工作区/));
     await vi.waitFor(() => expect(upsert).toHaveBeenCalled());
     expect(onCreated).toHaveBeenCalled();
@@ -265,13 +289,13 @@ describe("NewSessionModal（P26c 两步向导）", () => {
         open={true}
         adapters={adapters}
         workspaces={workspaces}
-        presetWorkspaceId="ws-1"
         onClose={() => {}}
         onConfirm={vi.fn()}
         onWorkspaceCreated={onCreated}
       />,
     );
     const user = userEvent.setup();
+    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByText(/新建工作区/));
     expect(upsert).not.toHaveBeenCalled();
     expect(onCreated).not.toHaveBeenCalled();
@@ -312,11 +336,9 @@ describe("NewSessionModal（P26c 两步向导）", () => {
         onAdaptersRefresh={onRefresh}
       />,
     );
-    // 选 Pi（presetWorkspaceId 直落第二步 → 先回第一步换 harness）
+    // 选 Pi（presetWorkspaceId 只预填工作区，仍在第一步选 harness）
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("ns-back-btn"));
     await user.click(screen.getByText("Pi"));
-    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByTestId("ns-confirm-btn"));
     // 安装中：进度行 + 安装器输出尾迹回显，未建会话
     await waitFor(() => expect(installBridge).toHaveBeenCalledWith("pi-acp", expect.any(Function)));
@@ -345,9 +367,7 @@ describe("NewSessionModal（P26c 两步向导）", () => {
       />,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("ns-back-btn"));
     await user.click(screen.getByText("Pi"));
-    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByTestId("ns-confirm-btn"));
     await waitFor(() => expect(screen.getByTestId("ns-install-error")).toBeInTheDocument());
     expect(screen.getByText(/连接器安装失败/)).toBeInTheDocument();
@@ -423,12 +443,7 @@ describe("NewSessionModal（P26c 两步向导）", () => {
       return Promise.resolve();
     });
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("ns-back-btn"));
     await user.click(screen.getByText("OpenCode"));
-    await user.click(screen.getByTestId("ns-next-btn"));
-    // presetWorkspaceId 预填的是 ws-1；回第一步换 harness 后需重选工作区
-    // （cmdk 受控 value 回调 ws-none 在 localWs 就绪前触发过一次，workspaceId 为 null）
-    await user.click(screen.getByText("dev"));
     await user.click(screen.getByTestId("ns-confirm-btn"));
     // mock 立即 resolve，瞬态进度行无法稳定捕获——串联顺序以调用序为准
     await waitFor(() => expect(installCli).toHaveBeenCalledWith("opencode", expect.any(Function)));
@@ -473,9 +488,7 @@ describe("NewSessionModal（P26c 两步向导）", () => {
       return Promise.resolve();
     });
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("ns-back-btn"));
     await user.click(screen.getByText("OpenCode"));
-    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByTestId("ns-confirm-btn"));
     await waitFor(() => expect(screen.getByTestId("ns-install-error")).toBeInTheDocument());
     expect(screen.getByText(/桥接器安装失败/)).toBeInTheDocument();
@@ -498,9 +511,7 @@ describe("NewSessionModal（P26c 两步向导）", () => {
       />,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("ns-back-btn"));
     await user.click(screen.getByText("OpenCode"));
-    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByTestId("ns-confirm-btn"));
     await waitFor(() => expect(screen.getByTestId("ns-install-error")).toBeInTheDocument());
     expect(screen.getByText(/CLI 安装失败/)).toBeInTheDocument();

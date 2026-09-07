@@ -22,6 +22,23 @@ vi.mock("@/ipc/quickask", () => ({
   quickAskConfigSave: vi.fn().mockResolvedValue(undefined),
 }));
 
+// P29 S6：ModelSwitchPanel 依赖 sonner toast 与 logger（jsdom 无 Tauri 运行时）
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+vi.mock("@/lib/logger", () => ({
+  logger: { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+// ModelSwitchPanel 走 @/ipc/harnessMeta 的探测/写回（可编程 mock）
+vi.mock("@/ipc/harnessMeta", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/ipc/harnessMeta")>();
+  return {
+    ...mod,
+    probeModels: vi.fn(),
+    writeHarnessSettings: vi.fn(),
+  };
+});
+
 const ADAPTERS = [
   { id: "omp", name: "Oh My Pi", program: "omp", args: ["acp"], cwd: ".", logo: "#7c3aed" },
   { id: "codex", name: "Codex", program: "codex-acp", args: [], cwd: ".", logo: "#16a34a" },
@@ -257,6 +274,23 @@ describe("P29 设置页卡片化", () => {
     expect(saveCall).toBeTruthy();
     expect(saveCall!.args.input.model).toBe("new-model");
   });
+
+  it("P29 S6：配置模型表单有 endpoint 时出现「探测可用模型」入口，点击弹出 ModelSwitchPanel", async () => {
+    const { probeModels, writeHarnessSettings } = await import("@/ipc/harnessMeta");
+    vi.mocked(probeModels).mockResolvedValue(["m-a", "m-b"]);
+    vi.mocked(writeHarnessSettings).mockResolvedValue({ path: "/p/settings.json", backup: "/p/settings.json.ainone-bak" });
+    mockTauriIpc({ handlers: p29Handlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("cfg-toggle-omp"));
+    await vi.waitFor(() => expect(screen.getByTestId("cfg-probe-omp")).toBeInTheDocument());
+    // 打开面板 → ModelSwitchPanel 打开即探测
+    await user.click(screen.getByTestId("cfg-probe-omp"));
+    await vi.waitFor(() => expect(probeModels).toHaveBeenCalledWith("omp", "https://old.example.com"));
+    // 模型列表出现
+    await vi.waitFor(() => expect(screen.getByText("m-b")).toBeInTheDocument());
+  });
 });
 
 describe("Dialog 点遮罩关闭（P26 WKWebView mousedown 兜底）", () => {
@@ -280,5 +314,72 @@ describe("Dialog 点遮罩关闭（P26 WKWebView mousedown 兜底）", () => {
     Object.defineProperty(click, "target", { value: target });
     document.dispatchEvent(click);
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+// —— P30 权限模式开关（仅 claude-code）：读回显 + 切换写 settings.json 单键 ——
+
+const CLAUDE_ADAPTER = [
+  { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: "#d97706" },
+];
+
+function permHandlers(mode: unknown) {
+  return {
+    adapters_list: () => CLAUDE_ADAPTER,
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/bin/claude-agent-acp", source: "Home", bridge: null, cli: null, auth: { state: "subscription", detail: "已登录订阅" } }),
+    permission_mode_read: () => mode,
+    permission_mode_save: (a: { mode: string }) => `/Users/x/.claude/settings.json (mode=${a.mode})`,
+  };
+}
+
+describe("P30 权限模式开关", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(cleanup);
+
+  it("claude-code 卡片渲染开关；settings 已是 auto → 开关为关", async () => {
+    mockTauriIpc({ handlers: permHandlers("auto") });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const sw = await screen.findByTestId("perm-switch-claude-code");
+    expect(sw).toHaveAttribute("data-state", "unchecked");
+    expect(screen.getByText(/defaultMode=auto/)).toBeInTheDocument();
+  });
+
+  it("未配置 defaultMode（null）→ 开关默认为开（bypass）", async () => {
+    mockTauriIpc({ handlers: permHandlers(null) });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const sw = await screen.findByTestId("perm-switch-claude-code");
+    expect(sw).toHaveAttribute("data-state", "checked");
+  });
+
+  it("切换开 → permission_mode_save(bypassPermissions)；切回关 → save(auto)", async () => {
+    const calls = mockTauriIpc({ handlers: permHandlers("auto") });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const sw = await screen.findByTestId("perm-switch-claude-code");
+    expect(sw).toHaveAttribute("data-state", "unchecked");
+    // 关 → 开：写 bypassPermissions
+    await userEvent.setup().click(sw);
+    expect(calls.find((c) => c.cmd === "permission_mode_save")?.args.mode).toBe("bypassPermissions");
+    expect(await screen.findByText(/已写入/)).toBeInTheDocument();
+    // 开 → 关：写回 auto
+    await userEvent.setup().click(screen.getByTestId("perm-switch-claude-code"));
+    const saves = calls.filter((c) => c.cmd === "permission_mode_save");
+    expect(saves).toHaveLength(2);
+    expect(saves[1].args.mode).toBe("auto");
+  });
+
+  it("非 claude-code 卡片不渲染开关", async () => {
+    mockTauriIpc({
+      handlers: {
+        ...defaultHandlers(),
+        permission_mode_read: () => null,
+      },
+    });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    await screen.findByText("Oh My Pi");
+    await screen.findByText("Codex");
+    expect(screen.queryByTestId("perm-switch-omp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("perm-switch-codex")).not.toBeInTheDocument();
   });
 });

@@ -77,13 +77,31 @@ pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, Str
         }
         "codex" => {
             let Ok(doc) = raw.parse::<toml_edit::DocumentMut>() else { return empty };
+            // 优先 ainone provider（应用代写）；无则按 model_provider 活跃值 → 首个 provider
+            // （用户自配的 provider 名各异——回显应显示用户真实在用的 endpoint）
             let endpoint = doc
                 .get("model_providers")
                 .and_then(|p| p.get("ainone"))
                 .and_then(|p| p.get("base_url"))
                 .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
+                .map(String::from)
+                .or_else(|| {
+                    let active = doc
+                        .get("model_provider")
+                        .and_then(|p| p.as_str())
+                        .map(String::from)
+                        .or_else(|| {
+                            doc.get("model_providers")
+                                .and_then(|p| p.as_table())
+                                .and_then(|t| t.iter().next().map(|(k, _)| k.to_string()))
+                        })?;
+                    doc.get("model_providers")
+                        .and_then(|p| p.get(&active))
+                        .and_then(|p| p.get("base_url"))
+                        .and_then(|x| x.as_str())
+                        .map(String::from)
+                })
+                .unwrap_or_default();
             let model = doc.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
             // codex key 是否已存：命令层拿得到 AppHandle 时查 keys.json，
             // 这里（无 AppHandle 上下文的读路径）以 keys 环境注入检查兜底。
@@ -96,13 +114,9 @@ pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, Str
             read_pi_provider(&v)
         }
         "omp" => {
-            // YAML 结构与 pi 的 JSON 同构；简单键提取（无 serde_yaml 依赖的轻量解析）
-            let endpoint = yaml_get(raw, &["providers", "ainone", "baseUrl"]);
-            let model = yaml_get(raw, &["providers", "ainone", "models", "0", "id"]);
-            let has_key = yaml_get(raw, &["providers", "ainone", "apiKey"])
-                .trim()
-                .len() > 3; // 占位符 "ollama" 也算已配置
-            (endpoint, has_key, model)
+            // YAML 与 pi 的 JSON 同构；扫 providers 下各层的 baseUrl/apiKey/model id，
+            // ainone 优先、无则首个含 baseUrl 的 provider（用户自配名各异，S6 反馈缺陷）
+            yaml_providers_scan(raw)
         }
         "opencode" => {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else { return empty };
@@ -143,28 +157,55 @@ fn codex_key_present() -> bool {
 }
 
 fn read_pi_provider(v: &serde_json::Value) -> (String, bool, String) {
-    let provider = v.get("providers").and_then(|p| p.get("ainone"));
-    let endpoint = provider
-        .and_then(|p| p.get("baseUrl"))
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .to_string();
-    let has_key = provider
-        .and_then(|p| p.get("apiKey"))
-        .and_then(|x| x.as_str())
-        .is_some_and(|s| !s.trim().is_empty());
-    let model = provider
-        .and_then(|p| p.get("models"))
-        .and_then(|m| m.as_array())
-        .and_then(|a| a.first())
-        .and_then(|m| m.get("id"))
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .to_string();
-    (endpoint, has_key, model)
+    read_provider_fallback(v.get("providers"), "baseUrl", "apiKey")
 }
 
-/// 极简 YAML 点路径读取（key: value 两层内嵌套；只服务 omp 回显，不追求完备）。
+/// 通用 provider 读取（pi JSON / omp YAML 同构）：优先 ainone（应用代写），
+/// 无则取**首个含 baseUrl 的 provider**——用户自配 provider 名各异
+/// （本机 omp 配的是 "zhubaoduo"），只认 ainone 会让回显全空（S6 反馈缺陷）。
+/// YAML 分支传预解析的扁平行映射，JSON 分支传 serde Value；此处统一收 JSON 树。
+fn read_provider_fallback(
+    providers: Option<&serde_json::Value>,
+    url_key: &str,
+    key_field: &str,
+) -> (String, bool, String) {
+    let empty = (String::new(), false, String::new());
+    let Some(map) = providers.and_then(|p| p.as_object()) else { return empty };
+    // 候选序：ainone 在前（应用代写值最可信），其余按文件序
+    let mut names: Vec<&String> = Vec::new();
+    if let Some(k) = map.keys().find(|k| k.as_str() == "ainone") {
+        names.push(k);
+    }
+    for k in map.keys() {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        let p = &map[name];
+        let endpoint = p.get(url_key).and_then(|x| x.as_str()).unwrap_or("");
+        if endpoint.trim().is_empty() {
+            continue;
+        }
+        let has_key = p
+            .get(key_field)
+            .and_then(|x| x.as_str())
+            .is_some_and(|s| !s.trim().is_empty());
+        let model = p
+            .get("models")
+            .and_then(|m| m.as_array())
+            .and_then(|a| a.first())
+            .and_then(|m| m.get("id"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        return (endpoint.to_string(), has_key, model);
+    }
+    empty
+}
+
+/// 极简 YAML 点路径读取（key: value 两层内嵌套；测试用——生产回显走 yaml_providers_scan）。
+#[cfg(test)]
 fn yaml_get(raw: &str, path: &[&str]) -> String {
     let mut indent_stack: Vec<(usize, String)> = Vec::new();
     for line in raw.lines() {
@@ -204,6 +245,84 @@ fn yaml_get(raw: &str, path: &[&str]) -> String {
         }
     }
     String::new()
+}
+
+/// omp models.yml 的 providers 扫描：逐行解析 `providers:` 下各 provider 块的
+/// baseUrl / apiKey / models 首项 id；ainone 优先，否则首个含 baseUrl 的 provider。
+/// 不追求完整 YAML 语义——只服务回显（写入走受控同构生成）。
+fn yaml_providers_scan(raw: &str) -> (String, bool, String) {
+    struct P {
+        base_url: String,
+        has_key: bool,
+        model: String,
+    }
+    let mut order: Vec<String> = Vec::new();
+    let mut blocks: std::collections::HashMap<String, P> = std::collections::HashMap::new();
+    let mut cur: Option<(usize, String)> = None; // (缩进, provider名)
+    let mut in_models = false;
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+        let Some((key_raw, value_raw)) = trimmed.split_once(':') else { continue };
+        let key = key_raw.trim().trim_start_matches("- ").trim();
+        let value = value_raw.trim().trim_matches('"').trim_matches('\'');
+        if key == "providers" {
+            in_models = false;
+            continue;
+        }
+        // 进入某个 provider 块（缩进比 providers 深一层、且值内无 baseUrl 等键）
+        if indent > 0 && !key.is_empty() && !value.is_empty() || key == "models" {
+            // providers 下第一层 = provider 名（"  zhubaoduo:" 值为空）
+        }
+        if indent >= 2 && value.is_empty() && key != "models" && !key.starts_with('#') {
+            // 可能是 provider 名行（如 "  ainone:"）也可能是子键（"  models:" 已排除）
+            if raw.contains(&format!("{}:", key)) && blocks.contains_key(key) || is_provider_name(raw, key) {
+                cur = Some((indent, key.to_string()));
+                order.push(key.to_string());
+                blocks.entry(key.to_string()).or_insert(P { base_url: String::new(), has_key: false, model: String::new() });
+                in_models = false;
+                continue;
+            }
+        }
+        let Some((_, name)) = cur.as_ref() else { continue };
+        let b = blocks.get_mut(name).unwrap();
+        match key {
+            "baseUrl" if b.base_url.is_empty() => b.base_url = value.to_string(),
+            "apiKey" if !value.is_empty() => b.has_key = true,
+            "id" if b.model.is_empty() && in_models => b.model = value.to_string(),
+            "models" => in_models = true,
+            _ => {}
+        }
+    }
+    fn is_provider_name(raw: &str, key: &str) -> bool {
+        // provider 名行的特征：出现 `  <key>:`（两空格缩进）且后面跟 baseUrl
+        raw.lines().any(|l| {
+            let t = l.trim_start();
+            (t.starts_with(&format!("{key}:")) || t.starts_with(&format!("- {key}:")))
+                && (l.starts_with("  ") || l.starts_with("\t"))
+        })
+    }
+    // ainone 优先，否则首个含 baseUrl 的
+    let mut names: Vec<&String> = Vec::new();
+    if order.iter().any(|k| k == "ainone") {
+        names.push(order.iter().find(|k| k.as_str() == "ainone").unwrap());
+    }
+    for k in &order {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        if let Some(b) = blocks.get(name) {
+            if !b.base_url.is_empty() {
+                return (b.base_url.clone(), b.has_key, b.model.clone());
+            }
+        }
+    }
+    (String::new(), false, String::new())
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +540,73 @@ pub fn harness_config_save(app: tauri::AppHandle, input: HarnessConfigInput) -> 
     Ok(path.to_string_lossy().into_owned())
 }
 
+// ---------------------------------------------------------------------------
+// P30 权限模式开关（仅 claude-code）：settings.json 的 permissions.defaultMode 单键合并写
+// ---------------------------------------------------------------------------
+
+/// 开关支持的两种模式（用户认可的语义）：
+///   bypass = "bypassPermissions"（全部工具直接放行，无分类器——auto 模式依赖的
+///            权限分类器在模型通道故障时会拦死所有 Bash，这是加此开关的根因）
+///   auto   = "auto"（Claude 自动判权限，依赖分类器）
+pub const PERMISSION_MODE_BYPASS: &str = "bypassPermissions";
+pub const PERMISSION_MODE_AUTO: &str = "auto";
+
+/// 纯函数：读 settings.json 文本里的 permissions.defaultMode（缺失/损坏 → None）。
+pub fn read_permission_mode(raw: Option<&str>) -> Option<String> {
+    let raw = raw?;
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    v.get("permissions")?
+        .get("defaultMode")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// 纯函数：合并写 permissions.defaultMode 单键（无则创建 permissions 对象）。
+/// 其余键/键序逐字节不动（json_merge_set preserve_order）。损坏 JSON → Err 不写盘。
+pub fn write_permission_mode(raw: Option<&str>, mode: &str) -> Result<String, String> {
+    let base_raw = raw.unwrap_or("{}");
+    json_merge_set(base_raw, &[("permissions.defaultMode", serde_json::Value::String(mode.into()))])
+}
+
+/// 读取当前权限模式回显（开关初值；未配置 → None → 前端按默认开渲染）。
+#[tauri::command]
+pub fn permission_mode_read(app: tauri::AppHandle, adapter_id: String) -> Result<Option<String>, String> {
+    if adapter_id != "claude-code" {
+        return Ok(None);
+    }
+    let home = home_dir()?;
+    let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
+    let raw = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
+    Ok(read_permission_mode(raw.as_deref()))
+}
+
+/// 保存权限模式（开 = bypassPermissions，关 = auto；前端限制二值，后端再校验白名单）。
+/// 单键合并写 + 写前备份（与其他配置代写同一纪律）。
+#[tauri::command]
+pub fn permission_mode_save(app: tauri::AppHandle, adapter_id: String, mode: String) -> Result<String, String> {
+    if adapter_id != "claude-code" {
+        return Err(format!("{adapter_id} 不支持权限模式开关"));
+    }
+    if mode != PERMISSION_MODE_BYPASS && mode != PERMISSION_MODE_AUTO {
+        return Err(format!("不支持的权限模式: {mode}"));
+    }
+    let home = home_dir()?;
+    let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    }
+    let existing = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
+    // 损坏文件报错不覆盖（与配置代写同一纪律）
+    let new_text = write_permission_mode(existing.as_deref(), &mode)?;
+    if existing.is_some() {
+        let bak = path.with_extension("ainone-bak");
+        std::fs::copy(&path, &bak).map_err(|e| format!("备份失败: {e}"))?;
+    }
+    std::fs::write(&path, new_text).map_err(|e| format!("写入配置失败: {e}"))?;
+    log::info!("[harness-config] {} permissions.defaultMode → {mode}（{}）", adapter_id, path.display());
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,7 +781,8 @@ base_url = "https://old/v1"
         assert_eq!(model, "pm");
 
         let (ep, _, model) = read_view_text("codex", Some(CODEX_TOML));
-        assert_eq!(ep, ""); // 旧文件无 ainone provider → 空
+        // 无 ainone provider → 回落读活跃 provider（model_provider="codex"）的 base_url
+        assert_eq!(ep, "https://old/v1");
         assert_eq!(model, "gpt-5.4");
 
         let (_, has_key, _) = read_view_text("codex", Some(CODEX_TOML));
@@ -605,6 +792,30 @@ base_url = "https://old/v1"
         // 缺失/损坏 → 全空
         assert_eq!(read_view_text("pi", None), (String::new(), false, String::new()));
         assert_eq!(read_view_text("pi", Some("junk")), (String::new(), false, String::new()));
+    }
+
+    #[test]
+    fn read_view_falls_back_to_user_provider() {
+        // S6 反馈缺陷回归：用户自配 provider 名各异（omp 配的是 "zhubaoduo"），
+        // 只认 ainone 会让回显全空 → 应回落到首个含 baseUrl 的 provider
+        let omp_yaml = "providers:\n  zhubaoduo:\n    type: openai\n    api: openai-completions\n    baseUrl: https://token.zhubaoduo.com/v1\n    apiKey: sk-user\n    models:\n      - id: duo-king-6.6\n        context: 128000\n";
+        let (ep, has_key, model) = read_view_text("omp", Some(omp_yaml));
+        assert_eq!(ep, "https://token.zhubaoduo.com/v1");
+        assert!(has_key);
+        assert_eq!(model, "duo-king-6.6");
+
+        // pi 同理：自配 provider 名 → 回落读出
+        let pi_json = r#"{"providers":{"my-gw":{"baseUrl":"https://mygw/v1","apiKey":"sk","models":[{"id":"m1"}]}}}"#;
+        let (ep, has_key, model) = read_view_text("pi", Some(pi_json));
+        assert_eq!(ep, "https://mygw/v1");
+        assert!(has_key);
+        assert_eq!(model, "m1");
+
+        // ainone 与用户自配并存 → 优先 ainone（应用代写值最可信）
+        let both = r#"{"providers":{"my-gw":{"baseUrl":"https://mygw/v1"},"ainone":{"baseUrl":"https://ainone/v1","apiKey":"sk","models":[{"id":"m2"}]}}}"#;
+        let (ep, _, model) = read_view_text("pi", Some(both));
+        assert_eq!(ep, "https://ainone/v1");
+        assert_eq!(model, "m2");
     }
 
     #[test]
@@ -619,5 +830,67 @@ base_url = "https://old/v1"
             "/h/.codex/config.toml"
         );
         assert!(config_file_for("custom-x", home).is_none());
+    }
+
+    // ---------------- P30 权限模式开关（回归：单键合并写不动其他键） ----------------
+
+    #[test]
+    fn permission_mode_read_detects_existing_value() {
+        assert_eq!(
+            read_permission_mode(Some(r#"{"permissions":{"defaultMode":"auto"},"model":"m"}"#)),
+            Some("auto".into())
+        );
+        // 无 permissions 对象 → None（前端按默认开渲染）
+        assert_eq!(read_permission_mode(Some(r#"{"model":"m"}"#)), None);
+        // 损坏 JSON → None（不 panic）
+        assert_eq!(read_permission_mode(Some("{broken")), None);
+        assert_eq!(read_permission_mode(None), None);
+    }
+
+    #[test]
+    fn permission_mode_write_creates_when_missing() {
+        // 键不存在 → 创建 permissions.defaultMode（用户「没有就新增」的诉求）
+        let out = write_permission_mode(Some(r#"{"cleanupPeriodDays":30,"model":"m"}"#), PERMISSION_MODE_BYPASS).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["permissions"]["defaultMode"], "bypassPermissions");
+        assert_eq!(v["model"], "m", "无关键必须保留");
+        assert_eq!(v["cleanupPeriodDays"], 30);
+        // 全新文件（None）→ 最小合法 JSON
+        let out2 = write_permission_mode(None, PERMISSION_MODE_AUTO).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
+        assert_eq!(v2["permissions"]["defaultMode"], "auto");
+    }
+
+    #[test]
+    fn permission_mode_write_replaces_only_target_key() {
+        // 用户「有就修改那一个键」：替换 defaultMode，permissions 内其他键（allow/deny）与
+        // 顶层键（env/hooks/键序）逐字节不动——这是本开关与全量覆盖写的分界线
+        let raw = r#"{
+  "cleanupPeriodDays": 36500,
+  "env": {"ANTHROPIC_BASE_URL": "https://x"},
+  "permissions": {
+    "allow": ["Bash(ls:*)"],
+    "defaultMode": "auto"
+  },
+  "model": "glm-5.3",
+  "hooks": {"SessionStart": []}
+}"#;
+        let out = write_permission_mode(Some(raw), PERMISSION_MODE_BYPASS).unwrap();
+        assert!(out.contains("\"allow\""), "permissions.allow 必须保留");
+        assert!(out.contains("Bash(ls:*)"));
+        assert!(out.contains("\"ANTHROPIC_BASE_URL\""));
+        assert!(out.contains("\"hooks\""));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["permissions"]["defaultMode"], "bypassPermissions");
+        // 键序保留：cleanupPeriodDays 仍在 env 前（preserve_order）
+        let cp = out.find("cleanupPeriodDays").unwrap();
+        let env = out.find("ANTHROPIC_BASE_URL").unwrap();
+        assert!(cp < env, "原键序应保留: {out}");
+    }
+
+    #[test]
+    fn permission_mode_write_rejects_corrupt_input() {
+        // 损坏 settings.json → Err，调用方保证不覆盖用户文件
+        assert!(write_permission_mode(Some("{broken"), PERMISSION_MODE_BYPASS).is_err());
     }
 }
