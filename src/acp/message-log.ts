@@ -22,6 +22,11 @@ export type BlockMsg =
       toolCallId: string;
       title: string;
       status: string;
+      /** P30：协议 ToolKind（read/edit/execute/…），驱动图标。字段名 toolKind——
+       *  块级 kind 是块类型判别符（"text"/"thought"/"tool"），不能被协议值覆盖。旧日志缺省。 */
+      toolKind?: string;
+      /** P30：工具原始入参（驱动参数副标题）；原样保留，旧日志缺省 */
+      rawInput?: unknown;
       content: ToolContent[];
       /** F-16-2（DEC-49）：工具耗时计时——startTs = tool_call 事件时间戳（写入即持久化）；
        *  ms = 收尾时封口的耗时毫秒。旧日志缺省 → 按 0 计不参与累加。 */
@@ -57,6 +62,8 @@ function isBlock(o: unknown): o is BlockMsg {
       typeof b.title === "string" &&
       typeof b.status === "string" &&
       isToolContent(b.content) &&
+      // P30：toolKind/rawInput 为纯展示字段不做形状校验（坏值由渲染层 kindIcon 回退兜底），
+      // 与 content 的宽容策略一致（只查 Array.isArray 不查元素形状）——不因展示字段拒收整块
       (b.startTs === undefined || typeof b.startTs === "number") &&
       (b.ms === undefined || typeof b.ms === "number")
     );
@@ -130,14 +137,17 @@ export function appendTool(blocks: BlockMsg[], tool: BlockMsg & { kind: "tool" }
   return [...blocks, tool];
 }
 
-/** 按 toolCallId 更新 tool block 的 status/content（找不到则原样返回）。
- *  F-16-2（DEC-49）：status 进入终态（completed/error）且块带 startTs 时封口 ms = now - startTs。 */
+/** 按 toolCallId 更新 tool block 的 status/toolKind/rawInput/content（找不到则原样返回）。
+ *  F-16-2（DEC-49）：status 进入终态（completed/failed，error 为本地历史值）且块带
+ *  startTs 时封口 ms = now - startTs。P30：toolKind/rawInput 仅在事件携带时覆盖（缺省保留旧值）。
+ *  注：协议 kind 落块级字段名 toolKind（块 kind 是块类型判别符，不能覆盖）。 */
 export function updateTool(
   blocks: BlockMsg[],
   toolCallId: string,
   status: string | null,
   content: ToolContent[],
   now?: () => number,
+  patch?: { toolKind?: string; rawInput?: unknown },
 ): BlockMsg[] {
   const idx = blocks.findIndex(
     (b) => b.kind === "tool" && b.toolCallId === toolCallId,
@@ -148,13 +158,15 @@ export function updateTool(
   if (b.kind === "tool") {
     const nextStatus = status ?? b.status;
     const finished =
-      (nextStatus === "completed" || nextStatus === "error") &&
+      (nextStatus === "completed" || nextStatus === "failed" || nextStatus === "error") &&
       b.startTs !== undefined &&
       b.ms === undefined;
     copy[idx] = {
       ...b,
       status: nextStatus,
       content: content.length > 0 ? content : b.content,
+      ...(patch?.toolKind !== undefined ? { toolKind: patch.toolKind } : {}),
+      ...(patch && "rawInput" in patch ? { rawInput: patch.rawInput } : {}),
       ...(finished && now ? { ms: Math.max(0, now() - b.startTs!) } : {}),
     };
   }

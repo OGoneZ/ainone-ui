@@ -28,7 +28,7 @@
   font-size: 0.8em;
 }
 
-/* 状态点睛：按工具 status 着色（F-16-1） */
+/* 状态点睛：按工具 status 着色（F-16-1）。P30：failed 是协议失败终态（error 为本地历史值），同色 */
 .tool[data-status="in_progress"] .tool-head .status,
 .tool[data-status="pending"] .tool-head .status {
   color: var(--primary);
@@ -38,7 +38,8 @@
   color: var(--success);
 }
 
-.tool[data-status="error"] .tool-head .status {
+.tool[data-status="error"] .tool-head .status,
+.tool[data-status="failed"] .tool-head .status {
   color: var(--danger);
 }
 

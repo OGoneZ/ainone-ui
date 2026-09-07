@@ -166,4 +166,57 @@ describe("turn 内 block 追加 / 合并", () => {
     const b: BlockMsg[] = [{ kind: "text", text: "x" }];
     expect(sealLastThought(b, 100)).toBe(b);
   });
+
+  // P30 AC-1.3：协议失败终态 failed 封口（error 为本地历史值）
+  it("P30：updateTool 终态 completed/failed/error 均封口 ms；非终态不封口", () => {
+    for (const terminal of ["completed", "failed", "error"] as const) {
+      const b = [{ ...tool("a"), startTs: 50 }];
+      const out = updateTool(b, "a", terminal, [], () => 100);
+      expect((out[0] as { ms?: number }).ms).toBe(50); // ms = 100 - 50
+    }
+    const running = updateTool([{ ...tool("a"), startTs: 50 }], "a", "in_progress", [], () => 100);
+    expect((running[0] as { ms?: number }).ms).toBeUndefined();
+  });
+
+  // P30 AC-1.4：旧日志行（无 toolKind/rawInput）解析不回归；新字段坏形状宽容降级
+  it("P30：旧日志无新字段照常解析；toolKind 非 string 降级为缺省不拒收", () => {
+    // 旧版日志行：tool 块无 toolKind/rawInput
+    const legacy = JSON.stringify({
+      role: "assistant",
+      blocks: [{ kind: "tool", toolCallId: "t1", title: "Terminal", status: "failed", content: [{ kind: "text", text: "x" }], startTs: 1, ms: 2 }],
+    });
+    const parsedLegacy = parseLine(legacy);
+    expect(parsedLegacy).not.toBeNull();
+    expect((parsedLegacy as { blocks: Array<{ toolKind?: string }> }).blocks[0].toolKind).toBeUndefined();
+
+    // 新字段形状坏（toolKind 为数字）→ 照常收下（纯展示字段不校验，渲染层回退兜底）
+    const badShape = JSON.stringify({
+      role: "assistant",
+      blocks: [{ kind: "tool", toolCallId: "t2", title: "T", status: "completed", content: [], toolKind: 42 }],
+    });
+    const parsedBad = parseLine(badShape) as { blocks: Array<{ toolKind?: unknown }> } | null;
+    expect(parsedBad).not.toBeNull();
+    expect(parsedBad!.blocks[0].toolKind).toBe(42);
+
+    // 新字段正常形状 → 无损往返
+    const modern = JSON.stringify({
+      role: "assistant",
+      blocks: [{ kind: "tool", toolCallId: "t3", title: "Terminal", status: "completed", content: [], toolKind: "execute", rawInput: { command: "ls" } }],
+    });
+    const parsedModern = parseLine(modern) as { blocks: Array<{ toolKind?: string; rawInput?: unknown }> };
+    expect(parsedModern.blocks[0].toolKind).toBe("execute");
+    expect(parsedModern.blocks[0].rawInput).toEqual({ command: "ls" });
+  });
+
+  // P30 AC-1.2：updateTool patch 合并语义（携带才覆盖，缺省保留）
+  it("P30：updateTool 携带 toolKind/rawInput 覆盖，不携带保留旧值", () => {
+    const b = [{ ...tool("a"), toolKind: "execute", rawInput: { command: "ls" } }];
+    const kept = updateTool(b, "a", "completed", [], undefined);
+    expect((kept[0] as { toolKind?: string }).toolKind).toBe("execute");
+    expect((kept[0] as { rawInput?: unknown }).rawInput).toEqual({ command: "ls" });
+
+    const overridden = updateTool(b, "a", "completed", [], undefined, { toolKind: "edit", rawInput: { file_path: "/x" } });
+    expect((overridden[0] as { toolKind?: string }).toolKind).toBe("edit");
+    expect((overridden[0] as { rawInput?: unknown }).rawInput).toEqual({ file_path: "/x" });
+  });
 });

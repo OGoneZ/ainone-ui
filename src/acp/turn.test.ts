@@ -85,6 +85,47 @@ describe("turn 事件累加（F-4-2 thinking 折叠）", () => {
     expect(blk.ms).toBe(20);
   });
 
+  // P30 AC-1.2：协议 kind/rawInput 落块级 toolKind/rawInput；tool_update 不携带 → 保留旧值
+  it("P30：tool_call 带 kind/rawInput 入块（toolKind）；tool_update 不携带 → 保留旧值", () => {
+    let acc = newTurn();
+    acc = applyEvent(
+      acc,
+      { type: "tool_call", toolCallId: "a", title: "Terminal", status: "pending", kind: "execute", rawInput: { command: "ls" }, content: [] },
+      () => 1,
+    );
+    // 块级 kind 是块类型判别符（恒 "tool"），协议 kind 落在 toolKind——不被覆盖
+    expect(acc.blocks[0].kind).toBe("tool");
+    expect((acc.blocks[0] as { toolKind?: string }).toolKind).toBe("execute");
+    expect((acc.blocks[0] as { rawInput?: unknown }).rawInput).toEqual({ command: "ls" });
+
+    // update 只带 status/content：toolKind/rawInput 保留
+    acc = applyEvent(acc, { type: "tool_update", toolCallId: "a", status: "completed", content: [] }, () => 2);
+    const blk = acc.blocks[0] as { toolKind?: string; rawInput?: unknown };
+    expect(blk.toolKind).toBe("execute");
+    expect(blk.rawInput).toEqual({ command: "ls" });
+
+    // update 带新 toolKind/rawInput：覆盖
+    acc = applyEvent(
+      acc,
+      { type: "tool_update", toolCallId: "a", status: "completed", kind: "edit", rawInput: { file_path: "/x" }, content: [] },
+      () => 3,
+    );
+    const blk2 = acc.blocks[0] as { toolKind?: string; rawInput?: unknown };
+    expect(blk2.toolKind).toBe("edit");
+    expect(blk2.rawInput).toEqual({ file_path: "/x" });
+  });
+
+  // P30 AC-1.3：协议失败终态 failed 也封口 ms（error 为本地历史值，另行覆盖）
+  it("P30：failed 终态封口 ms", () => {
+    let t = 0;
+    const now = () => (t += 10);
+    let acc = newTurn();
+    acc = applyEvent(acc, tool("a"), now); // 首事件 turnStart=10，startTs=20
+    // 收尾 update：withStart 已落定不再调 now；updateTool 内封口调 now()=30 → ms = 30 - 20 = 10
+    acc = applyEvent(acc, { type: "tool_update", toolCallId: "a", status: "failed", content: [] }, now);
+    expect((acc.blocks[0] as { ms?: number }).ms).toBe(10);
+  });
+
   it("两段 thinking 各自独立封口（工具间穿插）", () => {
     let t = 0;
     const now = () => ++t;

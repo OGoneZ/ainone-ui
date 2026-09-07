@@ -13,6 +13,7 @@ export type RenderItem =
   | { type: "activity_group"; thoughts: number; tools: number; ms: number; blocks: BlockMsg[] };
 
 function isSettled(tool: BlockMsg & { kind: "tool" }): boolean {
+  // P30：协议失败终态是 failed（error 为本地历史值），两者都算已结算
   return tool.status !== "pending" && tool.status !== "in_progress";
 }
 
