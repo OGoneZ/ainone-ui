@@ -10,7 +10,7 @@ import type { ToolContent } from "@/acp/session-core";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import type { RenderItem } from "@/chat/logic/activity";
-import { buildActivityGroups } from "@/chat/logic/activity";
+import { buildActivityGroups, buildStreamingItems } from "@/chat/logic/activity";
 import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 import { aggregateFileChanges } from "@/chat/logic/fileChanges";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -32,6 +32,7 @@ export const MessageLine = memo(function MessageLine({
   busy,
   isLast,
   turnStartedAt,
+  lastEventAt,
   onSelect,
   onFork,
   onRewind,
@@ -45,6 +46,8 @@ export const MessageLine = memo(function MessageLine({
   isLast: boolean;
   /** P16b：turn 起点时间戳（store）——运行中末条消息显示实时总耗时 */
   turnStartedAt?: number;
+  /** P30：当前 turn 最近一次协议事件时间戳（store）——静默感知数据源 */
+  lastEventAt?: number;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
   onRewind?: () => void;
@@ -90,7 +93,11 @@ export const MessageLine = memo(function MessageLine({
   }
   // F-12-3 活动组：连续已完成 thought/tool 聚合为一张卡（DEC-36）
   // 流式末条 turn 的运行中块不入组（isSettled 判定 + live 判定在渲染项内处理）
-  const renderItems = buildActivityGroups(msg.blocks);
+  // P30：流式中（busy && isLast）尾部已完成的 tool 块暂不入组——completed 是即时判定的，
+  // 无条件入组会把刚带 diff 的写块瞬间收进折叠卡，边沿自动展开失去意义（AC-3.2 失效）。
+  // 非流式（历史回填/turn 结束后）保持原分组语义。
+  const streaming = busy && isLast;
+  const renderItems = streaming ? buildStreamingItems(msg.blocks) : buildActivityGroups(msg.blocks);
   return (
     <div className="group flex gap-2.5 my-2.5">
       <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={32} className="shrink-0 mt-0.5" />
@@ -110,8 +117,11 @@ export const MessageLine = memo(function MessageLine({
           ),
         )}
         {/* P16b：turn 总耗时——从首个事件到 turn 结束的墙钟秒，实时跳动；
-            与工具/思考结果无关（finally 清 turnStartedAt 停表） */}
-        {busy && isLast && turnStartedAt ? <TurnElapsed startTs={turnStartedAt} /> : null}
+            与工具/思考结果无关（finally 清 turnStartedAt 停表）。
+            P30：lastEventAt 驱动静默感知（AC-3.4） */}
+        {busy && isLast && turnStartedAt ? (
+          <TurnElapsed startTs={turnStartedAt} lastEventAt={lastEventAt} />
+        ) : null}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {onFork && (
@@ -276,12 +286,22 @@ function FileChangeRow({
   );
 }
 
-/** P16b turn 实时总耗时行：无论思考/工具处于什么状态，秒表一直走 */
-function TurnElapsed({ startTs }: { startTs: number }) {
+/** P30 AC-3.4：静默感知阈值——距最近协议事件超过该值提示「可能在运行长任务」 */
+const SILENT_THRESHOLD_S = 30;
+
+/** P16b turn 实时总耗时行 + P30 静默感知：秒表一直走；最近 30s 无任何协议事件时追加提示 */
+function TurnElapsed({ startTs, lastEventAt }: { startTs: number; lastEventAt?: number }) {
   const elapsed = useElapsedTicker(startTs);
+  const silent = useElapsedTicker(lastEventAt);
+  const silentFor = lastEventAt ? silent : 0;
   return (
     <div className="turn-elapsed" data-testid="turn-elapsed" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
       ⏱ 用时 {elapsed} 秒
+      {silentFor >= SILENT_THRESHOLD_S && (
+        <span data-testid="silent-hint" style={{ marginLeft: 6, color: "var(--warning)" }}>
+          · 静默 {silentFor} 秒（可能在运行长任务或子代理）
+        </span>
+      )}
     </div>
   );
 }

@@ -883,7 +883,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   async function runPrompt(text: string, opts?: { queueItemId?: string; isRetry?: boolean }) {
     // F-8-1：刷新最近交互时间戳（回收判定的数据源）
     lastActivityRef.current = Date.now();
-    patch(tabKey, { busy: true, turnStartedAt: Date.now() });
+    // P30：lastEventAt 同步落定——首事件前静默时长以 prompt 发出时刻起算
+    patch(tabKey, { busy: true, turnStartedAt: Date.now(), lastEventAt: Date.now() });
     turnRef.current = newTurn();
     const p = (async () => {
       try {
@@ -934,6 +935,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           }
           const next = applyEvent(turnRef.current, e, Date.now);
           turnRef.current = next;
+          // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）
+          useSessionStore.getState().patch(tabKey, { lastEventAt: Date.now() });
           useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
         });
         // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）；
@@ -962,7 +965,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           toast.warning("该任务执行失败，已放回队列首位");
         }
       } finally {
-        patch(tabKey, { busy: false, turnStartedAt: undefined });
+        patch(tabKey, { busy: false, turnStartedAt: undefined, lastEventAt: undefined });
         runRef.current = null;
         // H10：turn 结束时未决的权限请求/提问卡一并收口（turn 已中止，
         // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）。
@@ -1271,6 +1274,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
                   turnStartedAt={rt?.turnStartedAt}
+                  lastEventAt={rt?.lastEventAt}
                   onSelect={onSelectText}
                   onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}
