@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag（v*）触发：四作业矩阵构建 → 产物汇总 → 上传 Cloudflare R2 + 生成 latest.json
+# 打 tag（v*）触发：门禁 → 四作业矩阵构建 → 产物汇总 → 上传 Cloudflare R2 + 生成 latest.json
 on:
   push:
     tags:
@@ -10,10 +10,39 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    # 第一道门禁（stage 1）：ubuntu 单作业、默认 bash，30 秒内出结论。
+    # 门禁不过，build 四腿根本不启动（needs 硬依赖），不再复制进矩阵作业跑 4 遍。
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches tauri.conf.json
+        # 门禁：tag 版本必须与 tauri.conf.json 的 version 完全一致，不等直接失败。
+        # 产物文件名内嵌 conf 版本、app「关于」显示 conf 版本——分叉即错版
+        # （v0.2.0 首发实锤：tag v0.2.0 而 conf 0.1.0，产物全名 0.1.0）。
+        # 不一致 = 开发者忘了 bump，打回对齐后重新打 tag，无任何自动改写补丁。
+        env:
+          EXPECTED: ${{ steps.ver.outputs.version }}
+        run: |
+          ACTUAL=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "tag version: $EXPECTED / tauri.conf.json version: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::tag 版本($EXPECTED)与 tauri.conf.json 版本($ACTUAL)不一致——先 bump src-tauri/tauri.conf.json（及 package.json）到 $EXPECTED，再重新打 tag"
+            exit 1
+          fi
+
   build:
+    needs: preflight
     strategy:
       # 任一平台失败立即取消其余矩阵作业：发版语义是「全平台齐活才发布」，
-      # 一条腿挂了其余继续跑只是浪费 runner 分钟数（v0.2.0 门禁误伤实锤）
+      # 一条腿挂了其余继续跑只是浪费 runner 分钟数
       fail-fast: true
       matrix:
         include:
@@ -34,31 +63,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Derive version from tag
-        id: ver
-        # 版本号直取 tag（vX.Y.Z → X.Y.Z）。shell: bash——Windows 作业默认 pwsh，
-        # ${GITHUB_REF_NAME#v} 的参数展开语法 pwsh 不认（v0.2.0 三发实锤：pwsh
-        # 会把整串当字面量，输出文件里落了空值，下游门禁拿到空 EXPECTED）
-        shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify tag matches tauri.conf.json
-        # 门禁：tag 版本必须与 tauri.conf.json 的 version 完全一致，不等直接失败。
-        # 防止「tag 打了 v0.2.0 而 conf 还是 0.1.0」的异步分叉（产物文件名内嵌
-        # conf 版本、app「关于」显示 conf 版本，与 tag 错位）。不一致 = 开发者
-        # 忘了 bump，打回对齐后重新打 tag，无任何自动改写补丁。
-        # shell: bash 显式指定——Windows 作业默认 pwsh，bash 语法会 ParserError。
-        shell: bash
-        env:
-          EXPECTED: ${{ steps.ver.outputs.version }}
-        run: |
-          ACTUAL=$(jq -r .version src-tauri/tauri.conf.json)
-          echo "tag version: $EXPECTED / tauri.conf.json version: $ACTUAL"
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "::error::tag 版本($EXPECTED)与 tauri.conf.json 版本($ACTUAL)不一致——先 bump src-tauri/tauri.conf.json（及 package.json）到 $EXPECTED，再重新打 tag"
-            exit 1
-          fi
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -72,8 +76,7 @@ jobs:
           node-version: 22
           # 注意：不开 cache: pnpm。该缓存机制依赖 `pnpm store path`，本仓库
           # pnpm-workspace.yaml 仅含 onlyBuiltDependencies（非真 workspace），
-          # 会报 "packages field missing or empty" 使四个构建作业全挂（首发实锤，
-          # 见 8711a8a 之前的 ci(release) 提交链）
+          # 会报 "packages field missing or empty" 使构建作业全挂（首发实锤）
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -100,11 +103,11 @@ jobs:
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1
-        # 版本一致性由上面的 Verify 门禁保证（tag == conf 才放行），产物文件名内嵌
+        # 版本一致性由 preflight 门禁保证（tag == conf 才放行），产物文件名内嵌
         # 的就是 conf 版本 = tag 版本，无需 --config 注入、无需改文件名补丁。
         # 注意：签名/公证 env 只在 Apple secrets 实际配置后才注入。secrets 引用会把
         # 空字符串设进环境，tauri bundler 判 APPLE_CERTIFICATE 非空即走 keychain
-        # setup——空串触发 security import 必炸 SecKeychainItemImport（首发三跑实锤）。
+        # setup——空串触发 security import 必炸 SecKeychainItemImport（首发实锤）。
         # 未来配好证书后把下面这段 env 注释还原即可。
         # env:
         #   APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -126,7 +129,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [build, preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,26 +141,24 @@ jobs:
           merge-multiple: true
           path: bundles
 
-      - name: Read version
-        id: ver
-        # 版本号取 tag（vX.Y.Z → X.Y.Z）。tag 是发布意图，R2 目录 / URL /
-        # latest.json 全部以 tag 版本为准，互相对齐。
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
       - name: List bundles (debug)
         run: find bundles -type f | sort
 
       - name: Generate latest.json
+        # 版本号直接复用 preflight 的 outputs（单一事实源），不再本地重推
         env:
-          VERSION: ${{ steps.ver.outputs.version }}
-          BASE_URL: https://pkg.zhubaoduo.com/v${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BASE_URL: https://pkg.zhubaoduo.com/v${{ needs.preflight.outputs.version }}
         run: |
           cd bundles
           # 产物布局（targets "all" 全格式）：macOS → dmg×2 架构；Windows → nsis/*.exe + msi/*.msi；
           # Linux → deb/*.deb + rpm/*.rpm + appimage/*.AppImage。七产物全上架，与门户七卡对齐
           DMG_ARM=$(find . -path '*aarch64*' -name '*.dmg' | head -1)
           DMG_X64=$(find . -path '*x64*' -name '*.dmg' | head -1)
-          NSIS=$(find . -path '*nsis*' -name '*.exe' | head -1)
+          # NSIS 的 exe 靠路径含 nsis 识别——但 publish 在 find+mv 展平【之后】才跑
+          # 生成逻辑时该前缀已不存在，改为按文件名特征匹配（tauri NSIS 安装器
+          # 固定 -setup.exe 后缀；msi 按扩展名全桶唯一，无歧义）
+          NSIS=$(find . -name '*-setup.exe' | head -1)
           MSI=$(find . -name '*.msi' | head -1)
           DEB=$(find . -name '*.deb' | head -1)
           RPM=$(find . -name '*.rpm' | head -1)
@@ -202,7 +203,7 @@ jobs:
           AWS_DEFAULT_REGION: auto
           ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           BUCKET: ${{ secrets.R2_BUCKET }}
-          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           cd bundles
           # 先把散在各 artifact 目录下的安装器集中到 bundles/ 根，再整体平铺上传。
