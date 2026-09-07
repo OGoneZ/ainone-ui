@@ -55,6 +55,9 @@ export interface RuntimeState {
   /** P16b：当前 turn 的起点时间戳（ms，Date.now()）；0/undefined = 无进行中 turn。
    *  总耗时 = now - turnStartedAt，与工具/思考结果无关的墙钟时间。 */
   turnStartedAt?: number;
+  /** P30 AC-3.4：当前 turn 最近一次协议事件的时间戳（静默感知）。
+   *  turn 结束随 turnStartedAt 一并清除；runtime 不持久化。 */
+  lastEventAt?: number;
   /** initialize 握手存档的 agent 能力（capability gate 数据源；未声明 → null） */
   capabilities: AgentCapabilities | null;
   /** 恢复链降级记录（session/load 失败 → session/new）；null = 无降级 */

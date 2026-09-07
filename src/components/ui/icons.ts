@@ -25,7 +25,9 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  FolderSymlink,
   GitFork,
+  Globe,
   GripVertical,
   Loader2,
   Maximize2,
@@ -37,10 +39,13 @@ import {
   PanelLeftOpen,
   Pencil,
   Plus,
+  Repeat,
+  Search,
   Settings,
   Square,
   SquareTerminal,
   Terminal,
+  Trash2,
   CircleHelp,
   Undo2,
   User,
@@ -57,6 +62,13 @@ export const ThinkingIcon = Brain; // thinking 块
 export const ToolIcon = Wrench; // 工具调用
 export const TerminalIcon = Terminal; // 终端输出
 export const NewTerminalIcon = SquareTerminal; // P25 新建终端入口（侧栏头部图标钮）
+// P30：ToolKind 图标（toolDisplay.kindIcon 消费；read 复用 FileTextIcon / think 复用 ThinkingIcon）
+export const EditIconKind = Pencil; // kind=edit
+export const DeleteIcon = Trash2; // kind=delete
+export const MoveIcon = FolderSymlink; // kind=move
+export const SearchIcon = Search; // kind=search
+export const FetchIcon = Globe; // kind=fetch
+export const SwitchModeIcon = Repeat; // kind=switch_mode
 export const FileTextIcon = FileText; // 文件
 export const DiffIcon = FileDiff; // diff 视图
 export const CopyIcon = Copy; // 复制

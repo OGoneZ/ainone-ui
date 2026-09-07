@@ -10,7 +10,7 @@ import type { ToolContent } from "@/acp/session-core";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import type { RenderItem } from "@/chat/logic/activity";
-import { buildActivityGroups } from "@/chat/logic/activity";
+import { buildActivityGroups, buildStreamingItems } from "@/chat/logic/activity";
 import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 import { aggregateFileChanges } from "@/chat/logic/fileChanges";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -40,6 +40,7 @@ export const MessageLine = memo(function MessageLine({
   adapter,
   busy,
   isLast,
+  lastEventAt,
   onSelect,
   onFork,
   onRewind,
@@ -53,6 +54,8 @@ export const MessageLine = memo(function MessageLine({
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
+  /** P30：当前 turn 最近一次协议事件时间戳（store）——静默感知数据源 */
+  lastEventAt?: number;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
   onRewind?: () => void;
@@ -102,7 +105,11 @@ export const MessageLine = memo(function MessageLine({
   }
   // F-12-3 活动组：连续已完成 thought/tool 聚合为一张卡（DEC-36）
   // 流式末条 turn 的运行中块不入组（isSettled 判定 + live 判定在渲染项内处理）
-  const renderItems = buildActivityGroups(msg.blocks);
+  // P30：流式中（busy && isLast）尾部已完成的 tool 块暂不入组——completed 是即时判定的，
+  // 无条件入组会把刚带 diff 的写块瞬间收进折叠卡，边沿自动展开失去意义（AC-3.2 失效）。
+  // 非流式（历史回填/turn 结束后）保持原分组语义。
+  const streaming = busy && isLast;
+  const renderItems = streaming ? buildStreamingItems(msg.blocks) : buildActivityGroups(msg.blocks);
   return (
     <div className="group flex gap-2.5 my-2.5">
       <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={32} className="shrink-0 mt-0.5" />
@@ -123,7 +130,11 @@ export const MessageLine = memo(function MessageLine({
             <ActivityGroupCard key={i} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
           ),
         )}
-        {/* p22e：turn 总耗时并入活动组卡实时走秒（原单独 ⏱ 行删除）；纯 text 轮次不显示计时 */}
+        {/* p22e：turn 总耗时并入活动组卡实时走秒；纯 text 轮次不显示计时。
+            P30：纯 text 轮次的静默感知也随 TurnElapsed 一并移除——文本轮事件密集，
+            静默提示仅在工具轮有意义；工具轮静默由 p22e 活动卡 + lastEventAt 的
+            TurnElapsed（下方保留）承担。 */}
+        {busy && isLast && lastEventAt ? <TurnElapsed lastEventAt={lastEventAt} /> : null}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {onFork && (
@@ -210,6 +221,7 @@ function ActivityGroupCard({
   const fileChanges = aggregateFileChanges(
     diffs.map((d) => ({ path: d.diff.path, oldText: d.diff.oldText, newText: d.diff.newText })),
   );
+  // P30 AC-2.4：折叠态就透出改动规模——「改了什么」不该藏在展开态里（徽标行见 JSX）
   return (
     <div className="activity-group my-1.5">
       <button
@@ -236,6 +248,14 @@ function ActivityGroupCard({
         <ToolIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
         <span>{summary}</span>
         {seconds !== "0" && <span>· 用时 {seconds} 秒</span>}
+        {fileChanges.length > 0 && (
+          <span className="activity-filechanges" title={fileChanges.map((f) => f.path).join("\n")}>
+            ·{" "}
+            <span style={{ color: "var(--success)" }}>+{fileChanges.reduce((s, f) => s + f.added, 0)}</span>{" "}
+            <span style={{ color: "var(--danger)" }}>−{fileChanges.reduce((s, f) => s + f.removed, 0)}</span>{" "}
+            {fileChanges.length} 个文件
+          </span>
+        )}
         {/* P25：折叠态淡色提示「Ctrl+O 展开全部」（键名实时取键位表，改绑后同步） */}
         {!open && <ActivityToggleHint />}
       </button>
@@ -308,6 +328,22 @@ function FileChangeRow({
             />
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+/** P30 AC-3.4：静默感知——距最近协议事件 ≥30s 时提示「可能在运行长任务」。
+ *  p22e 已把总耗时并入活动组卡实时走秒，本组件只承担静默提示，不重复显示总耗时。 */
+const SILENT_THRESHOLD_S = 30;
+
+function TurnElapsed({ lastEventAt }: { lastEventAt: number }) {
+  const silent = useElapsedTicker(lastEventAt);
+  return (
+    <div className="turn-elapsed" data-testid="turn-elapsed" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+      {silent >= SILENT_THRESHOLD_S && (
+        <span data-testid="silent-hint" style={{ color: "var(--warning)" }}>
+          · 静默 {silent} 秒（可能在运行长任务或子代理）
+        </span>
       )}
     </div>
   );

@@ -72,6 +72,57 @@ describe("session-core · dispatchUpdate", () => {
     expect(r).toEqual([{ type: "tool_update", toolCallId: "t1", status: "completed", content: [] }]);
   });
 
+  // P30 AC-1.1：kind/rawInput 透传——带了就带键，不带就干净缺省
+  it("tool_call 带 kind/rawInput → 透传同值；不带 → 字段缺省（无 null 垃圾）", () => {
+    const withFields = collect(
+      notif({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Terminal",
+        status: "pending",
+        kind: "execute",
+        rawInput: { command: "git status" },
+        content: [],
+      }),
+    );
+    expect(withFields).toEqual([
+      {
+        type: "tool_call",
+        toolCallId: "t1",
+        title: "Terminal",
+        status: "pending",
+        kind: "execute",
+        rawInput: { command: "git status" },
+        content: [],
+      },
+    ]);
+
+    const withoutFields = collect(
+      notif({ sessionUpdate: "tool_call", toolCallId: "t2", title: "Task", status: "pending", content: [] }),
+    );
+    expect(withoutFields).toEqual([
+      { type: "tool_call", toolCallId: "t2", title: "Task", status: "pending", content: [] },
+    ]);
+    expect("kind" in withoutFields[0]).toBe(false);
+    expect("rawInput" in withoutFields[0]).toBe(false);
+  });
+
+  it("tool_call_update 带 kind/rawInput → 透传", () => {
+    const r = collect(
+      notif({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        status: "failed",
+        kind: "edit",
+        rawInput: { file_path: "/a.ts" },
+        content: [],
+      }),
+    );
+    expect(r).toEqual([
+      { type: "tool_update", toolCallId: "t1", status: "failed", kind: "edit", rawInput: { file_path: "/a.ts" }, content: [] },
+    ]);
+  });
+
   it("usage_update → usage（含 cost 数值 / 无 cost → null）", () => {
     expect(
       collect(notif({ sessionUpdate: "usage_update", used: 100, size: 1000, cost: { amount: 1.5, currency: "USD" } })),
