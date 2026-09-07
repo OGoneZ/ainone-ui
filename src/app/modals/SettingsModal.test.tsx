@@ -4,7 +4,7 @@
 // 配置模型），保存校验测试改用「新增 harness」的自定义行。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "./SettingsModal";
 import { mockTauriIpc } from "@/test/mockIpc";
@@ -212,7 +212,8 @@ describe("P29 设置页卡片化", () => {
     mockTauriIpc({ handlers: p29Handlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
-    expect(await screen.findByTestId("status-omp")).toHaveTextContent(/未安装 · 一键安装/);
+    // 探测异步：findByTestId 可能在「探测中…」占位时就命中 → 用 waitFor 等到四态徽标渲染
+    await waitFor(() => expect(screen.getByTestId("status-omp")).toHaveTextContent(/未安装 · 一键安装/));
     const btn = screen.getByTestId("install-omp");
     expect(btn).toHaveTextContent("一键安装");
     expect(btn).not.toBeDisabled();
