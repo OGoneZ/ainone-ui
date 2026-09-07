@@ -284,12 +284,20 @@ describe("P25 VoiceInput registerToggle", () => {
       getTracks: () => [],
     });
     Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: gUM }, configurable: true });
-    const MR = vi.fn().mockImplementation(() => ({
-      start: vi.fn(),
-      ondataavailable: null,
-      onstop: null,
-    }));
-    (window as any).MediaRecorder = MR;
+    // MediaRecorder 必须是可 new 的构造器：vi.fn() + 箭头 mockImplementation 在
+    // vitest 4 的 new Mock 路径下报「not a constructor」，start() 同步抛出 →
+    // void start() 的 promise 落成 unhandled rejection，污染后续测试报告。
+    // 用类 mock（与 VoiceInput.test.tsx 的 FakeRecorder 同式）。
+    class FakeRecorder {
+      stream: unknown;
+      start = vi.fn();
+      ondataavailable: ((e: unknown) => void) | null = null;
+      onstop: (() => void) | null = null;
+      constructor(stream: unknown) {
+        this.stream = stream;
+      }
+    }
+    (window as any).MediaRecorder = FakeRecorder;
     toggle();
     await vi.waitFor(() => {
       expect(gUM).toHaveBeenCalled();
