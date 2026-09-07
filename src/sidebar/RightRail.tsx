@@ -21,13 +21,17 @@ export type RailTab = "meta" | "files" | "history";
 
 interface Props {
   tabKey: string;
-  adapter: AdapterWithStatus;
+  /** P30：terminalOnly 时可为 undefined（终端不在 adapters 注册表） */
+  adapter: AdapterWithStatus | undefined;
   sessionId: string | null;
   cwd?: string;
   /** P29 R5：活跃会话句柄（模型切换 set_config_option 用；无会话 = null） */
   session: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null;
   /** 当前会话消息（文件树「M」徽标数据源） */
   messages: ChatMsg[];
+  /** P30：终端 tab 模式——无 harness 元数据/历史消息，只显示「文件」tab；
+   *  折叠细栏杆也只剩文件入口，落点 tab 强制回 files */
+  terminalOnly?: boolean;
   /** P25：开合与 tab 受控（state 提升到 App，Ctrl+K 才够得到；持久化仍在 App） */
   open: boolean;
   tab: RailTab;
@@ -65,7 +69,7 @@ export function saveRailState(s: RailState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
-export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, open, tab, onSwitchTab, onToggle }: Props) {
+export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, terminalOnly = false, open, tab, onSwitchTab, onToggle }: Props) {
   // F-21-6 右栏宽度（拖宽把手，独立 key 持久化；clamp 220~min(520,40vw)）
   const [width, setWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-rightrail-width")) || 260, 220, sidebarMaxWidth()),
@@ -76,6 +80,10 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, 
 
   // F-9-4 最近改动文件（文件树「M」徽标）
   const modifiedPaths = useMemo(() => collectModifiedPaths(messages), [messages]);
+
+  // P30：终端 tab 无元数据/历史——落点若是 meta/history 强制回 files
+  // （持久化 tab 可能停在 meta，切到终端 tab 时避免白屏）
+  const effectiveTab: RailTab = terminalOnly ? "files" : tab;
 
   function switchTab(t: RailTab) {
     onSwitchTab(t);
@@ -89,30 +97,34 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, 
   if (!open) {
     return (
       <aside className="rightrail rightrail-collapsed">
+        {!terminalOnly && (
+          <button
+            type="button"
+            className="rail-tab-btn vertical"
+            aria-label="展开元数据侧栏"
+            onClick={() => switchTab("meta")}
+          >
+            元数据
+          </button>
+        )}
         <button
           type="button"
           className="rail-tab-btn vertical"
-          aria-label="展开元数据侧栏"
-          onClick={() => switchTab("meta")}
-        >
-          元数据
-        </button>
-        <button
-          type="button"
-          className="rail-tab-btn vertical"
-          aria-label="展开文件树"
+          aria-label={terminalOnly ? "展开文件树" : "展开文件树"}
           onClick={() => switchTab("files")}
         >
           文件
         </button>
-        <button
-          type="button"
-          className="rail-tab-btn vertical"
-          aria-label="展开历史消息"
-          onClick={() => switchTab("history")}
-        >
-          历史
-        </button>
+        {!terminalOnly && (
+          <button
+            type="button"
+            className="rail-tab-btn vertical"
+            aria-label="展开历史消息"
+            onClick={() => switchTab("history")}
+          >
+            历史
+          </button>
+        )}
       </aside>
     );
   }
@@ -129,33 +141,37 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, 
         label="拖拽调整侧栏宽度"
       />
       <div className="rail-tabs" role="tablist">
+        {!terminalOnly && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={effectiveTab === "meta"}
+            className={effectiveTab === "meta" ? "rail-tab-btn active" : "rail-tab-btn"}
+            onClick={() => switchTab("meta")}
+          >
+            元数据
+          </button>
+        )}
         <button
           type="button"
           role="tab"
-          aria-selected={tab === "meta"}
-          className={tab === "meta" ? "rail-tab-btn active" : "rail-tab-btn"}
-          onClick={() => switchTab("meta")}
-        >
-          元数据
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "files"}
-          className={tab === "files" ? "rail-tab-btn active" : "rail-tab-btn"}
+          aria-selected={effectiveTab === "files"}
+          className={effectiveTab === "files" ? "rail-tab-btn active" : "rail-tab-btn"}
           onClick={() => switchTab("files")}
         >
           文件
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "history"}
-          className={tab === "history" ? "rail-tab-btn active" : "rail-tab-btn"}
-          onClick={() => switchTab("history")}
-        >
-          历史
-        </button>
+        {!terminalOnly && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={effectiveTab === "history"}
+            className={effectiveTab === "history" ? "rail-tab-btn active" : "rail-tab-btn"}
+            onClick={() => switchTab("history")}
+          >
+            历史
+          </button>
+        )}
         <button
           type="button"
           className="rail-collapse"
@@ -166,8 +182,8 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, 
           »
         </button>
       </div>
-      <div className={`rail-body ${tab === "files" ? "rail-body-noscroll" : ""}`} role="tabpanel">
-        {tab === "meta" ? (
+      <div className={`rail-body ${effectiveTab === "files" ? "rail-body-noscroll" : ""}`} role="tabpanel">
+        {effectiveTab === "meta" && adapter ? (
           <MetadataPanel
             tabKey={tabKey}
             adapter={adapter}
@@ -176,7 +192,7 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, 
             embedded
             session={session}
           />
-        ) : tab === "files" ? (
+        ) : effectiveTab === "files" ? (
           <div className="rail-files">
             <FileTree
               cwd={cwd}

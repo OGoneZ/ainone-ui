@@ -1258,8 +1258,10 @@ function App() {
               onExternalDrag={handleExternalDrag}
             />
           </div>
-          {/* F-11-7 右侧侧边栏：元数据 / 文件 双 tab（替换原独立 MetadataPanel） */}
-          {activeAdapter && activeTab && (
+          {/* F-11-7 右侧侧边栏：元数据 / 文件 双 tab（替换原独立 MetadataPanel）。
+              P30：终端 tab（adapterId=terminal，不在 adapters 注册表）过去整栏消失；
+              终端有 cwd，文件树可用——挂载 Rail 并传入 terminal-only 信号（只显示文件 tab） */}
+          {activeTab && (activeAdapter || activeTab.kind === "terminal") && (
             <RightRail
               tabKey={activeTab.key}
               adapter={activeAdapter}
@@ -1267,6 +1269,7 @@ function App() {
               cwd={activeTab.cwd}
               session={activeSession}
               messages={activeMessages}
+              terminalOnly={activeTab.kind === "terminal"}
               open={railState.open}
               tab={railState.tab}
               onSwitchTab={(t: RailTab) => setRailState((s) => ({ ...s, tab: t, open: true }))}

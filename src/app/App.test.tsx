@@ -191,6 +191,35 @@ describe("P25 App 全局快捷键", () => {
     // 终端面板被 factory 分派渲染
     expect(await screen.findByTestId("terminal-panel")).toBeInTheDocument();
   });
+
+  it("P30：终端 tab 聚焦时右侧栏不消失，只显示文件 tab（文件树可用）", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    // TerminalPanel mock（同上，jsdom 无 xterm 测量链路）
+    vi.mock("@/terminal/TerminalPanel", () => ({
+      TerminalPanel: () => <div data-testid="terminal-panel">终端</div>,
+    }));
+    render(<App />);
+    await screen.findByText("dev");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", code: "KeyT", ctrlKey: true, bubbles: true, cancelable: true }));
+    // 终端 tab 创建并聚焦
+    await screen.findByTestId("terminal-panel");
+
+    // 旧缺陷：终端不在 adapters 注册表 → activeAdapter=undefined → 整个右栏消失。
+    // 期望：右栏仍在（terminalOnly 模式），只有「文件」tab，无元数据/历史
+    expect(screen.getByTestId("right-rail")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "文件" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "元数据" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "历史" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "文件" })).toHaveAttribute("aria-selected", "true");
+    // 终端 cwd 落到文件树（default_cwd 返回 "/"，workspace_list_dir mock 返回 []，树容器在即可）
+    expect(document.querySelector(".filetree")).toBeTruthy();
+
+    // 切回 agent 会话 → 三 tab 恢复（互斥模式切换）
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "你好" }));
+    expect(await screen.findByRole("tab", { name: "元数据" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "历史" })).toBeInTheDocument();
+  });
 });
 
 describe("P26e Ctrl+Enter 临时全屏", () => {
