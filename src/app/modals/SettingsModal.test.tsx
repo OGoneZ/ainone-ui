@@ -22,6 +22,23 @@ vi.mock("@/ipc/quickask", () => ({
   quickAskConfigSave: vi.fn().mockResolvedValue(undefined),
 }));
 
+// P29 S6：ModelSwitchPanel 依赖 sonner toast 与 logger（jsdom 无 Tauri 运行时）
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+vi.mock("@/lib/logger", () => ({
+  logger: { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+// ModelSwitchPanel 走 @/ipc/harnessMeta 的探测/写回（可编程 mock）
+vi.mock("@/ipc/harnessMeta", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/ipc/harnessMeta")>();
+  return {
+    ...mod,
+    probeModels: vi.fn(),
+    writeHarnessSettings: vi.fn(),
+  };
+});
+
 const ADAPTERS = [
   { id: "omp", name: "Oh My Pi", program: "omp", args: ["acp"], cwd: ".", logo: "#7c3aed" },
   { id: "codex", name: "Codex", program: "codex-acp", args: [], cwd: ".", logo: "#16a34a" },
@@ -255,6 +272,23 @@ describe("P29 设置页卡片化", () => {
     const saveCall = calls.find((c) => c.cmd === "harness_config_save");
     expect(saveCall).toBeTruthy();
     expect(saveCall!.args.input.model).toBe("new-model");
+  });
+
+  it("P29 S6：配置模型表单有 endpoint 时出现「探测可用模型」入口，点击弹出 ModelSwitchPanel", async () => {
+    const { probeModels, writeHarnessSettings } = await import("@/ipc/harnessMeta");
+    vi.mocked(probeModels).mockResolvedValue(["m-a", "m-b"]);
+    vi.mocked(writeHarnessSettings).mockResolvedValue({ path: "/p/settings.json", backup: "/p/settings.json.ainone-bak" });
+    mockTauriIpc({ handlers: p29Handlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("cfg-toggle-omp"));
+    await vi.waitFor(() => expect(screen.getByTestId("cfg-probe-omp")).toBeInTheDocument());
+    // 打开面板 → ModelSwitchPanel 打开即探测
+    await user.click(screen.getByTestId("cfg-probe-omp"));
+    await vi.waitFor(() => expect(probeModels).toHaveBeenCalledWith("omp", "https://old.example.com"));
+    // 模型列表出现
+    await vi.waitFor(() => expect(screen.getByText("m-b")).toBeInTheDocument());
   });
 });
 
