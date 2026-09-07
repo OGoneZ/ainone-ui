@@ -18,7 +18,7 @@ static NEXT_AGENT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// spawn 一个 harness 子进程，返回 agentId；后续 stdout/stderr/退出经 onEvent 推给前端。
 #[tauri::command]
-pub fn agent_spawn(
+pub async fn agent_spawn(
     app: AppHandle,
     program: String,
     args: Vec<String>,
@@ -26,7 +26,7 @@ pub fn agent_spawn(
     on_event: Channel<AgentEvent>,
 ) -> Result<u64, String> {
     let agent_id = NEXT_AGENT_ID.fetch_add(1, Ordering::SeqCst);
-    let rx = spawn_inner(&app, agent_id, &program, &args, &cwd)?;
+    let rx = spawn_inner(&app, agent_id, &program, &args, &cwd).await?;
     pump_events(rx, on_event);
     Ok(agent_id)
 }
@@ -123,18 +123,24 @@ pub struct AgentStore(pub Mutex<HashMap<u64, CommandChild>>);
 ///      PATH（execvp 语义），只改子进程 env 不够；
 ///   2. 子进程 env PATH 注入增强 PATH——桌面应用进程 PATH 常缺用户目录
 ///      （~/.bun/bin 等），且系统目录旧版工具会遮蔽用户新版（/usr/local/bin/bun）。
-pub fn spawn_inner(
+pub async fn spawn_inner(
     app: &AppHandle,
     agent_id: u64,
     program: &str,
     args: &[String],
     cwd: &str,
 ) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
-    // Claude Code 连接器懒安装兜底：PATH 自装优先；没有则尝试应用管理的连接器
-    //（bun <entry> 形式 spawn），连接器缺失时自动安装（connector.rs）。
-    if program == "claude-agent-acp" && crate::env_path::find_program(program).is_none() {
-        let connector = crate::connector::connector_install(app.to_owned())?;
-        return spawn_connector(app, agent_id, &connector, args, cwd);
+    // 懒装桥（connector.rs BRIDGES 表驱动）：用户 PATH 自装优先；没有则用应用
+    // 管理的桥（未装自动安装，进度流入口在前端 bridge_install，这里是无 UI 兜底），
+    // 以 `bun <entry>` 形式 spawn。
+    if let Some(spec) = crate::connector::bridge_spec(program) {
+        if crate::env_path::find_program(program).is_none() {
+            let bridge = match crate::connector::resolve_managed(app, spec) {
+                Some(b) => b,
+                None => crate::connector::install_bridge(app, spec, None).await?,
+            };
+            return spawn_bridge(app, agent_id, spec, &bridge, args, cwd);
+        }
     }
 
     let hit = crate::env_path::find_program(program);
@@ -159,7 +165,7 @@ pub fn spawn_inner(
         .args(args)
         .set_raw_out(true)
         .env("PATH", crate::env_path::enhanced_path())
-        .envs(claude_env_inject());
+        .envs(bridge_env_inject(program));
     if !cwd.is_empty() {
         cmd = cmd.current_dir(cwd);
     }
@@ -172,39 +178,41 @@ pub fn spawn_inner(
     Ok(rx)
 }
 
-/// spawn 应用管理的连接器：`bun <entry> <args>`（连接器纯 ESM JS，bun/node 均可跑）。
-fn spawn_connector(
+/// spawn 应用管理的桥：`bun <entry> <args>`（桥纯 ESM JS，bun/node 均可跑）。
+fn spawn_bridge(
     app: &AppHandle,
     agent_id: u64,
-    connector: &crate::connector::ResolvedConnector,
+    spec: &crate::connector::BridgeSpec,
+    bridge: &crate::connector::ResolvedBridge,
     args: &[String],
     cwd: &str,
 ) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
     let runtime = crate::env_path::find_program("bun")
         .map(|h| h.path)
         .or_else(|| crate::env_path::find_program("node").map(|h| h.path))
-        .ok_or_else(|| "未找到 bun 或 node 运行时，无法启动 Claude Code 连接器".to_string())?;
+        .ok_or_else(|| format!("未找到 bun 或 node 运行时，无法启动 {} 桥接器", spec.pkg))?;
     log::info!(
-        "[agent:{agent_id}] spawn claude-agent-acp(managed v{}) → {} {} {:?} cwd={cwd}",
-        connector.version,
+        "[agent:{agent_id}] spawn {}(managed v{}) → {} {} {:?} cwd={cwd}",
+        spec.program,
+        bridge.version,
         runtime.display(),
-        connector.entry,
+        bridge.entry,
         args
     );
     let mut cmd = app
         .shell()
         .command(&runtime)
-        .arg(&connector.entry)
+        .arg(&bridge.entry)
         .args(args)
         .set_raw_out(true)
         .env("PATH", crate::env_path::enhanced_path())
-        .envs(claude_env_inject());
+        .envs(bridge_env_inject(spec.program));
     if !cwd.is_empty() {
         cmd = cmd.current_dir(cwd);
     }
     let (rx, child) = cmd
         .spawn()
-        .map_err(|e| format!("spawn claude-agent-acp 失败: {e}"))?;
+        .map_err(|e| format!("spawn {} 失败: {e}", spec.program))?;
     app.state::<AgentStore>()
         .0
         .lock()
@@ -213,14 +221,16 @@ fn spawn_connector(
     Ok(rx)
 }
 
-/// Claude Code 连接器的 claude 二进制定位：注入 CLAUDE_CODE_EXECUTABLE
-/// （acp-agent.js claudeCliPath() 的官方覆盖点）。用户没装 claude 时不注入，
-/// 由连接器报清晰错误引导安装。
-fn claude_env_inject() -> Vec<(String, String)> {
+/// 懒装桥的本体 CLI 定位：注入 spec.cli_env（各桥官方覆盖点，如 claude 的
+/// CLAUDE_CODE_EXECUTABLE）。用户没装本体时不注入，由桥报清晰错误引导安装。
+fn bridge_env_inject(program: &str) -> Vec<(String, String)> {
     let mut env = Vec::new();
-    if let Some(hit) = crate::env_path::find_program("claude") {
+    let Some(spec) = crate::connector::bridge_spec(program) else {
+        return env;
+    };
+    if let (Some(key), Some(hit)) = (spec.cli_env, crate::env_path::find_program(spec.cli_program)) {
         env.push((
-            "CLAUDE_CODE_EXECUTABLE".to_string(),
+            key.to_string(),
             hit.path.to_string_lossy().into_owned(),
         ));
     }
