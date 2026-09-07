@@ -417,7 +417,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                             ? `✓ 可用（${a.resolvedPath}）`
                             : "✓ 可用"
                           : a.state === "installable"
-                            ? "未装桥（首次使用/测试连接时自动安装）"
+                            ? "未装 ACP 桥接器（首次使用/测试连接时自动安装）"
                             : a.bridge
                               ? a.bridge.cliAvailable
                                 ? `✗ 缺 bun/npm，无法自动安装桥接器（本体 ${a.bridge.cliProgram} 已装）`

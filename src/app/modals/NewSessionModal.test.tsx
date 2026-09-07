@@ -112,7 +112,7 @@ describe("NewSessionModal（P26c 两步向导）", () => {
     );
     const pi = screen.getByText("Pi").closest("[cmdk-item]");
     expect(pi).not.toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("未装桥 · 首次使用自动安装")).toBeInTheDocument();
+    expect(screen.getByText("未装 ACP 桥接器 · 首次使用自动安装")).toBeInTheDocument();
     const codex = screen.getByText("Codex").closest("[cmdk-item]");
     expect(codex).toHaveAttribute("aria-disabled", "true");
     expect(codex?.textContent).toContain("未安装");
@@ -279,11 +279,11 @@ describe("NewSessionModal（P26c 两步向导）", () => {
 
   // —— P28 三态与懒装门控 ——
 
-  it("P28：absent 行 disabled 标「未安装」；installable 行可点标「未装桥」", () => {
+  it("P28：absent 行 disabled 标「未安装」；installable 行可点标「未装 ACP 桥接器」", () => {
     renderModal();
     const pi = screen.getByText("Pi").closest("[cmdk-item]");
     expect(pi?.getAttribute("aria-disabled")).not.toBe("true");
-    expect(screen.getByText("未装桥 · 首次使用自动安装")).toBeInTheDocument();
+    expect(screen.getByText("未装 ACP 桥接器 · 首次使用自动安装")).toBeInTheDocument();
     const cc = screen.getByText("Claude Code").closest("[cmdk-item]");
     expect(cc?.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByText("未安装")).toBeInTheDocument();

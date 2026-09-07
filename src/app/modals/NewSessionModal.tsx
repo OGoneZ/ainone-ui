@@ -219,7 +219,7 @@ export function NewSessionModal({
                     <span className="ns-item-name">{a.name}</span>
                     {a.state === "absent" && <span className="ns-item-note">未安装</span>}
                     {a.state === "installable" && (
-                      <span className="ns-item-note">未装桥 · 首次使用自动安装</span>
+                      <span className="ns-item-note">未装 ACP 桥接器 · 首次使用自动安装</span>
                     )}
                     {adapterId === a.id && <span className="ns-item-check">✓</span>}
                   </CommandItem>
