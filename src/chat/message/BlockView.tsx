@@ -6,6 +6,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import type { BlockMsg } from "@/acp/message-log";
 import type { ToolContent } from "@/acp/session-core";
+import { kindIcon, toolSubtitle } from "@/acp/toolDisplay";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import { MarkdownView } from "./MarkdownView";
 import { DiffView } from "./DiffView";
@@ -15,9 +16,17 @@ import {
 
   ThinkingIcon,
   TerminalIcon,
-  ToolIcon,
 } from "@/components/ui/icons";
 import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
+
+/** P30：工具 status → 中文文案（failed 为协议失败终态，error 为本地历史值） */
+const TOOL_STATUS_LABEL: Record<string, string> = {
+  pending: "等待",
+  in_progress: "运行中",
+  completed: "完成",
+  failed: "失败",
+  error: "失败",
+};
 
 function ThoughtView({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
   const [open, setOpen] = useState(live);
@@ -99,19 +108,26 @@ function ToolBlock({
   startTs,
   ms,
   content,
+  toolKind,
+  rawInput,
   diffComments,
   onAddDiffComment,
 }: {
   toolCallId: string;
   title: string;
   status: string;
+  /** P30：协议 ToolKind（read/edit/execute/…）+ 原始入参（参数副标题）；旧日志缺省 */
+  toolKind?: string;
+  rawInput?: unknown;
   startTs?: number;
   ms?: number;
   content: ToolContent[];
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // P30 AC-3.1：含 diff（写操作）默认展开；S3 接入「无 diff→有 diff 边沿自动展开」
+  const hasDiff = content.some((c) => c.kind === "diff");
+  const [open, setOpen] = useState(hasDiff);
   // P16b：运行中（pending/in_progress）→ 实时秒表；终态 → 封口的 ms
   const running = status === "pending" || status === "in_progress";
   const elapsed = useElapsedTicker(running ? startTs : undefined);
@@ -120,6 +136,9 @@ function ToolBlock({
     : ms !== undefined && ms > 0
       ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
       : null;
+  // P30 AC-2.3：kind 驱动图标（缺省回退扳手）+ rawInput 提炼参数副标题
+  const KindIcon = kindIcon(toolKind);
+  const subtitle = toolSubtitle(rawInput);
   return (
     // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）
     <div className="tool" data-status={status}>
@@ -127,7 +146,7 @@ function ToolBlock({
         <span className="caret inline-flex transition-transform" style={{ transform: open ? "rotate(90deg)" : "none", transitionDuration: "var(--motion-fast)" }}>
           <ChevronRightIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
         </span>
-        <ToolIcon
+        <KindIcon
           style={{
             width: 14,
             height: 14,
@@ -138,8 +157,13 @@ function ToolBlock({
           }}
         />
         <span>{title}</span>
+        {subtitle && (
+          <span className="tool-subtitle" title={subtitle}>
+            {subtitle}
+          </span>
+        )}
         {timeLabel && <span className="tool-elapsed">{timeLabel}</span>}
-        <span className="status">{status}</span>
+        <span className="status">{TOOL_STATUS_LABEL[status] ?? status}</span>
       </div>
       {open && content.length > 0 && (
         <div className="tool-body">
@@ -208,6 +232,8 @@ export function BlockView({
           toolCallId={block.toolCallId}
           title={block.title}
           status={block.status}
+          toolKind={block.toolKind}
+          rawInput={block.rawInput}
           startTs={block.startTs}
           ms={block.ms}
           content={block.content}

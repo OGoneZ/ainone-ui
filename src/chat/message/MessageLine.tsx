@@ -174,6 +174,7 @@ function ActivityGroupCard({
   const fileChanges = aggregateFileChanges(
     diffs.map((d) => ({ path: d.diff.path, oldText: d.diff.oldText, newText: d.diff.newText })),
   );
+  // P30 AC-2.4：折叠态就透出改动规模——「改了什么」不该藏在展开态里（徽标行见 JSX）
   return (
     <div className="activity-group my-1.5">
       <button
@@ -192,6 +193,14 @@ function ActivityGroupCard({
         <ToolIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
         <span>{summary}</span>
         {seconds !== "0" && <span>· 用时 {seconds} 秒</span>}
+        {fileChanges.length > 0 && (
+          <span className="activity-filechanges" title={fileChanges.map((f) => f.path).join("\n")}>
+            ·{" "}
+            <span style={{ color: "var(--success)" }}>+{fileChanges.reduce((s, f) => s + f.added, 0)}</span>{" "}
+            <span style={{ color: "var(--danger)" }}>−{fileChanges.reduce((s, f) => s + f.removed, 0)}</span>{" "}
+            {fileChanges.length} 个文件
+          </span>
+        )}
       </button>
       {open && (
         <div
