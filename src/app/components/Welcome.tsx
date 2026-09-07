@@ -17,7 +17,7 @@ export function LogoMark({ size = 96 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" className="welcome-logo">
       <rect className="welcome-logo-shadow" x="166" y="178" width="284" height="240" rx="56" fill="#E0DBCE" />
       <rect className="welcome-logo-shadow2" x="140" y="146" width="284" height="240" rx="56" fill="#CBC5B7" />
-      <g fill="#141414">
+      <g className="welcome-logo-ink" fill="#141414">
         <path transform="translate(114,112)" d="M44 0 H122 A10 10 0 0 1 132 10 V100 A10 10 0 0 1 122 110 H10 A10 10 0 0 1 0 100 V44 A44 44 0 0 1 44 0 Z" />
         <g className="welcome-logo-eye"><g className="welcome-logo-lid"><path transform="translate(256,112)" fill="#D97757" d="M10 0 H98 A44 44 0 0 1 142 44 V110 A10 10 0 0 1 132 120 H10 A10 10 0 0 1 0 110 V10 A10 10 0 0 1 10 0 Z" /></g></g>
         <path transform="translate(114,242)" d="M10 0 H122 A10 10 0 0 1 132 10 V100 A10 10 0 0 1 122 110 H44 A44 44 0 0 1 0 66 V10 A10 10 0 0 1 10 0 Z" />

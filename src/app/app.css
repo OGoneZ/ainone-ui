@@ -469,18 +469,30 @@ select {
 }
 
 /* —— P30 欢迎页动效：logo 悬浮呼吸 + 橙格扫视眨眼 + 气泡尾摆 + 宣传语打字机光标 ——
- * 图形 path 不动，只挂 transform/opacity 动画；节奏刻意错开（呼吸 4.4s /
+ * 图形 path 不动，只挂 transform/opacity/fill 动画；节奏刻意错开（呼吸 4.4s /
  * 扫视 8.6s / 尾摆 3.4s）避免整体机械感。
  * 灵动感参照动画十二法则（社区通识）：
- *  - 扫视是"弹射"不是"滑动"：换向短促 + overshoot 回弹 + 停留期轻微游移；
- *  - 看向一侧时「远侧压扁多、近侧压扁少」= 斜眼（squint），比整体平移醒目得多；
- *  - 眨眼自带 squash（横向微鼓）+ 双段弹回，比单段压扁更有弹性；
+ *  - 移动为主、压扁为辅：整体平移扛「看」的语义，斜眼 squash 只做次信号；
+ *  - 平移与压缩必须同向叠加（挤过去），不能反向补偿——反向补偿会吃掉
+ *    净位移，实测读作「原地哆嗦、两边收缩」（两轮翻车根因）；
+ *  - 眨眼与扫视相位锁定（8.6 = 2 × 4.3）：眨眼只落在注视停留段，
+ *    绝不砸在弹射/压扁半路上（实测随机相位会撞出双重形变的怪异感）；
+ *  - 换向弹射 + overshoot 回弹，注视期轻微游移；
  *  - 身体跟随用呼吸（缩放）替代僵硬的左右倾。
  * 打字机 JS 侧在 useHeadlineTypewriter（打完停住），光标闪烁交给 CSS。 */
 .welcome-logo {
   /* 悬浮叠加缓慢呼吸（scale 1~1.012）：像在轻轻吐纳，替代原先机械的 ±2° 倾斜 */
   animation: welcome-logo-float 4.4s ease-in-out infinite,
     welcome-logo-breathe 4.4s ease-in-out infinite;
+}
+
+/* —— 深浅色自适应（社区通识：单色标志用 currentColor/令牌随主题换色，
+ * 而非两套图）——三个「墨色」窗口 fill 走 --text-primary：浅色 #0f0f0f、
+ * 深色 #f6f6f6，深色下与背景拉开对比；橙眼/双层投影是品牌色/中性米灰，
+ * 两种主题下都成立，保持不动。SVG fill 属性优先级低于 CSS 规则，
+ * 故 CSS 换色不需要动 JSX 里的 fallback fill（无 CSS 时仍回退 #141414）。 */
+.welcome-logo-ink {
+  fill: var(--text-primary);
 }
 
 @keyframes welcome-logo-breathe {
@@ -496,58 +508,59 @@ select {
   animation: welcome-logo-look 8.6s ease-in-out infinite;
 }
 
-/* 眨眼（scaleY 压扁）挂内层 .welcome-logo-lid——与扫视分离成两条时间线：
- * 周期互质（8.6s × 4.6s），眨眼会随机落在看左/看右/回中等不同相位，
- * 组合出「自然随机」的观感，而不是每个循环一模一样。 */
+/* 眨眼（scaleY 压扁）挂内层 .welcome-logo-lid——与扫视分离成两条时间线。
+ * 周期 4.3s = 扫视 8.6s 的一半：眨眼相位与扫视**锁定**在注视段
+ * （扫视 37%~46% 回中停留 ↔ 眨眼 74%~92% 闭合弹回；扫视 87%~100% 尾段
+ * ↔ 眨眼 0%~22% 又一次），绝不砸在弹射/形变半路上——上一版互质随机
+ * 相位实测会撞出「形变进行到一半又叠一次闭合」的怪异双重形变。 */
 .welcome-logo-lid {
   transform-origin: 327px 172px;
   transform-box: view-box;
-  animation: welcome-logo-blink 4.6s ease-in-out infinite;
+  animation: welcome-logo-blink 4.3s ease-in-out infinite;
 }
 
-/* 扫视循环（8.6s）：大步幅平移 + 斜眼 squash。
- * 「斜眼」实现：origin 固定几何中心 327,172，scaleX 对称压缩后用反向
- * translate 补偿近侧——看左时落点 translate 为 +7px（往右），近侧（左）缘
- * 被推回原位附近不动、远侧（右）缘被大幅挤进来，等效于把 origin 挪到近侧缘
- * 的形变，但不用中途改 transform-origin（平滑改 origin 本身就是一次形变跳动）。
- * 看左落点：橙格宽 142，scaleX 0.72 → 102；中心 327+7=334，左缘 ≈ 283
- * （近侧贴原位 256 附近），右缘 ≈ 385（远侧自 398 大收，压掉 ~60px），
- * 整体「左眼角钉住、右眼角挤扁」，斜眼轮廓一眼可辨。
- * 换向保持弹射 + overshoot（先冲到 scaleX 0.66 再回落），注视期游移 ±1px。 */
+/* 扫视循环（8.6s）：大步幅平移（±26px）+ 斜眼 squash。
+ * 关键教训（两轮实测）：平移与压缩必须**同向叠加**——看左时 translate
+ * -26px、scaleX 0.76 挤过去，两侧收缩的同时整体确实「挪走」了；此前
+ * 两版把 translate 反向来补偿压缩（+5px/+7px），净位移被吃掉，观感是
+ * 「原地哆嗦、两边收缩、挪了一点点」。
+ * 现在看左：左缘 256-26-17≈213、右缘 398-26-17≈355（整体左探 ~43px，
+ * 同时变窄 34px）；斜眼感来自「朝向侧探出 + 收窄」，不再追求单侧钉住。
+ * 换向弹射 + overshoot（先冲 0.68 / ±30px 再回落），注视期游移 ±1px。 */
 @keyframes welcome-logo-look {
-  /* 看左：快速弹射（对称压扁 + 反向 translate 补偿近侧） */
+  /* 看左：快速弹射（平移与压缩同向，整体挤过去） */
   0% { transform: translate(0, 0) scale(1, 1); }
-  4% { transform: translate(-4px, 0) scale(0.95, 1); }
-  8% { transform: translate(4px, 0) scale(0.66, 1.02); }
-  13% { transform: translate(7px, 0) scale(0.72, 1.03); }
+  4% { transform: translate(-10px, 0) scale(0.94, 1); }
+  8% { transform: translate(-30px, 0) scale(0.68, 1.02); }
+  13% { transform: translate(-26px, 0) scale(0.76, 1.03); }
   /* 注视左：斜眼保持 + 轻微游移 */
-  22% { transform: translate(7px, 0) scale(0.72, 1.03); }
-  26% { transform: translate(6px, 0.6px) scale(0.74, 1); }
+  22% { transform: translate(-26px, 0) scale(0.76, 1.03); }
+  26% { transform: translate(-25px, 0.6px) scale(0.78, 1); }
   /* 回中：恢复方眼 */
-  32% { transform: translate(1.5px, 0) scale(1.01, 1); }
+  32% { transform: translate(2px, 0) scale(1.01, 1); }
   37% { transform: translate(0, 0) scale(1, 1); }
   46% { transform: translate(0, 0) scale(1, 1); }
-  /* 看右：对称压扁 + 反向 translate 补偿另一侧 */
-  50% { transform: translate(4px, 0) scale(0.95, 1); }
-  54% { transform: translate(-4px, 0) scale(0.66, 1.02); }
-  58% { transform: translate(-7px, 0) scale(0.72, 1.03); }
+  /* 看右：平移与压缩同向（挤过去） */
+  50% { transform: translate(10px, 0) scale(0.94, 1); }
+  54% { transform: translate(30px, 0) scale(0.68, 1.02); }
+  58% { transform: translate(26px, 0) scale(0.76, 1.03); }
   /* 注视右：斜眼保持 + 轻微游移 */
-  68% { transform: translate(-7px, 0) scale(0.72, 1.03); }
-  72% { transform: translate(-6px, -0.6px) scale(0.74, 1); }
+  68% { transform: translate(26px, 0) scale(0.76, 1.03); }
+  72% { transform: translate(25px, -0.6px) scale(0.78, 1); }
   /* 回中 + 余韵微晃 */
-  78% { transform: translate(-1.5px, 0) scale(1.01, 1); }
-  83% { transform: translate(0.5px, 0) scale(1, 1); }
+  78% { transform: translate(-2px, 0) scale(1.01, 1); }
+  83% { transform: translate(-0.5px, 0) scale(1, 1); }
   87% { transform: translate(0, 0) scale(1, 1); }
   100% { transform: translate(0, 0) scale(1, 1); }
 }
 
-/* 眨眼循环（4.6s）：先微眯（预告）→ 闭合 → 快速弹回 → 轻微过开回落。
+/* 眨眼循环（4.3s，= 扫视半周期）：微眯预告 → 闭合 → 快速弹回 → 过开回落。
  * 横向 1.03 微鼓是 squash-and-stretch（体积守恒），比单段压扁更有弹性。 */
 @keyframes welcome-logo-blink {
-  0%, 78% { transform: scale(1, 1); }
-  83% { transform: scale(1.01, 0.88); }
-  88% { transform: scale(1.03, 0.1); }
-  93% { transform: scale(1.02, 1.06); }
+  0%, 74% { transform: scale(1, 1); }
+  80% { transform: scale(1.01, 0.85); }
+  86% { transform: scale(1.03, 0.08); }
+  92% { transform: scale(1.02, 1.07); }
   97% { transform: scale(1, 1); }
   100% { transform: scale(1, 1); }
 }
