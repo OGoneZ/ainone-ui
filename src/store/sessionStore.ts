@@ -15,9 +15,12 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AgentCapabilities } from "@agentclientprotocol/sdk";
+import type { AgentCapabilities, SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { ChatMsg, BlockMsg } from "@/acp/message-log";
 import type { AskQuestion } from "../chat/logic/askCard";
+
+/** P29：会话配置选项（ACP SessionConfigOption，category="model" 即模型选择器） */
+export type AcpSessionConfigOption = SessionConfigOption;
 
 export type { ChatMsg, BlockMsg };
 
@@ -41,6 +44,8 @@ export interface RuntimeState {
   usage: { used: number; size: number; cost: number | null } | null;
   /** F-8-4 元数据：provider 路由（providers/list 采集），无则为 null */
   meta: { apiType?: string; baseUrl?: string } | null;
+  /** P29：会话配置选项（session/new 存档 + config_option_update 刷新）；category="model" 即模型选择器 */
+  configOptions: AcpSessionConfigOption[] | null;
   /** F-9-1 计划：当前 turn 的 plan 条目（全量替换，turn 结束清除） */
   plan: { content: string; status: string; priority?: string }[] | null;
   /** F-12-2 结构化提问：当前等待回答的提问卡（null = 无） */
@@ -84,6 +89,8 @@ interface SessionStore {
   setUsage: (key: string, usage: { used: number; size: number; cost: number | null }) => void;
   /** 更新采集到的 provider 路由（F-8-4） */
   setMeta: (key: string, meta: { apiType?: string; baseUrl?: string } | null) => void;
+  /** P29：更新会话配置选项（session/new 存档 + config_option_update / set_config_option 刷新） */
+  setConfigOptions: (key: string, options: AcpSessionConfigOption[] | null) => void;
   /** 更新会话 cwd 的 git 分支（F-15-6） */
   setBranch: (key: string, branch: string | null) => void;
   /** 更新当前 turn 的 plan（F-9-1 全量替换） */
@@ -121,6 +128,7 @@ export const useSessionStore = create<SessionStore>()(
                 prompted: false,
                 usage: null,
                 meta: null,
+                configOptions: null,
                 plan: null,
                 ask: null,
                 branch: null,
@@ -143,6 +151,13 @@ export const useSessionStore = create<SessionStore>()(
           const cur = s.runtime[key];
           if (!cur) return {};
           return { runtime: { ...s.runtime, [key]: { ...cur, meta } } };
+        }),
+
+      setConfigOptions: (key, options) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          return { runtime: { ...s.runtime, [key]: { ...cur, configOptions: options } } };
         }),
 
       setBranch: (key, branch) =>

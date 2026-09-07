@@ -589,6 +589,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       );
       sessionRef.current = s;
       bindSession(tabKey, s.sessionId);
+      // P29：session/new 存档的 configOptions（category="model" 即模型选择器）进 store
+      if (s.configOptions) useSessionStore.getState().setConfigOptions(tabKey, s.configOptions);
       // 日志身份固化：全新会话（无恢复来源）首次建链时把 logSid 锚定为
       // harness sessionId；此后即使恢复链降级换 sessionId，日志文件身份不变
       if (logSidRef.current === null) logSidRef.current = s.sessionId;
@@ -986,6 +988,11 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
               total: e.entries.length,
             });
             useSessionStore.getState().setPlan(tabKey, e.entries);
+            return;
+          }
+          if (e.type === "config_options") {
+            // P29：config_option_update 全量刷新（模型切换 currentValue 实时更新）
+            useSessionStore.getState().setConfigOptions(tabKey, e.options);
             return;
           }
           const next = applyEvent(turnRef.current, e, Date.now);

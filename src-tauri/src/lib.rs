@@ -15,6 +15,7 @@ mod env_path;
 mod fs;
 mod fslist;
 mod gitmeta;
+mod harness_meta;
 mod harness_probe;
 mod quickask;
 mod sessions;
@@ -71,6 +72,8 @@ pub fn run() {
             adapters::adapter_status,
             adapters::default_cwd,
             connector::bridge_install,
+            harness_meta::harness_meta,
+            harness_meta::harness_settings_write,
             agent::agent_spawn,
             agent::agent_stdin_write,
             agent::agent_kill,

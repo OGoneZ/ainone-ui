@@ -32,6 +32,7 @@ export type Outgoing =
   | { type: "available_commands"; commands: CommandWord[] }
   | { type: "usage"; used: number; size: number; cost: number | null }
   | { type: "plan"; entries: PlanEntry[] }
+  | { type: "config_options"; options: acp.SessionConfigOption[] }
   | { type: "error"; message: string };
 
 /** P9 F-9-1 计划条目（从 ACP plan block 提取） */
@@ -81,6 +82,10 @@ export interface AcpSession {
   sessionOrigin: "new" | "loaded" | "degraded-new";
   /** 降级原因（sessionOrigin === "degraded-new" 时存在，供 UI 文案） */
   loadError?: string;
+  /** P29：session/new 存档的会话配置选项（category="model" 即模型选择器；未声明 → null） */
+  configOptions: acp.SessionConfigOption[] | null;
+  /** P29：会话级设置配置选项（session/set_config_option；无该能力 → null） */
+  setConfigOption: ((configId: string, value: string) => Promise<acp.SessionConfigOption[] | null>) | null;
   prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
   cancel(): Promise<void>;
   /** F-8-5 会话分叉：从当前状态 fork，返回新 sessionId */
@@ -224,6 +229,8 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
   let agentInfo: acp.Implementation | null = null;
   let sessionOrigin: "new" | "loaded" | "degraded-new" = "new";
   let loadError: string | undefined;
+  // P29：session/new 响应的 configOptions（降级 new / 全新 new 两处赋值）
+  let newConfigOptions: acp.SessionConfigOption[] | null = null;
 
   const initResp = await withStartupGuard(
     connection.agent.request(acp.methods.agent.initialize, {
@@ -295,6 +302,7 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
       boundSessionId = resp.sessionId;
       sessionOrigin = "degraded-new";
       loadError = loadError ?? "session/load 失败";
+      newConfigOptions = resp.configOptions ?? null;
       console.info("[acp] 降级 session/new 完成 sessionId=", resp.sessionId);
     }
   } else {
@@ -307,10 +315,14 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
       { closed: opts.closed, stderrTail: opts.stderrTail, timeoutMs: opts.initTimeoutMs },
     );
     boundSessionId = resp.sessionId;
+    newConfigOptions = resp.configOptions ?? null;
     console.info("[acp] session/new 完成 sessionId=", resp.sessionId);
   }
 
   const sessionId = boundSessionId;
+
+  // P29：configOptions 存档（模型选择器数据源；config_option_update 通知实时刷新）
+  let configOptions: acp.SessionConfigOption[] | null = newConfigOptions;
 
   return {
     sessionId,
@@ -318,6 +330,25 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     agentInfo,
     sessionOrigin,
     ...(loadError !== undefined ? { loadError } : {}),
+    get configOptions() {
+      return configOptions;
+    },
+    async setConfigOption(configId, value) {
+      try {
+        const resp = await connection.agent.request(acp.methods.agent.session.setConfigOption as any, {
+          sessionId,
+          configId,
+          value,
+        });
+        // 响应带全量最新 configOptions → 存档刷新（currentValue 已更新）
+        const opts = (resp as { configOptions?: acp.SessionConfigOption[] })?.configOptions;
+        if (Array.isArray(opts)) configOptions = opts;
+        return configOptions;
+      } catch (e) {
+        console.warn("[acp] session/set_config_option 失败:", e);
+        return null;
+      }
+    },
     async prompt(text, onOutgoing) {
       console.info("[acp] session/prompt 开始 sessionId=", sessionId);
       // prompt 入口丢弃滞留 update：上一 turn 250ms 有界补派发的漏网尾巴
@@ -437,6 +468,10 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
     case "plan":
       // F-9-1 计划栏：plan block 全量替换（DEC-16；L5：走 plan.extractPlan 单一实现）
       onOutgoing({ type: "plan", entries: extractPlan(u.update) });
+      break;
+    case "config_option_update":
+      // P29：会话配置选项全量刷新（模型切换 currentValue 实时更新）
+      onOutgoing({ type: "config_options", options: u.update.configOptions });
       break;
     default:
       break;

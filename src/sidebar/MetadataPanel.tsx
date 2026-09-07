@@ -1,18 +1,20 @@
 // 元数据侧栏（P8 · F-8-4）：右侧可折叠第二侧栏，展示当前会话元数据。
 //
-// 数据来源：
+// 数据来源（P29 优先级链）：
 //   - 上下文占用 / token / 成本 → usage_update（store.runtime[t].usage）
-//   - apiType / baseUrl → providers/list（store.runtime[t].meta）
-//   - sessionId / cwd / 模型（--model）→ 会话与 adapter 配置（DEC-13）
-//   - git 分支 → git_current_branch（P15 F-15-6，ChatPanel 挂载时采集）
+//   - apiType / baseUrl → providers/list（store.runtime[t].meta）→ harness_meta 静态配置兜底
+//   - sessionId → store.runtime[t].sessionId（P29 改读 store：新建会话 bindSession 即有值，
+//     不再依赖 App 透传 Tab.sessionId——那条链路只有恢复会话才填）
+//   - 模型 → configOptions[model].currentValue（ACP 稳定通道）→ harness_meta 静态 → args --model
+//   - cwd / git 分支 → 会话与 git_current_branch 采集
 //
 // F-15-6：session ID / 工作区 cwd / 分支 / baseUrl / 模型 点击复制，
 // toast「已复制」反馈；非 git 仓库分支显示「—」不可复制。
 
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/store/sessionStore";
-import { usagePercent } from "@/acp/metadata";
-import { extractModel } from "@/acp/metadata";
+import { usagePercent, extractModel, extractSessionModel, stripModelSuffix } from "@/acp/metadata";
+import { fetchHarnessMeta, type HarnessMeta } from "@/ipc/harnessMeta";
 import { ChevronRightIcon, CloseIcon, CopyIcon } from "@/components/ui/icons";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
@@ -29,10 +31,28 @@ interface Props {
 
 const STORAGE_KEY = "ainone-metadata-open";
 
-export function MetadataPanel({ tabKey, adapter, sessionId, cwd, embedded = false }: Props) {
+export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, embedded = false }: Props) {
   const usage = useSessionStore((s) => s.runtime[tabKey]?.usage ?? null);
   const meta = useSessionStore((s) => s.runtime[tabKey]?.meta ?? null);
   const branch = useSessionStore((s) => s.runtime[tabKey]?.branch ?? null);
+  // P29 R2：sessionId 改读 store——新建会话 bindSession 后立即有值
+  const storeSessionId = useSessionStore((s) => s.runtime[tabKey]?.sessionId ?? null);
+  const sessionId = storeSessionId ?? sessionIdProp;
+  // P29 R3：会话级 configOptions（模型选择器 currentValue）
+  const configOptions = useSessionStore((s) => s.runtime[tabKey]?.configOptions ?? null);
+  // P29 R3/R4：静态配置兜底（harness_meta；文件缺失/不支持 → null）
+  const [staticMeta, setStaticMeta] = useState<HarnessMeta | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchHarnessMeta(adapter.id)
+      .then((m) => {
+        if (alive) setStaticMeta(m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [adapter.id]);
 
   const [open, setOpen] = useState<boolean>(() => localStorage.getItem(STORAGE_KEY) === "1");
   useEffect(() => {
@@ -40,14 +60,21 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd, embedded = fals
   }, [open]);
 
   const pct = usage ? usagePercent(usage) : null;
-  const model = extractModel(adapter.args);
+  // P29 模型优先级：configOptions[model] > 静态配置 model > args --model（全部去 [1m] 后缀）
+  const model =
+    extractSessionModel(configOptions) ??
+    stripModelSuffix(staticMeta?.model ?? null) ??
+    stripModelSuffix(extractModel(adapter.args));
+  // P29 baseUrl 优先级：providers 会话值 > 静态配置（UI 标注来源）
+  const baseUrl = meta?.baseUrl ?? staticMeta?.base_url ?? null;
+  const baseUrlSource = meta?.baseUrl ? "session" : staticMeta?.base_url ? "config" : null;
 
   // F-11-7：嵌入 RightRail → 直接渲染内容（Rail 负责开合，不再有自己的折叠态）
   if (embedded) {
     return (
       <div className="meta-embedded">
         <dl className="meta-list">
-          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} />
+          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} />
         </dl>
       </div>
     );
@@ -82,10 +109,19 @@ export function MetadataPanel({ tabKey, adapter, sessionId, cwd, embedded = fals
       </div>
 
       <dl className="meta-list">
-        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} />
+        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} />
       </dl>
     </aside>
   );
+}
+
+/** F-15-6 可复制值渲染（纯展示；CopyableItem 的 dd 内容部分） */
+function CopyableValue({ value, label }: { value: string | null | undefined; label: string }) {
+  const display = value ?? "—";
+  return (
+    <span className="meta-mono">{display}</span>
+  );
+  void label;
 }
 
 /** F-15-6 可复制条目：点击复制值 + 已复制 toast */
@@ -131,6 +167,8 @@ function MetaItems({
   cwd,
   adapterName,
   branch,
+  baseUrl,
+  baseUrlSource,
 }: {
   usage: { used: number; size: number; cost: number | null } | null;
   meta: { apiType?: string; baseUrl?: string } | null;
@@ -140,6 +178,9 @@ function MetaItems({
   cwd?: string;
   adapterName: string;
   branch: string | null;
+  baseUrl: string | null;
+  /** P29 R4：baseUrl 来源（"session"=会话路由 / "config"=本机配置；AC-R4-3） */
+  baseUrlSource: "session" | "config" | null;
 }) {
   return (
     <>
@@ -188,7 +229,17 @@ function MetaItems({
           </dd>
         </div>
 
-        <CopyableItem label="baseUrl" value={meta?.baseUrl ?? null} />
+        <div className="meta-item">
+          <dt>baseUrl</dt>
+          <dd>
+            <CopyableValue value={baseUrl} label="baseUrl" />
+            {baseUrl && baseUrlSource && (
+              <span className="meta-tag" title={baseUrlSource === "session" ? "来自会话路由（providers/list）" : "来自本机配置文件"}>
+                {baseUrlSource === "session" ? "会话" : "配置"}
+              </span>
+            )}
+          </dd>
+        </div>
         <CopyableItem label="模型" value={model} />
     </>
   );

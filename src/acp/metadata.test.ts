@@ -1,7 +1,7 @@
 // 元数据侧栏纯函数单测：extractUsage / extractModel / usagePercent（AC-P8-22）。
 
 import { describe, it, expect } from "vitest";
-import { extractUsage, extractModel, usagePercent } from "./metadata";
+import { extractUsage, extractModel, usagePercent, stripModelSuffix, extractSessionModel } from "./metadata";
 
 describe("extractUsage", () => {
   it("正常：used/size/cost 全取", () => {
@@ -48,5 +48,47 @@ describe("usagePercent", () => {
 
   it("size 为 0 防除零", () => {
     expect(usagePercent({ used: 10, size: 0, cost: null })).toBe(0);
+  });
+});
+
+// —— P29 R3：会话级模型提取 + [1m] 后缀剥离 ——
+
+describe("stripModelSuffix", () => {
+  it("去 [1m] 后缀", () => {
+    expect(stripModelSuffix("saver/glm-5.3-flash[1m]")).toBe("saver/glm-5.3-flash");
+  });
+
+  it("无后缀原样返回", () => {
+    expect(stripModelSuffix("duo-king-6.6")).toBe("duo-king-6.6");
+  });
+
+  it("null 安全", () => {
+    expect(stripModelSuffix(null)).toBeNull();
+  });
+});
+
+describe("extractSessionModel", () => {
+  it("category=model 的 select 项 → currentValue", () => {
+    expect(
+      extractSessionModel([
+        { category: "mode", type: "select", currentValue: "default" },
+        { category: "model", type: "select", currentValue: "anthropic/claude-opus-4-8" },
+      ]),
+    ).toBe("anthropic/claude-opus-4-8");
+  });
+
+  it("[1m] 后缀剥离", () => {
+    expect(
+      extractSessionModel([
+        { category: "model", type: "select", currentValue: "saver/glm-5.3-flash[1m]" },
+      ]),
+    ).toBe("saver/glm-5.3-flash");
+  });
+
+  it("无 model 项 / boolean 项 / 空数组 → null（不编造值）", () => {
+    expect(extractSessionModel([])).toBeNull();
+    expect(extractSessionModel([{ category: "mode", type: "select", currentValue: "plan" }])).toBeNull();
+    expect(extractSessionModel([{ category: "model", type: "boolean", currentValue: true }])).toBeNull();
+    expect(extractSessionModel(null)).toBeNull();
   });
 });
