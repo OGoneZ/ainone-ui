@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdapterWithStatus } from "@/ipc/adapters";
-import { installBridge } from "@/ipc/adapters";
+import { installBridge, installCli } from "@/ipc/adapters";
 import { workspacesUpsert, pickDirectory, type Workspace } from "@/ipc/workspaces";
 import { normPath } from "@/lib/normPath";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -45,8 +45,10 @@ export function NewSessionModal({
   const [adapterId, setAdapterId] = useState("");
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  // P28：懒装桥安装态——installing=安装进行中；installTail=安装器输出尾迹（进度行）
+  // P28/P29：懒装安装态——installing=安装进行中；installingCli=当前装的是 CLI 本体（否则为桥）；
+  // installTail=安装器输出尾迹（进度行）
   const [installing, setInstalling] = useState(false);
+  const [installingCli, setInstallingCli] = useState(false);
   const [installTail, setInstallTail] = useState("");
   const [installError, setInstallError] = useState<string | null>(null);
   // P26 两步向导：harness=选框架；workspace=选目录（presetWorkspaceId 存在时直接进第二步）
@@ -54,6 +56,9 @@ export function NewSessionModal({
   // P26b：cmdk root ref——无输入框模式下方向键监听在 root 的 onKeyDown，
   // root 必须持焦点方向键才可达（Dialog 默认把焦点给容器，真机实测高亮不动）
   const cmdkRootRef = useRef<HTMLDivElement | null>(null);
+  // P29：adapters 最新快照 ref——串联安装（装 CLI → 刷新 → 装桥）跨 render 读最新状态
+  const adapterRef = useRef(adapters);
+  adapterRef.current = adapters;
   useEffect(() => {
     if (!open) return;
     // 等内容渲染完再聚焦（Dialog 焦点圈先落容器）
@@ -68,9 +73,14 @@ export function NewSessionModal({
     setWorkspaceId(presetWorkspaceId !== undefined ? presetWorkspaceId : (workspaces[0]?.id ?? null));
     setStep(presetWorkspaceId !== undefined ? "workspace" : "harness");
     setInstalling(false);
+    setInstallingCli(false);
     setInstallError(null);
     setInstallTail("");
-  }, [open, adapters, workspaces, presetWorkspaceId]);
+    // P29：依赖只留 open + presetWorkspaceId。原先依赖 adapters 会在串联安装中途
+    // （父级 onAdaptersRefresh 换 adapters props）把用户已选的 harness/工作区与
+    // 安装进度整体重置——安装中途被清 = 缺陷。adapters 后续变化经 adapterRef 读取。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, presetWorkspaceId]);
 
   async function newWorkspace() {
     const dir = await pickDirectory();
@@ -103,24 +113,57 @@ export function NewSessionModal({
   const selected = localWs.find((w) => w.id === workspaceId) ?? null;
   const selectedAdapter = adapters.find((a) => a.id === adapterId) ?? null;
 
+  // P29：workspaceId/localWs 在 async startSession 闭包里是本次 render 的快照——
+  // 串联安装跨多次 render，onConfirm 时的选中工作区须经 ref 读最新值。
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+
   function confirm() {
     if (!adapterId || creating || installing) return;
     void startSession();
   }
 
-  /** P28：懒装桥（installable）先装后开——安装进度行实时回显，成功后才关窗建会话 */
+  /** P28/P29：先装后开——CLI 未装先装 CLI（成功保留）、桥未装再装桥，串联但解耦：
+   *  任一步失败停在失败处（已装部分保留，重开按真实状态续补），全成后才关窗建会话。 */
   async function startSession() {
     const a = adapters.find((x) => x.id === adapterId);
     if (!a) return;
-    if (a.state === "installable") {
+    const tail = (line: string) => {
+      setInstallTail((prev) => (prev + "\n" + line).split("\n").slice(-4).join("\n"));
+    };
+    const begin = (isCli: boolean) => {
       setInstalling(true);
+      setInstallingCli(isCli);
       setInstallError(null);
       setInstallTail("");
+    };
+    let cliInstalled = false;
+    if (a.state === "cli_installable") {
+      begin(true);
       try {
-        await installBridge(a.program, (line) => {
-          setInstallTail((prev) => (prev + "\n" + line).split("\n").slice(-4).join("\n"));
-        });
-        // 装成功 → 刷新三态（state 转 ready），再创建
+        await installCli(a.program, tail);
+        cliInstalled = true;
+        // 装 CLI 成功 → 刷新四态（cli_installable 转 installable 或 ready）
+        await onAdaptersRefresh?.();
+      } catch (e) {
+        setInstallError(String(e instanceof Error ? e.message : e));
+        setInstalling(false);
+        return;
+      }
+      setInstalling(false);
+    }
+    // CLI 刚装完刷新后 state 可能已转 installable——用 ref 读最新 props：
+    // React 的 props（adapters）在 async 闭包里是本次 render 的快照，
+    // 所以经 adapterRef.current 取刷新后的最新列表。
+    const fresh = cliInstalled
+      ? (adapterRef.current.find((x) => x.id === adapterId) ?? a)
+      : a;
+    if (fresh.state === "installable") {
+      begin(false);
+      try {
+        await installBridge(fresh.program, tail);
         await onAdaptersRefresh?.();
       } catch (e) {
         setInstallError(String(e instanceof Error ? e.message : e));
@@ -130,7 +173,7 @@ export function NewSessionModal({
       setInstalling(false);
     }
     onClose();
-    onConfirm(adapterId, workspaceId, selected?.cwd);
+    onConfirm(adapterId, workspaceIdRef.current ?? workspaceId, selectedRef.current?.cwd ?? selected?.cwd);
   }
 
   function goNext() {
@@ -175,6 +218,10 @@ export function NewSessionModal({
     if (adapters.some((a) => a.id === id)) setAdapterId(id);
   }
   function onWorkspaceValueChange(v: string) {
+    // P29：v === "ws-none" 只在用户点「未归组」或 Enter 语义上成立；cmdk 受控
+    // value 在 rerender 时也会回调当前值，这里是幂等的。关键修复：不要在
+    // 回调里无条件 setWorkspaceId(null)——受控 value 的初始回调时机在
+    // localWs/workspaces 就绪前后不同，会覆盖 presetWorkspaceId。
     if (v === "ws-none") {
       setWorkspaceId(null);
       return;
@@ -212,12 +259,15 @@ export function NewSessionModal({
                   <CommandItem
                     key={a.id}
                     value={`harness-${a.id}`}
-                    disabled={a.state === "absent"}
+                    disabled={a.state === "absent" && !a.cli}
                     onSelect={() => setAdapterId(a.id)}
                     className={adapterId === a.id ? "ns-item ns-item-active" : "ns-item"}
                   >
                     <span className="ns-item-name">{a.name}</span>
-                    {a.state === "absent" && <span className="ns-item-note">未安装</span>}
+                    {a.state === "absent" && <span className="ns-item-note">{a.cli ? "未安装 · 缺安装条件" : "未安装"}</span>}
+                    {a.state === "cli_installable" && (
+                      <span className="ns-item-note">未安装 · 首次使用自动安装（CLI + 桥）</span>
+                    )}
                     {a.state === "installable" && (
                       <span className="ns-item-note">未装 ACP 桥接器 · 首次使用自动安装</span>
                     )}
@@ -277,8 +327,9 @@ export function NewSessionModal({
         {step === "workspace" && installing && (
           <div className="ns-hint" role="status" data-testid="ns-install-progress">
             <p>
-              正在安装 {selectedAdapter?.name} 的 ACP 桥接器（{selectedAdapter?.bridge?.pkg}
-              ）——首次需下载，视网络可能数秒至数分钟…
+              {installingCli
+                ? `正在安装 ${selectedAdapter?.name}（CLI 本体）——首次需下载，视网络可能数秒至数分钟…`
+                : `正在安装 ${selectedAdapter?.name} 的 ACP 桥接器（${selectedAdapter?.bridge?.pkg}）——首次需下载，视网络可能数秒至数分钟…`}
             </p>
             {installTail && (
               <pre className="ns-install-tail" style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: "0.8em" }}>
@@ -289,7 +340,13 @@ export function NewSessionModal({
         )}
         {step === "workspace" && installError && (
           <p className="ns-hint bad" data-testid="ns-install-error">
-            桥接器安装失败：{installError}
+            {installingCli ? "CLI 安装失败" : "桥接器安装失败"}：{installError}
+          </p>
+        )}
+        {step === "workspace" && selectedAdapter?.state === "cli_installable" && !installing && !installError && (
+          <p className="ns-hint">
+            未检测到 {selectedAdapter.name}（{selectedAdapter.cli?.display}）——点「开始对话」将自动安装 CLI 本体
+            与 ACP 桥接器（需网络）。CLI 安装到用户目录，失败不会影响已装部分。
           </p>
         )}
         {step === "workspace" && selectedAdapter?.state === "installable" && !installing && !installError && (
@@ -304,7 +361,9 @@ export function NewSessionModal({
               ? !selectedAdapter.bridge.cliAvailable
                 ? `未检测到 ${selectedAdapter.name} 的 CLI 本体——桥接器只是转接头，请先在终端安装 ${selectedAdapter.name} 本身。`
                 : `未找到 bun 或 npm 运行时，无法自动安装 ${selectedAdapter.name} 的 ACP 桥接器。请安装 Node.js ≥20 或 bun。`
-              : `程序 ${selectedAdapter.program} 未找到（已搜索 ~/.local/bin、~/.bun/bin、nvm、登录 shell PATH 与系统 PATH）。请先安装，或在设置中改为绝对路径。`}
+              : selectedAdapter.cli && !selectedAdapter.cli.installable
+                ? `未找到 bun 或 npm 运行时，无法自动安装 ${selectedAdapter.cli.display}。请安装 Node.js ≥20 或 bun。`
+                : `程序 ${selectedAdapter.program} 未找到（已搜索 ~/.local/bin、~/.bun/bin、nvm、登录 shell PATH 与系统 PATH）。请先安装，或在设置中改为绝对路径。`}
           </p>
         )}
 

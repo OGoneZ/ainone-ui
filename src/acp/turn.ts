@@ -67,6 +67,9 @@ export function applyEvent(
           toolCallId: e.toolCallId,
           title: e.title,
           status: e.status ?? "pending",
+          // P30：协议 kind/rawInput 透传入块（kind 落 toolKind 避开块类型判别符；缺省不带键）
+          ...(e.kind !== undefined ? { toolKind: e.kind } : {}),
+          ...(e.rawInput !== undefined ? { rawInput: e.rawInput } : {}),
           content: e.content,
           // F-16-2（DEC-49）：记起始时间戳，收尾封口耗时
           startTs: now(),
@@ -74,8 +77,21 @@ export function applyEvent(
       };
     }
     case "tool_update":
-      // now 注入：status 到终态时封口工具耗时 ms
-      return { ...withStart, blocks: updateTool(withStart.blocks, e.toolCallId, e.status ?? null, e.content, now) };
+      // now 注入：status 到终态时封口工具耗时 ms；P30：toolKind/rawInput 合并（缺省保留旧值）
+      return {
+        ...withStart,
+        blocks: updateTool(
+          withStart.blocks,
+          e.toolCallId,
+          e.status ?? null,
+          e.content,
+          now,
+          {
+            ...(e.kind !== undefined ? { toolKind: e.kind } : {}),
+            ...(e.rawInput !== undefined ? { rawInput: e.rawInput } : {}),
+          },
+        ),
+      };
     case "turn_stop":
       return seal(withStart, now);
     default:

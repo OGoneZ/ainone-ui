@@ -28,6 +28,7 @@ export type RenderItem =
     };
 
 function isSettled(tool: BlockMsg & { kind: "tool" }): boolean {
+  // P30：协议失败终态是 failed（error 为本地历史值），两者都算已结算
   return tool.status !== "pending" && tool.status !== "in_progress";
 }
 
@@ -96,4 +97,27 @@ export function buildActivityGroups(blocks: BlockMsg[]): RenderItem[] {
   }
   flush();
   return out;
+}
+
+/**
+ * P30：流式中的分组——尾部一段（最后一个 text/工具边界之后）保持独立渲染，
+ * 已完成的 tool 块不即时收组。理由：completed 是即时判定，流式中途把刚带 diff
+ * 的写块收进折叠卡会让「写操作默认展开」落空（MessageLine busy&&isLast 时调用）。
+ * 规则：从末尾向前找最后一个「不可组块」（text/运行中 tool）为界，界后全部独立；
+ * 界前的连续段仍按 buildActivityGroups 分组（turn 前段活动收组，视觉紧凑）。
+ * turn 结束（busy=false）后由调用方切回 buildActivityGroups 全量收组。
+ */
+export function buildStreamingItems(blocks: BlockMsg[]): RenderItem[] {
+  // 末尾不可组块（含 text）之后不可能再有内容——找最后一个 groupable 段的边界
+  let boundary = blocks.length;
+  while (boundary > 0 && groupable(blocks[boundary - 1])) boundary -= 1;
+  // boundary = 首个「从尾部连续 groupable 段」的起点；若整段全 groupable（纯工具序列流式）
+  // 则 boundary === 0，界后为空 —— 此时保守不入组（全部独立），等 turn 结束统一收
+  if (boundary === 0) {
+    return blocks.map((block): RenderItem => ({ type: "block", block }));
+  }
+  return [
+    ...buildActivityGroups(blocks.slice(0, boundary)),
+    ...blocks.slice(boundary).map((block): RenderItem => ({ type: "block", block })),
+  ];
 }

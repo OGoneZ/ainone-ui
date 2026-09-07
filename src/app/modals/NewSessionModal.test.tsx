@@ -29,7 +29,7 @@ vi.mock("@/ipc/workspaces", async (importOriginal) => {
 
 vi.mock("@/ipc/adapters", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/ipc/adapters")>();
-  return { ...actual, installBridge: vi.fn() };
+  return { ...actual, installBridge: vi.fn(), installCli: vi.fn() };
 });
 
 const pick = vi.mocked(wsMod.pickDirectory);
@@ -351,6 +351,159 @@ describe("NewSessionModal（P26c 两步向导）", () => {
     await user.click(screen.getByTestId("ns-confirm-btn"));
     await waitFor(() => expect(screen.getByTestId("ns-install-error")).toBeInTheDocument());
     expect(screen.getByText(/连接器安装失败/)).toBeInTheDocument();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  // —— P29 四态：CLI 一键安装 + 两层解耦串联 ——
+
+  const opencodeCliInstallable: AdapterWithStatus = {
+    id: "opencode", name: "OpenCode", program: "opencode", args: [], cwd: ".", logo: null,
+    available: false, state: "cli_installable", resolvedPath: null, source: null,
+    bridge: null, cli: { display: "OpenCode", installable: true }, auth: { state: "none", detail: "" },
+  };
+
+  it("P29：cli_installable 项可选中并标「未安装 · 首次使用自动安装（CLI + 桥）」", () => {
+    render(
+      <NewSessionModal
+        open={true}
+        adapters={[adapters[0], opencodeCliInstallable]}
+        workspaces={workspaces}
+        onClose={() => {}}
+        onConfirm={vi.fn()}
+      />,
+    );
+    const oc = screen.getByText("OpenCode").closest("[cmdk-item]");
+    expect(oc?.getAttribute("aria-disabled")).not.toBe("true");
+    expect(screen.getByText(/未安装 · 首次使用自动安装（CLI \+ 桥）/)).toBeInTheDocument();
+  });
+
+  it("P29：cli_installable 点「开始对话」→ 先装 CLI（进度回显），成功后接装桥（fresh 状态驱动），全成建会话", async () => {
+    const installCli = vi.mocked(adaptersMod.installCli);
+    const callOrder: string[] = [];
+    installCli.mockImplementation(async (_program, onLine) => {
+      callOrder.push("cli");
+      onLine?.("下载安装脚本 https://opencode.ai/install…");
+    });
+    installBridge.mockImplementation(async (_program, onLine) => {
+      callOrder.push("bridge");
+      onLine?.("bun add v1.3.14");
+    });
+    // 父级刷新：装完 CLI 后 props 换成 installable 的新状态（fresh 驱动第二段）
+    const onConfirm = vi.fn();
+    let currentAdapters = [adapters[0], opencodeCliInstallable];
+    const onRefresh = vi.fn(() => Promise.resolve());
+    const { rerender } = render(
+      <NewSessionModal
+        open={true}
+        adapters={currentAdapters}
+        workspaces={workspaces}
+        presetWorkspaceId="ws-1"
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        onAdaptersRefresh={onRefresh}
+      />,
+    );
+    // 模拟父级 onAdaptersRefresh 后 rerender 传新 props
+    onRefresh.mockImplementation(() => {
+      currentAdapters = [
+        adapters[0],
+        { ...opencodeCliInstallable, state: "installable" as const, bridge: { pkg: "opencode-acp", version: "0.1.0", cliProgram: "opencode", cliAvailable: true, runtimeAvailable: true } },
+      ];
+      rerender(
+        <NewSessionModal
+          open={true}
+          adapters={currentAdapters}
+          workspaces={workspaces}
+          presetWorkspaceId="ws-1"
+          onClose={() => {}}
+          onConfirm={onConfirm}
+          onAdaptersRefresh={onRefresh}
+        />,
+      );
+      return Promise.resolve();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("ns-back-btn"));
+    await user.click(screen.getByText("OpenCode"));
+    await user.click(screen.getByTestId("ns-next-btn"));
+    // presetWorkspaceId 预填的是 ws-1；回第一步换 harness 后需重选工作区
+    // （cmdk 受控 value 回调 ws-none 在 localWs 就绪前触发过一次，workspaceId 为 null）
+    await user.click(screen.getByText("dev"));
+    await user.click(screen.getByTestId("ns-confirm-btn"));
+    // mock 立即 resolve，瞬态进度行无法稳定捕获——串联顺序以调用序为准
+    await waitFor(() => expect(installCli).toHaveBeenCalledWith("opencode", expect.any(Function)));
+    await waitFor(() => expect(installBridge).toHaveBeenCalled());
+    expect(callOrder).toEqual(["cli", "bridge"]);
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith("opencode", "ws-1", "/Users/me/dev"));
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("P29：CLI 装成功、桥装失败 → 错误展示「CLI 安装成功」语义区分，不建会话", async () => {
+    const installCli = vi.mocked(adaptersMod.installCli);
+    installCli.mockResolvedValue(undefined);
+    installBridge.mockRejectedValueOnce("桥接器安装失败（网络）");
+    const onConfirm = vi.fn();
+    const onRefresh = vi.fn(() => Promise.resolve());
+    const { rerender } = render(
+      <NewSessionModal
+        open={true}
+        adapters={[adapters[0], opencodeCliInstallable]}
+        workspaces={workspaces}
+        presetWorkspaceId="ws-1"
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        onAdaptersRefresh={onRefresh}
+      />,
+    );
+    onRefresh.mockImplementation(() => {
+      rerender(
+        <NewSessionModal
+          open={true}
+          adapters={[
+            adapters[0],
+            { ...opencodeCliInstallable, state: "installable" as const, bridge: { pkg: "opencode-acp", version: "0.1.0", cliProgram: "opencode", cliAvailable: true, runtimeAvailable: true } },
+          ]}
+          workspaces={workspaces}
+          presetWorkspaceId="ws-1"
+          onClose={() => {}}
+          onConfirm={onConfirm}
+          onAdaptersRefresh={onRefresh}
+        />,
+      );
+      return Promise.resolve();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("ns-back-btn"));
+    await user.click(screen.getByText("OpenCode"));
+    await user.click(screen.getByTestId("ns-next-btn"));
+    await user.click(screen.getByTestId("ns-confirm-btn"));
+    await waitFor(() => expect(screen.getByTestId("ns-install-error")).toBeInTheDocument());
+    expect(screen.getByText(/桥接器安装失败/)).toBeInTheDocument();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("P29：CLI 安装失败 → 错误标「CLI 安装失败」，不建会话不装桥", async () => {
+    const installCli = vi.mocked(adaptersMod.installCli);
+    installCli.mockRejectedValueOnce("退出状态 exit status: 1");
+    const onConfirm = vi.fn();
+    render(
+      <NewSessionModal
+        open={true}
+        adapters={[adapters[0], opencodeCliInstallable]}
+        workspaces={workspaces}
+        presetWorkspaceId="ws-1"
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        onAdaptersRefresh={() => Promise.resolve()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("ns-back-btn"));
+    await user.click(screen.getByText("OpenCode"));
+    await user.click(screen.getByTestId("ns-next-btn"));
+    await user.click(screen.getByTestId("ns-confirm-btn"));
+    await waitFor(() => expect(screen.getByTestId("ns-install-error")).toBeInTheDocument());
+    expect(screen.getByText(/CLI 安装失败/)).toBeInTheDocument();
     expect(onConfirm).not.toHaveBeenCalled();
   });
 });

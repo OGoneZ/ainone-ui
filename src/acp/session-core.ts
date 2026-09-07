@@ -26,8 +26,25 @@ export type ToolContent =
 export type Outgoing =
   | { type: "agent_text"; text: string }
   | { type: "agent_thought"; text: string }
-  | { type: "tool_call"; toolCallId: string; title: string; status?: string | null; content: ToolContent[] }
-  | { type: "tool_update"; toolCallId: string; status?: string | null; content: ToolContent[] }
+  | {
+      type: "tool_call";
+      toolCallId: string;
+      title: string;
+      status?: string | null;
+      /** P30：协议 ToolKind（read/edit/execute/…十类），驱动图标与文案；缺省 = harness 未声明 */
+      kind?: string;
+      /** P30：工具原始入参（Bash→{command}、Edit→{file_path}…），驱动参数副标题；原样透传不解释 */
+      rawInput?: unknown;
+      content: ToolContent[];
+    }
+  | {
+      type: "tool_update";
+      toolCallId: string;
+      status?: string | null;
+      kind?: string;
+      rawInput?: unknown;
+      content: ToolContent[];
+    }
   | { type: "turn_stop"; stopReason: string }
   | { type: "available_commands"; commands: CommandWord[] }
   | { type: "usage"; used: number; size: number; cost: number | null }
@@ -450,6 +467,9 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
         toolCallId: u.update.toolCallId,
         title: u.update.title,
         status: u.update.status ?? null,
+        // P30：kind/rawInput 透传（字段缺省时不带键，保持事件形状干净）
+        ...(u.update.kind ? { kind: u.update.kind } : {}),
+        ...("rawInput" in u.update ? { rawInput: u.update.rawInput } : {}),
         content: toToolContent(u.update.content),
       });
       break;
@@ -458,6 +478,8 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
         type: "tool_update",
         toolCallId: u.update.toolCallId,
         status: u.update.status ?? null,
+        ...(u.update.kind ? { kind: u.update.kind } : {}),
+        ...("rawInput" in u.update ? { rawInput: u.update.rawInput } : {}),
         content: toToolContent(u.update.content),
       });
       break;
