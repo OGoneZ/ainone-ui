@@ -25,7 +25,7 @@ const adapter: AdapterWithStatus = {
   logo: "#7c3aed",
   available: true,
   state: "ready",
-  bridge: null,
+  bridge: null, cli: null, auth: { state: "none", detail: "" },
   resolvedPath: null,
   source: null,
 };

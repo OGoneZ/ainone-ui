@@ -16,7 +16,7 @@ const adapter: AdapterWithStatus = {
   args: ["acp", "--model", "duo-king-6.6"],
   cwd: ".",
   logo: "#7c3aed",
-  available: true, state: true ? "ready" : "absent", resolvedPath: null, source: null, bridge: null,};
+  available: true, state: true ? "ready" : "absent", resolvedPath: null, source: null, bridge: null, cli: null, auth: { state: "none", detail: "" },};
 
 beforeEach(() => {
   localStorage.clear();

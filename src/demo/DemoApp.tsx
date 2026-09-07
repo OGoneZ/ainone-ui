@@ -165,7 +165,7 @@ const DEMO_ADAPTER: AdapterWithStatus = {
   state: "ready",
   resolvedPath: null,
   source: null,
-  bridge: null,
+  bridge: null, cli: null, auth: { state: "none", detail: "" },
 };
 
 const DEMO_COMMANDS: CommandWord[] = [
