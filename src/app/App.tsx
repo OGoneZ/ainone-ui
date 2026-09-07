@@ -671,8 +671,8 @@ function App() {
     }
   }, [theme]);
 
-  function reloadAdapters() {
-    listAdapters().then(setAdapters);
+  async function reloadAdapters() {
+    setAdapters(await listAdapters());
   }
   function reloadHistory() {
     sessionsList().then(setHistory);
@@ -1241,6 +1241,7 @@ function App() {
         onClose={() => setNewSession({ open: false })}
         onConfirm={confirmNewSession}
         onWorkspaceCreated={reloadWorkspaces}
+        onAdaptersRefresh={reloadAdapters}
       />
 
       {/* F-11-2 全局 session 搜索（Ctrl+F，悬浮中上） */}

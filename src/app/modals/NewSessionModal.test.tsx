@@ -1,19 +1,22 @@
 // @vitest-environment jsdom
-// NewSessionModal 测试（P26c 两步向导改写）：
+// NewSessionModal 测试（P26c 两步向导改写 + P28 三态/懒装门控）：
 // 每步列表只放业务选项（无「下一步/上一步/开始对话」操作项；第二步保留「新建工作区」）；
 // 键盘：↑↓ 移高亮、第一步 →/Enter 进第二步、第二步 ← 回上一步、Enter 确认创建；
 // 鼠标：点选项仅选中，推进/回退用底部按钮。
+// P28：absent 才 disabled；installable 可点，「开始对话」先装桥（进度尾迹回显、
+// 成功后 onAdaptersRefresh 再 onConfirm；失败停留弹层展示错误）。
 // 键盘模拟用 fireEvent.keyDown 直发 cmdk root（userEvent 在 jsdom 下的
 // 焦点模型与 cmdk 的监听不匹配，实测不触发导航）。
-// pickDirectory 被 mock，直接返回目录路径。
+// pickDirectory 被 mock，直接返回目录路径。installBridge 被 mock 成可编程 Promise。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NewSessionModal } from "./NewSessionModal";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import type { Workspace } from "@/ipc/workspaces";
 import * as wsMod from "@/ipc/workspaces";
+import * as adaptersMod from "@/ipc/adapters";
 
 vi.mock("@/ipc/workspaces", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/ipc/workspaces")>();
@@ -24,12 +27,20 @@ vi.mock("@/ipc/workspaces", async (importOriginal) => {
   };
 });
 
+vi.mock("@/ipc/adapters", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/ipc/adapters")>();
+  return { ...actual, installBridge: vi.fn() };
+});
+
 const pick = vi.mocked(wsMod.pickDirectory);
 const upsert = vi.mocked(wsMod.workspacesUpsert);
+const installBridge = vi.mocked(adaptersMod.installBridge);
 
 const adapters: AdapterWithStatus[] = [
-  { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: null, available: true, resolvedPath: null, source: null },
-  { id: "pi", name: "Pi", program: "pi", args: [], cwd: ".", logo: null, available: false, resolvedPath: null, source: null },
+  { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: null, available: true, state: "ready", resolvedPath: null, source: null, bridge: null },
+  // P28：pi 走懒装桥语义——CLI 本体在、桥未装 → installable（可点、开始对话先装）
+  { id: "pi", name: "Pi", program: "pi-acp", args: [], cwd: ".", logo: null, available: false, state: "installable", resolvedPath: null, source: null, bridge: { pkg: "pi-acp", version: "0.0.33", cliProgram: "pi", cliAvailable: true, runtimeAvailable: true } },
+  { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: null, available: false, state: "absent", resolvedPath: null, source: null, bridge: { pkg: "@agentclientprotocol/claude-agent-acp", version: "0.73.0", cliProgram: "claude", cliAvailable: false, runtimeAvailable: true } },
 ];
 const workspaces: Workspace[] = [
   { id: "ws-1", name: "dev", cwd: "/Users/me/dev", created_ms: 1 },
@@ -79,11 +90,32 @@ describe("NewSessionModal（P26c 两步向导）", () => {
   });
 
   it("↑↓ 移动高亮（跳过 disabled），不推进步骤", () => {
-    const { container } = renderModal();
-    // Oh My Pi → (Pi disabled 跳过) 回到 Oh My Pi（只有两个项，loop）
-    pressKey(container, "ArrowDown");
-    expect(selectedText()).toContain("Oh My Pi");
+    renderModal();
+    // P28：Pi 从 disabled 改为 installable（可点），↓ 应高亮到 Pi 而不是跳回
+    pressKey(document.body, "ArrowDown");
+    expect(selectedText()).toContain("Pi");
     expect(screen.getByText(/选择 Harness/)).toBeInTheDocument(); // 仍在第一步
+  });
+
+  it("P28 三态：installable 项可选中并显示自动安装注记，absent 项 disabled", () => {
+    render(
+      <NewSessionModal
+        open={true}
+        adapters={[
+          ...adapters,
+          { id: "codex", name: "Codex", program: "codex-acp", args: [], cwd: ".", logo: null, available: false, state: "absent", resolvedPath: null, source: null, bridge: { pkg: "@agentclientprotocol/codex-acp", version: "1.10.0", cliProgram: "codex", cliAvailable: false, runtimeAvailable: true } },
+        ]}
+        workspaces={workspaces}
+        onClose={() => {}}
+        onConfirm={vi.fn()}
+      />,
+    );
+    const pi = screen.getByText("Pi").closest("[cmdk-item]");
+    expect(pi).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("未装桥 · 首次使用自动安装")).toBeInTheDocument();
+    const codex = screen.getByText("Codex").closest("[cmdk-item]");
+    expect(codex).toHaveAttribute("aria-disabled", "true");
+    expect(codex?.textContent).toContain("未安装");
   });
 
   it("→ 键直接进第二步", () => {
@@ -243,5 +275,82 @@ describe("NewSessionModal（P26c 两步向导）", () => {
     await user.click(screen.getByText(/新建工作区/));
     expect(upsert).not.toHaveBeenCalled();
     expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  // —— P28 三态与懒装门控 ——
+
+  it("P28：absent 行 disabled 标「未安装」；installable 行可点标「未装桥」", () => {
+    renderModal();
+    const pi = screen.getByText("Pi").closest("[cmdk-item]");
+    expect(pi?.getAttribute("aria-disabled")).not.toBe("true");
+    expect(screen.getByText("未装桥 · 首次使用自动安装")).toBeInTheDocument();
+    const cc = screen.getByText("Claude Code").closest("[cmdk-item]");
+    expect(cc?.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("未安装")).toBeInTheDocument();
+  });
+
+  it("P28：installable 点「开始对话」→ 先装桥（进度回显），成功后刷新三态再建会话", async () => {
+    let resolveInstall: () => void = () => {};
+    installBridge.mockImplementation(
+      (_program, onLine) =>
+        new Promise<void>((res) => {
+          resolveInstall = res;
+          onLine?.("bun add v1.3.14");
+          onLine?.("Resolving dependencies");
+        }),
+    );
+    const onConfirm = vi.fn();
+    const onRefresh = vi.fn(() => Promise.resolve());
+    const { rerender } = render(
+      <NewSessionModal
+        open={true}
+        adapters={adapters}
+        workspaces={workspaces}
+        presetWorkspaceId="ws-1"
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        onAdaptersRefresh={onRefresh}
+      />,
+    );
+    // 选 Pi（presetWorkspaceId 直落第二步 → 先回第一步换 harness）
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("ns-back-btn"));
+    await user.click(screen.getByText("Pi"));
+    await user.click(screen.getByTestId("ns-next-btn"));
+    await user.click(screen.getByTestId("ns-confirm-btn"));
+    // 安装中：进度行 + 安装器输出尾迹回显，未建会话
+    await waitFor(() => expect(installBridge).toHaveBeenCalledWith("pi-acp", expect.any(Function)));
+    expect(screen.getByTestId("ns-install-progress")).toBeInTheDocument();
+    // onLine 尾迹经 setInstallTail 异步入 DOM → waitFor
+    await waitFor(() => expect(screen.getByText(/Resolving dependencies/)).toBeInTheDocument());
+    expect(onConfirm).not.toHaveBeenCalled();
+    // 装成 → 刷新三态 + 建会话
+    resolveInstall();
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith("pi", "ws-1", "/Users/me/dev"));
+    expect(onRefresh).toHaveBeenCalled();
+    void rerender;
+  });
+
+  it("P28：桥安装失败 → 不建会话，弹层停留展示错误", async () => {
+    installBridge.mockRejectedValueOnce("连接器安装失败（网络）");
+    const onConfirm = vi.fn();
+    render(
+      <NewSessionModal
+        open={true}
+        adapters={adapters}
+        workspaces={workspaces}
+        presetWorkspaceId="ws-1"
+        onClose={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("ns-back-btn"));
+    await user.click(screen.getByText("Pi"));
+    await user.click(screen.getByTestId("ns-next-btn"));
+    await user.click(screen.getByTestId("ns-confirm-btn"));
+    await waitFor(() => expect(screen.getByTestId("ns-install-error")).toBeInTheDocument());
+    expect(screen.getByText(/连接器安装失败/)).toBeInTheDocument();
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

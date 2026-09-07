@@ -58,7 +58,7 @@ function defaultHandlers() {
       { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: "#7c3aed" },
       { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: "#d97706" },
     ],
-    adapter_status: () => ({ available: true, resolved_path: "/usr/local/bin/omp", source: "ProcessPath" }),
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/usr/local/bin/omp", source: "ProcessPath", bridge: null }),
     sessions_list: () => SESSIONS,
     workspaces_list: () => WS,
     log_read: () => "",

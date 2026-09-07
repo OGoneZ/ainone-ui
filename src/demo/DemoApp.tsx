@@ -162,8 +162,10 @@ const DEMO_ADAPTER: AdapterWithStatus = {
   cwd: ".",
   logo: "#7c3aed",
   available: true,
+  state: "ready",
   resolvedPath: null,
   source: null,
+  bridge: null,
 };
 
 const DEMO_COMMANDS: CommandWord[] = [

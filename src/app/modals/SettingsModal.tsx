@@ -5,8 +5,8 @@
 
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Adapter } from "@/ipc/adapters";
-import { refreshAdapterStatus } from "@/ipc/adapters";
+import type { Adapter, AdapterState, BridgeInfo } from "@/ipc/adapters";
+import { installBridge, refreshAdapterStatus } from "@/ipc/adapters";
 import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
@@ -29,12 +29,19 @@ interface EditableAdapter {
   argsText: string; // 每行一个参数
   cwd: string;
   logo: string; // 编辑态为空串；保存时转 null
-  available: boolean | null; // null = 探测中
-  /** 探测到的绝对路径（找到时展示「找到于 …」） */
+  available: boolean | null; // null = 探测中（= state ready 的兼容镜像）
+  /** P28 三态：null = 探测中 */
+  state: AdapterState | null;
+  /** 懒装桥元信息（非桥程序为 null） */
+  bridge: BridgeInfo | null;
+  /** 程序解析到的绝对路径（找到时展示「找到于 …」） */
   resolvedPath?: string | null;
   /** 握手探测结果（点击「测试连接」后写入） */
   probe: ProbeResult | null;
   probing: boolean;
+  /** P28：installable 行的安装态 */
+  installing?: boolean;
+  installTail?: string;
 }
 
 /** P24g：握手能力摘要（诊断用——用户可直观看到 harness 声明了哪些能力） */
@@ -49,7 +56,16 @@ function probeCapSummary(caps: import("@agentclientprotocol/sdk").AgentCapabilit
 }
 
 function toEditable(a: Adapter): EditableAdapter {
-  return { ...a, argsText: a.args.join("\n"), logo: a.logo ?? "", available: null, probe: null, probing: false };
+  return {
+    ...a,
+    argsText: a.args.join("\n"),
+    logo: a.logo ?? "",
+    available: null,
+    state: null,
+    bridge: null,
+    probe: null,
+    probing: false,
+  };
 }
 
 function fromEditable(a: EditableAdapter): Adapter {
@@ -110,16 +126,22 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
       .catch(() => {});
   }, [open]);
 
-  // 逐项探测可用性（adapter_status：含解析路径与来源）
+  // 逐项探测可用性（adapter_status：三态 + 解析路径与来源）
   useEffect(() => {
     if (!open) return;
     items.forEach((a) => {
-      if (a.available !== null) return;
+      if (a.state !== null) return;
       refreshAdapterStatus(fromEditable(a)).then((status) => {
         setItems((prev) =>
           prev.map((x) =>
             x.id === a.id
-              ? { ...x, available: status.available, resolvedPath: status.resolvedPath }
+              ? {
+                  ...x,
+                  available: status.available,
+                  state: status.state,
+                  resolvedPath: status.resolvedPath,
+                  bridge: status.bridge,
+                }
               : x,
           ),
         );
@@ -127,12 +149,34 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     });
   }, [items, open]);
 
-  /** 握手级探测：真实 spawn + initialize + kill（两级错误） */
+  /** 握手级探测：installable 先装桥再测（装完才能 spawn），真实 spawn + initialize + kill（两级错误） */
   async function testConnection(id: string) {
     const item = items.find((a) => a.id === id);
     if (!item || item.probing) return;
     update(id, { probing: true, probe: null });
-    const result = await probeAdapter(fromEditable(item));
+    if (item.state === "installable") {
+      update(id, { installing: true, installTail: "" });
+      try {
+        await installBridge(item.program, (line) => {
+          setItems((prev) =>
+            prev.map((x) =>
+              x.id === id
+                ? { ...x, installTail: ((x.installTail ?? "") + "\n" + line).split("\n").slice(-3).join("\n") }
+                : x,
+            ),
+          );
+        });
+        // 装完刷新三态（转 ready），再继续握手
+        const fresh = await refreshAdapterStatus(fromEditable(item));
+        update(id, { installing: false, state: fresh.state, available: fresh.available, resolvedPath: fresh.resolvedPath });
+      } catch (e) {
+        update(id, { installing: false, probing: false, probe: { ok: false, level: "spawn", message: `桥接器安装失败：${String(e instanceof Error ? e.message : e)}` } });
+        return;
+      }
+    }
+    const current = items.find((a) => a.id === id);
+    if (!current) return;
+    const result = await probeAdapter(fromEditable(current));
     setItems((prev) => prev.map((x) => (x.id === id ? { ...x, probing: false, probe: result } : x)));
   }
 
@@ -152,6 +196,8 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
         cwd: ".",
         logo: "",
         available: null,
+        state: null,
+        bridge: null,
         probe: null,
         probing: false,
       },
@@ -334,7 +380,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                     <input
                       placeholder="program"
                       value={a.program}
-                      onChange={(e) => update(a.id, { program: e.target.value, available: null })}
+                      onChange={(e) => update(a.id, { program: e.target.value, available: null, state: null })}
                     />
                   </label>
                   <label className="ns-label">
@@ -363,24 +409,36 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                     />
                   </label>
                   <div className="adapter-foot">
-                    <span className={a.available === null ? "" : a.available ? "ok" : "bad"}>
-                      {a.available === null
+                    <span className={a.state === null ? "" : a.available ? "ok" : "bad"}>
+                      {a.state === null
                         ? "探测中…"
-                        : a.available
+                        : a.state === "ready"
                           ? a.resolvedPath
                             ? `✓ 可用（${a.resolvedPath}）`
                             : "✓ 可用"
-                          : a.id === "claude-code"
-                            ? "未找到（首次使用时自动安装连接器）"
-                            : "✗ 未找到"}
+                          : a.state === "installable"
+                            ? "未装桥（首次使用/测试连接时自动安装）"
+                            : a.bridge
+                              ? a.bridge.cliAvailable
+                                ? `✗ 缺 bun/npm，无法自动安装桥接器（本体 ${a.bridge.cliProgram} 已装）`
+                                : `✗ 未找到本体 CLI ${a.bridge.cliProgram}——请先安装 ${a.name}`
+                              : "✗ 未找到"}
                     </span>
                     <span className="adapter-foot-actions">
-                      <button onClick={() => testConnection(a.id)} disabled={a.probing}>
-                        {a.probing ? "探测中…" : "测试连接"}
+                      <button onClick={() => testConnection(a.id)} disabled={a.probing || a.installing}>
+                        {a.installing ? "安装中…" : a.probing ? "探测中…" : "测试连接"}
                       </button>
                       <button onClick={() => removeRow(a.id)}>删除</button>
                     </span>
                   </div>
+                  {a.installing && a.installTail && (
+                    <pre
+                      className="ok"
+                      style={{ gridColumn: "1 / -1", margin: 0, whiteSpace: "pre-wrap", fontSize: "0.8em" }}
+                    >
+                      {a.installTail}
+                    </pre>
+                  )}
                   {a.probe && (
                     <p className={a.probe.ok ? "ok" : "bad"} style={{ gridColumn: "1 / -1", margin: 0 }}>
                       {a.probe.ok

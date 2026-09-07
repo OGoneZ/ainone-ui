@@ -28,7 +28,7 @@ const ADAPTERS = [
 function defaultHandlers() {
   return {
     adapters_list: () => ADAPTERS,
-    adapter_status: () => ({ available: true, resolved_path: "/usr/local/bin/omp", source: "ProcessPath" }),
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/usr/local/bin/omp", source: "ProcessPath", bridge: null }),
     adapters_save: () => null,
   };
 }

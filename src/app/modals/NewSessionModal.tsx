@@ -5,9 +5,12 @@
 // 鼠标：点选项仅选中（可改选），推进/回退用底部按钮。
 // 右键工作区「新建会话」时 presetWorkspaceId 预填，直接落在第二步。
 // P7 外壳迁 shadcn Dialog；P25 改 cmdk；P26 两步向导；P26c 左右键换步 + 删操作面板。
+// P28 三态：installable（懒装桥可装）不再灰掉——点「开始对话」先走安装（进度行
+// 展示安装器输出），装成再创建会话；absent 才禁用并说明缺什么。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdapterWithStatus } from "@/ipc/adapters";
+import { installBridge } from "@/ipc/adapters";
 import { workspacesUpsert, pickDirectory, type Workspace } from "@/ipc/workspaces";
 import { normPath } from "@/lib/normPath";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,6 +26,8 @@ interface Props {
   onConfirm: (adapterId: string, workspaceId: string | null, cwd?: string) => void;
   /** 新建工作区后回调（父级刷新 workspaces 列表，避免侧栏分组状态过期） */
   onWorkspaceCreated?: () => void;
+  /** P28：桥安装成功后父级重拉 adapters（三态刷新，装完即 ready） */
+  onAdaptersRefresh?: () => Promise<void> | void;
 }
 
 export function NewSessionModal({
@@ -33,12 +38,17 @@ export function NewSessionModal({
   onClose,
   onConfirm,
   onWorkspaceCreated,
+  onAdaptersRefresh,
 }: Props) {
   // 本地工作区副本：新建工作区后即时回显，无需父级刷新
   const [localWs, setLocalWs] = useState<Workspace[]>([]);
   const [adapterId, setAdapterId] = useState("");
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // P28：懒装桥安装态——installing=安装进行中；installTail=安装器输出尾迹（进度行）
+  const [installing, setInstalling] = useState(false);
+  const [installTail, setInstallTail] = useState("");
+  const [installError, setInstallError] = useState<string | null>(null);
   // P26 两步向导：harness=选框架；workspace=选目录（presetWorkspaceId 存在时直接进第二步）
   const [step, setStep] = useState<"harness" | "workspace">("harness");
   // P26b：cmdk root ref——无输入框模式下方向键监听在 root 的 onKeyDown，
@@ -57,6 +67,9 @@ export function NewSessionModal({
     setLocalWs(workspaces);
     setWorkspaceId(presetWorkspaceId !== undefined ? presetWorkspaceId : (workspaces[0]?.id ?? null));
     setStep(presetWorkspaceId !== undefined ? "workspace" : "harness");
+    setInstalling(false);
+    setInstallError(null);
+    setInstallTail("");
   }, [open, adapters, workspaces, presetWorkspaceId]);
 
   async function newWorkspace() {
@@ -91,7 +104,31 @@ export function NewSessionModal({
   const selectedAdapter = adapters.find((a) => a.id === adapterId) ?? null;
 
   function confirm() {
-    if (!adapterId || creating) return;
+    if (!adapterId || creating || installing) return;
+    void startSession();
+  }
+
+  /** P28：懒装桥（installable）先装后开——安装进度行实时回显，成功后才关窗建会话 */
+  async function startSession() {
+    const a = adapters.find((x) => x.id === adapterId);
+    if (!a) return;
+    if (a.state === "installable") {
+      setInstalling(true);
+      setInstallError(null);
+      setInstallTail("");
+      try {
+        await installBridge(a.program, (line) => {
+          setInstallTail((prev) => (prev + "\n" + line).split("\n").slice(-4).join("\n"));
+        });
+        // 装成功 → 刷新三态（state 转 ready），再创建
+        await onAdaptersRefresh?.();
+      } catch (e) {
+        setInstallError(String(e instanceof Error ? e.message : e));
+        setInstalling(false);
+        return;
+      }
+      setInstalling(false);
+    }
     onClose();
     onConfirm(adapterId, workspaceId, selected?.cwd);
   }
@@ -175,12 +212,15 @@ export function NewSessionModal({
                   <CommandItem
                     key={a.id}
                     value={`harness-${a.id}`}
-                    disabled={!a.available}
+                    disabled={a.state === "absent"}
                     onSelect={() => setAdapterId(a.id)}
                     className={adapterId === a.id ? "ns-item ns-item-active" : "ns-item"}
                   >
                     <span className="ns-item-name">{a.name}</span>
-                    {!a.available && <span className="ns-item-note">未安装</span>}
+                    {a.state === "absent" && <span className="ns-item-note">未安装</span>}
+                    {a.state === "installable" && (
+                      <span className="ns-item-note">未装桥 · 首次使用自动安装</span>
+                    )}
                     {adapterId === a.id && <span className="ns-item-check">✓</span>}
                   </CommandItem>
                 ))}
@@ -234,10 +274,36 @@ export function NewSessionModal({
           </Command>
         )}
 
-        {step === "workspace" && selectedAdapter && !selectedAdapter.available && (
+        {step === "workspace" && installing && (
+          <div className="ns-hint" role="status" data-testid="ns-install-progress">
+            <p>
+              正在安装 {selectedAdapter?.name} 的 ACP 桥接器（{selectedAdapter?.bridge?.pkg}
+              ）——首次需下载，视网络可能数秒至数分钟…
+            </p>
+            {installTail && (
+              <pre className="ns-install-tail" style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: "0.8em" }}>
+                {installTail}
+              </pre>
+            )}
+          </div>
+        )}
+        {step === "workspace" && installError && (
+          <p className="ns-hint bad" data-testid="ns-install-error">
+            桥接器安装失败：{installError}
+          </p>
+        )}
+        {step === "workspace" && selectedAdapter?.state === "installable" && !installing && !installError && (
+          <p className="ns-hint">
+            检测到 {selectedAdapter.name} CLI 本体，首次开始对话时将自动安装 ACP 桥接器（
+            {selectedAdapter.bridge?.pkg}@{selectedAdapter.bridge?.version}，需网络）。
+          </p>
+        )}
+        {step === "workspace" && selectedAdapter?.state === "absent" && (
           <p className="ns-hint bad">
-            {selectedAdapter.id === "claude-code"
-              ? "Claude Code 连接器未找到——首次开始对话时将自动安装（需 bun/node 与网络），并使用已安装的 claude CLI。"
+            {selectedAdapter.bridge
+              ? !selectedAdapter.bridge.cliAvailable
+                ? `未检测到 ${selectedAdapter.name} 的 CLI 本体——桥接器只是转接头，请先在终端安装 ${selectedAdapter.name} 本身。`
+                : `未找到 bun 或 npm 运行时，无法自动安装 ${selectedAdapter.name} 的 ACP 桥接器。请安装 Node.js ≥20 或 bun。`
               : `程序 ${selectedAdapter.program} 未找到（已搜索 ~/.local/bin、~/.bun/bin、nvm、登录 shell PATH 与系统 PATH）。请先安装，或在设置中改为绝对路径。`}
           </p>
         )}
@@ -253,8 +319,8 @@ export function NewSessionModal({
               下一步
             </button>
           ) : (
-            <button onClick={confirm} disabled={!adapterId || creating} data-testid="ns-confirm-btn">
-              开始对话
+            <button onClick={confirm} disabled={!adapterId || creating || installing} data-testid="ns-confirm-btn">
+              {installing ? "安装桥接器中…" : "开始对话"}
             </button>
           )}
           <button onClick={onClose}>取消</button>

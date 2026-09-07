@@ -571,7 +571,22 @@ button:disabled {
   font-size: 0.9em;
 }
 
-/* 新建会话弹层：选中未安装 harness 时的原因提示行 */
+/* 新建会话弹层：harness 状态提示行（P28：installable=中性提示 / absent=bad 红） */
+.ns-hint {
+  margin: 0;
+  font-size: 0.82em;
+  color: var(--text-secondary);
+}
+
+/* P28：懒装桥安装进度尾迹（安装器输出最后几行） */
+.ns-install-tail {
+  margin-top: 4px;
+  max-height: 6em;
+  overflow-y: auto;
+  font-size: 0.78em;
+  color: var(--text-secondary);
+}
+
 .ns-hint.bad {
   margin: 0;
   font-size: 0.82em;

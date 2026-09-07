@@ -45,6 +45,8 @@ const adapter = {
   cwd: ".",
   logo: "#7c3aed",
   available: true,
+  state: "ready",
+  bridge: null,
 } as any;
 
 const input = () => screen.getByLabelText("消息输入");

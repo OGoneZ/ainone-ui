@@ -154,6 +154,8 @@ pub enum AdapterState {
 pub struct BridgeInfo {
     pub pkg: String,
     pub version: String,
+    /// harness 本体 CLI 程序名（absent 文案点名「先装 X」用）
+    pub cli_program: String,
     /// harness 本体 CLI 是否在增强 PATH（缺 → 装桥也没用）
     pub cli_available: bool,
     /// bun/npm 安装运行时是否在（缺 → 装不了桥）
@@ -239,6 +241,7 @@ pub fn bridge_status(
     let bridge = BridgeInfo {
         pkg: spec.pkg.into(),
         version: spec.version.into(),
+        cli_program: spec.cli_program.into(),
         cli_available,
         runtime_available,
     };

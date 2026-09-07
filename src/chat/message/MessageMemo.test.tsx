@@ -24,6 +24,8 @@ const adapter: AdapterWithStatus = {
   cwd: ".",
   logo: "#7c3aed",
   available: true,
+  state: "ready",
+  bridge: null,
   resolvedPath: null,
   source: null,
 };

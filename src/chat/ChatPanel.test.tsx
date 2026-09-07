@@ -81,7 +81,7 @@ const adapter: AdapterWithStatus = {
   args: [],
   cwd: ".",
   logo: "#7c3aed",
-  available: true, resolvedPath: null, source: null,};
+  available: true, state: "ready" as const, resolvedPath: null, source: null, bridge: null,};
 
 const input = () => screen.getByLabelText("消息输入");
 
