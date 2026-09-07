@@ -238,3 +238,32 @@ export function activeKeyOf(model: ModelLike): string {
   const sel = model.getActiveTabset()?.getSelectedNode();
   return sel?.getId() ?? "";
 }
+
+// —— P30 R2：窗格内 Ctrl+Tab / Ctrl+Shift+Tab 循环切 tab ——
+
+/** 解析键盘事件是否为「窗格内切 tab」快捷键；不是则返回 null。
+ *  Ctrl+Tab = 向后（next），Ctrl+Shift+Tab = 向前（prev）；ctrl/meta 等价（mac 惯例）。
+ *  Tab 键 code 缺失时回退 key 推断（老环境）。 */
+export function tabCycleShortcut(e: {
+  key: string;
+  code?: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+}): "next" | "prev" | null {
+  const code = e.code ?? inferredCode(e);
+  if (code !== "Tab") return null;
+  if (e.altKey) return null;
+  if (!e.ctrlKey && !e.metaKey) return null;
+  return e.shiftKey ? "prev" : "next";
+}
+
+/** 循环切换索引（P30 R2 纯逻辑）：dir=next 向后 / prev 向前，到头循环。
+ *  count<=1 或 selected 无效时返回 null（调用方不动）。 */
+export function nextTabIndex(count: number, selected: number, dir: "next" | "prev"): number | null {
+  if (!Number.isInteger(count) || !Number.isInteger(selected)) return null;
+  if (count <= 1) return null;
+  if (selected < 0 || selected >= count) return null;
+  return dir === "next" ? (selected + 1) % count : (selected - 1 + count) % count;
+}

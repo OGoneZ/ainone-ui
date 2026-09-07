@@ -35,6 +35,8 @@ export type ShortcutId =
   | "pane.focus-e"
   | "pane.focus-w"
   | "pane.focus-zone"
+  | "pane.tab-next"
+  | "pane.tab-prev"
   | "pane.temp-maximize"
   | "pane.scroll-line-up"
   | "pane.scroll-line-down"
@@ -83,6 +85,8 @@ export const DEFAULT_DEFS: ShortcutDef[] = [
   { id: "pane.focus-e", scope: "global", label: "焦点移到右侧窗格", defaults: [{ code: "ArrowRight", ctrl: true }] },
   { id: "pane.focus-w", scope: "global", label: "焦点移到左侧窗格", defaults: [{ code: "ArrowLeft", ctrl: true }] },
   { id: "pane.focus-zone", scope: "pane", label: "焦点域：聊天记录 ↔ 输入框", defaults: [{ code: "KeyL", ctrl: true }] },
+  { id: "pane.tab-next", scope: "pane", label: "窗格内下一个 tab（循环）", defaults: [{ code: "Tab", ctrl: true }] },
+  { id: "pane.tab-prev", scope: "pane", label: "窗格内上一个 tab（循环）", defaults: [{ code: "Tab", ctrl: true, shift: true }] },
   { id: "pane.temp-maximize", scope: "pane", label: "临时全屏当前窗格 / 恢复布局", defaults: [{ code: "Enter", ctrl: true }] },
   { id: "pane.scroll-line-up", scope: "pane", label: "聊天记录向上滚动一行", defaults: [{ code: "ArrowUp" }] },
   { id: "pane.scroll-line-down", scope: "pane", label: "聊天记录向下滚动一行", defaults: [{ code: "ArrowDown" }] },

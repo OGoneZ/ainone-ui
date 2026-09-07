@@ -49,7 +49,7 @@ import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
-import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
+import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, tabCycleShortcut, nextTabIndex, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
 import { matchShortcut } from "@/app/logic/keymap";
 import { useKeymapStore } from "@/store/keymapStore";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
@@ -274,7 +274,10 @@ function App() {
    *  active prop（window 级事件按 active 实例路由），focus 落到该窗格 composer
    *  的 textarea（tab 面板 DOM id = `flexlayout-tab-<tabKey>`，flexlayout 约定）。
    *  focus 用重试式：首次激活长会话渲染可超过一帧，textarea 就绪即聚焦，
-   *  最多重试 ~0.5s。不用 rAF——窗口后台/完全遮挡时 WebKit 冻结 rAF（实测踩坑）。 */
+   *  最多重试 ~0.5s。不用 rAF——窗口后台/完全遮挡时 WebKit 冻结 rAF（实测踩坑）。
+   *  P30 R1：selectedIdx 三态语义——undefined/-1/越界 = 不改选中（保持目标窗格
+   *  屏幕显示的 tab，不调 selectTab）；有效 idx 才 selectTab。旧实现兜底 0，
+   *  导致切焦点/点 tab 条空白时目标窗格被强切到第一个 tab。 */
   function activateTabsetAndComposer(tabsetId: string, selectedIdx?: number) {
     const m = getModel();
     const target = m.getNodeById(tabsetId);
@@ -282,10 +285,11 @@ function App() {
     m.doAction(Actions.setActiveTabset(tabsetId));
     const sel = (target as unknown as { getChildren: () => { getId(): string }[] }).getChildren();
     let tabKey: string | undefined;
-    if (sel.length > 0) {
-      const idx = selectedIdx !== undefined && selectedIdx >= 0 && selectedIdx < sel.length ? selectedIdx : 0;
-      tabKey = sel[idx].getId();
+    if (selectedIdx !== undefined && selectedIdx >= 0 && selectedIdx < sel.length) {
+      tabKey = sel[selectedIdx].getId();
       m.doAction(Actions.selectTab(tabKey));
+    } else {
+      tabKey = (target as unknown as { getSelectedNode?: () => { getId(): string } | undefined }).getSelectedNode?.()?.getId();
     }
     syncFromModel();
     if (!tabKey) return;
@@ -341,6 +345,21 @@ function App() {
         if (!tabset) return;
         e.preventDefault();
         m.doAction(Actions.maximizeToggle(tabset.getId()));
+        return;
+      }
+      // P30 R2：Ctrl/Cmd+Tab 向后 / +Shift 向前，在当前聚焦窗格内循环切 tab。
+      // 纯函数判定 + 循环索引（layout.ts）；切到新 tab 后聚焦其输入框（activate
+      // 复用 selectedIdx>=0 通道显式 selectTab）。单 tab/空窗格直接不动作。
+      const cycle = tabCycleShortcut(e);
+      if (cycle) {
+        const m = getModel();
+        const tabset = m.getActiveTabset();
+        if (!tabset) return;
+        const children = (tabset as unknown as { getChildren?: () => { getId(): string }[] }).getChildren?.() ?? [];
+        const next = nextTabIndex(children.length, tabset.getSelected() ?? -1, cycle);
+        if (next === null) return;
+        e.preventDefault();
+        activateTabsetAndComposer(tabset.getId(), next);
         return;
       }
       // p20n：Ctrl/Cmd+D = 关闭当前窗格的当前 tab（原分屏快捷键让位，见 layout.ts）
@@ -434,7 +453,9 @@ function App() {
       const targetId = pickFocusTarget(curR, rects, dir);
       if (!targetId) return;
       e.preventDefault();
-      activateTabsetAndComposer(targetId, curTabset.getSelected() ?? 0);
+      // P30 R1：不传 idx——目标窗格保持它当前显示的 tab（旧实现传源 tabset 的
+      // selected idx，selectTab 错位切走目标窗格显示中的 tab = 跳第一个 tab 的根因）
+      activateTabsetAndComposer(targetId);
     }
     // F-11-2 全局搜索：Ctrl/Cmd+F（DEC-26；会话内搜索已改绑 Ctrl+Shift+F）
     const onGlobalSearch = (e: KeyboardEvent) => {
@@ -499,7 +520,8 @@ function App() {
       // 的 tab），而不是该 tabset 的当前选中 tab——tabset 内叠多个 tab 时（如右侧
       // 窗格 = 终端 + chat 两个 tab，当前显示 chat），按旧逻辑 selectTab(选中项)
       // 会把 tabset 切回它的选中 tab（终端）= 用户看到的「点 session 自动跳到终端」。
-      // 通道 A（tab 条/空窗格）无面板概念，维持 selectedIdx 语义。
+      // 通道 A（tab 条/空窗格）无面板概念：不传 idx = 不改选中（P30 R1 三态语义），
+      // 屏幕显示什么就保持什么；通道 B 的 clickedIdx 命中才显式 selectTab。
       const clickedTabKey = tab?.id.startsWith("flexlayout-tab-") ? tab.id.slice("flexlayout-tab-".length) : undefined;
       let clickedIdx = -1;
       if (clickedTabKey) {

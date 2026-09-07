@@ -195,3 +195,66 @@ describe("P26e Ctrl+Enter 临时全屏", () => {
     expect(matchShortcut({ code: "Enter", shiftKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(false);
   });
 });
+
+describe("P30 窗格内 Ctrl+Tab 循环切 tab", () => {
+  it("键位表注册 pane.tab-next / pane.tab-prev（Ctrl+Tab / Ctrl+Shift+Tab），可改绑基础存在", async () => {
+    const { matchShortcut, DEFAULT_DEFS } = await import("@/app/logic/keymap");
+    expect(matchShortcut({ code: "Tab", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next")).toBe(true);
+    expect(matchShortcut({ code: "Tab", ctrlKey: true, shiftKey: true }, DEFAULT_DEFS, "pane.tab-prev")).toBe(true);
+    // 裸 Tab / alt+Tab 不命中（不吞浏览器焦点移动 / 窗口切换）
+    expect(matchShortcut({ code: "Tab" }, DEFAULT_DEFS, "pane.tab-next")).toBe(false);
+    expect(matchShortcut({ code: "Tab", altKey: true, ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next")).toBe(false);
+    // 覆盖改绑生效（P25 overrides 机制天然支持）
+    expect(matchShortcut({ code: "KeyJ", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next", { "pane.tab-next": [{ code: "KeyJ", ctrl: true }] })).toBe(true);
+    expect(matchShortcut({ code: "Tab", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next", { "pane.tab-next": [{ code: "KeyJ", ctrl: true }] })).toBe(false);
+  });
+
+  it("Ctrl+Tab 在激活窗格内循环切 tab（0→1→2→0），Shift 反向（AC-R2-2）", async () => {
+    const flexlayout = await import("flexlayout-react");
+    const { Model } = flexlayout as any;
+    // 驱动 App 的 keydown 处理需要完整 flexlayout Layout DOM（jsdom 高度 0 不渲染），
+    // 这里等价验证：真实 Model 构造三 tab tabset + 循环索引纯函数（App.onKey 内
+    // 用的同一条链：getChildren → nextTabIndex → selectTab(children[next])）。
+    const m = Model.fromJson({
+      layout: {
+        type: "row", children: [{
+          type: "tabset", children: [
+            { type: "tab", id: "t0", name: "0" },
+            { type: "tab", id: "t1", name: "1" },
+            { type: "tab", id: "t2", name: "2" },
+          ],
+        }],
+      },
+    });
+    m.doAction((flexlayout as any).Actions.selectTab("t0"));
+    const tabset = m.getActiveTabset();
+    expect(tabset).toBeTruthy();
+    const children = tabset!.getChildren();
+    expect(children.length).toBe(3);
+    // 模拟 App.onKey 的循环推进：getSelected → nextTabIndex → children[next]
+    const { nextTabIndex } = await import("@/app/logic/layout");
+    const seq: string[] = [];
+    let cur = tabset!.getSelected();
+    for (let i = 0; i < 4; i++) {
+      cur = nextTabIndex(children.length, cur, "next")!;
+      seq.push(children[cur].getId());
+    }
+    expect(seq).toEqual(["t1", "t2", "t0", "t1"]);
+    // 反向（从当前选中回退）
+    let back = tabset!.getSelected();
+    const seqB: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      back = nextTabIndex(children.length, back, "prev")!;
+      seqB.push(children[back].getId());
+    }
+    expect(seqB).toEqual(["t2", "t1", "t0"]);
+  });
+
+  it("焦点切换不携带源 tabset 的 selected idx（AC-R1-1 源码级锁定在 layout.test.ts）", async () => {
+    // 源码级回归断言在 node 环境的 layout.test.ts（jsdom 无 node:fs 类型）；
+    // 这里保留键位表回归断言。
+    const { DEFAULT_DEFS } = await import("@/app/logic/keymap");
+    expect(DEFAULT_DEFS.find((d) => d.id === "pane.tab-next")?.defaults[0].code).toBe("Tab");
+    expect(DEFAULT_DEFS.find((d) => d.id === "pane.tab-prev")?.defaults[0].shift).toBe(true);
+  });
+});

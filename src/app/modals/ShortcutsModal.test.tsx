@@ -102,3 +102,22 @@ describe("ShortcutsModal", () => {
     expect(matchShortcut({ code: "KeyB", ctrlKey: true }, DEFAULT_DEFS, "app.toggle-sidebar", overrides)).toBe(false);
   });
 });
+
+describe("P30 窗格内切 tab 快捷键进面板", () => {
+  it("面板出现「窗格内下一个/上一个 tab」两行且可改绑（AC-R2-3）", async () => {
+    const { matchShortcut, DEFAULT_DEFS } = await import("@/app/logic/keymap");
+    render(<ShortcutsModal open={true} onClose={() => {}} />);
+    const nextRow = [...document.querySelectorAll(".shortcut-row")].find((r) => r.textContent?.includes("窗格内下一个 tab"))!;
+    const prevRow = [...document.querySelectorAll(".shortcut-row")].find((r) => r.textContent?.includes("窗格内上一个 tab"))!;
+    expect(nextRow).toBeTruthy();
+    expect(prevRow).toBeTruthy();
+    // 改绑下一 tab 为 Ctrl+J → store 覆盖生效、旧键失效
+    fireEvent.click(nextRow.querySelector(".shortcut-rebind")!);
+    act(() => {
+      press({ key: "j", code: "KeyJ", ctrlKey: true });
+    });
+    const overrides = useKeymapStore.getState().overrides;
+    expect(matchShortcut({ code: "KeyJ", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next", overrides)).toBe(true);
+    expect(matchShortcut({ code: "Tab", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next", overrides)).toBe(false);
+  });
+});

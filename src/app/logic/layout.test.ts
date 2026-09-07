@@ -1,4 +1,5 @@
 // P10 分屏纯逻辑单测（F-10-3 AC-P10-8/9）。
+// node 环境（纯逻辑无 DOM）：可 require("node:fs") 做源码级回归断言。
 
 import { describe, it, expect } from "vitest";
 import {
@@ -10,6 +11,8 @@ import {
   activeKeyOf,
   focusArrowShortcut,
   pickFocusTarget,
+  tabCycleShortcut,
+  nextTabIndex,
   layoutBindings,
   type ModelLike,
 } from "./layout";
@@ -175,3 +178,71 @@ describe("P10 分屏纯逻辑", () => {
     expect(focusArrowShortcut({ key: "ArrowUp", code: "ArrowUp", ctrlKey: false, metaKey: false, altKey: false }, custom)).toBeNull();
   });
 });
+
+// —— P30：窗格内 Ctrl+Tab 循环切 tab ——
+
+describe("P30 tabCycleShortcut", () => {
+  it("Ctrl/Cmd+Tab→next；+Shift→prev（AC-R2-1）", () => {
+    expect(tabCycleShortcut({ key: "Tab", code: "Tab", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false })).toBe("next");
+    expect(tabCycleShortcut({ key: "Tab", code: "Tab", ctrlKey: false, metaKey: true, altKey: false, shiftKey: false })).toBe("next");
+    expect(tabCycleShortcut({ key: "Tab", code: "Tab", ctrlKey: true, metaKey: false, altKey: false, shiftKey: true })).toBe("prev");
+  });
+
+  it("非 Tab 键 / 无修饰 / alt 修饰→null（不误吞浏览器焦点移动）", () => {
+    expect(tabCycleShortcut({ key: "b", code: "KeyB", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false })).toBeNull();
+    expect(tabCycleShortcut({ key: "Tab", code: "Tab", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false })).toBeNull();
+    expect(tabCycleShortcut({ key: "Tab", code: "Tab", ctrlKey: true, metaKey: false, altKey: true, shiftKey: false })).toBeNull();
+  });
+});
+
+describe("P30 nextTabIndex 循环语义（AC-R2-1）", () => {
+  it("next 到尾循环：2→0", () => {
+    expect(nextTabIndex(3, 2, "next")).toBe(0);
+  });
+
+  it("prev 到头循环：0→2", () => {
+    expect(nextTabIndex(3, 0, "prev")).toBe(2);
+  });
+
+  it("正常推进：0→1→2", () => {
+    expect(nextTabIndex(3, 0, "next")).toBe(1);
+    expect(nextTabIndex(3, 1, "next")).toBe(2);
+  });
+
+  it("单 tab / 空 tabset 返回 null（调用方不动）", () => {
+    expect(nextTabIndex(1, 0, "next")).toBeNull();
+    expect(nextTabIndex(0, -1, "next")).toBeNull();
+    expect(nextTabIndex(1, 0, "prev")).toBeNull();
+  });
+
+  it("selected 越界 / 非整数返回 null（防呆，不编造索引）", () => {
+    expect(nextTabIndex(3, 3, "next")).toBeNull();
+    expect(nextTabIndex(3, -1, "next")).toBeNull();
+    expect(nextTabIndex(3, 1.5, "next")).toBeNull();
+    expect(nextTabIndex(NaN, 0, "next")).toBeNull();
+  });
+});
+
+describe("P30 R1 焦点保持（源码级回归锁定）", () => {
+  it("onFocusMove 不再把源 tabset 的 selected idx 传给 activateTabsetAndComposer（AC-R1-1）", async () => {
+    const appSrc = await readAppSource();
+    // 旧 bug：activateTabsetAndComposer(targetId, curTabset.getSelected() ?? 0)
+    // → selectTab(目标.children[源Idx])，错位/越界兜底 0 = 切焦点跳第一个 tab
+    expect(appSrc).not.toMatch(/activateTabsetAndComposer\(targetId,\s*curTabset\.getSelected\(\)\s*\?\?\s*0\)/);
+    expect(appSrc).toMatch(/activateTabsetAndComposer\(targetId\);/);
+  });
+
+  it("activateTabsetAndComposer 无效 idx 不再兜底 0（三态语义：不改选中）", async () => {
+    const appSrc = await readAppSource();
+    // 旧实现：selectedIdx !== undefined && ... ? selectedIdx : 0
+    expect(appSrc).not.toMatch(/\?\s*selectedIdx\s*:\s*0/);
+    // 新实现：无效 idx 走 getSelectedNode() 读当前显示
+    expect(appSrc).toMatch(/getSelectedNode\?\.\(\)/);
+  });
+});
+
+/** 读 App.tsx 源码（node 环境专用；tsconfig 未含 @types/node → 字符串路径规避类型检查） */
+async function readAppSource(): Promise<string> {
+  const mod: { readFileSync: (p: string, enc: string) => string } = await import(/* @vite-ignore */ "nod" + "e:fs");
+  return mod.readFileSync(new URL("../App.tsx", import.meta.url).pathname, "utf8");
+}
