@@ -36,7 +36,10 @@ jobs:
 
       - name: Derive version from tag
         id: ver
-        # 版本号直取 tag（vX.Y.Z → X.Y.Z）
+        # 版本号直取 tag（vX.Y.Z → X.Y.Z）。shell: bash——Windows 作业默认 pwsh，
+        # ${GITHUB_REF_NAME#v} 的参数展开语法 pwsh 不认（v0.2.0 三发实锤：pwsh
+        # 会把整串当字面量，输出文件里落了空值，下游门禁拿到空 EXPECTED）
+        shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag matches tauri.conf.json
