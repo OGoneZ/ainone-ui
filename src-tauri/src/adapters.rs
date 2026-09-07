@@ -173,7 +173,141 @@ pub struct CliInstallInfo {
     pub installable: bool,
 }
 
-/// 检测结果详情：四态 + 绝对路径与命中来源 + CLI 安装信息（UI 展示与一键装用）。
+// ---------------------------------------------------------------------------
+// 认证态探测（P29 任务二）：只读文件、不回传密钥。三态：
+//   Subscription = 订阅登录（OAuth 凭据）；Api = API key 配置；None = 未配置。
+// 探测失败（文件缺失/损坏/读不了）一律 None，不报错——认证态是尽力而为的信息。
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthState {
+    Subscription,
+    Api,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthInfo {
+    pub state: AuthState,
+    /// 文案细节（如「已登录订阅」「API 已配置」；None 时为空）
+    pub detail: String,
+}
+
+impl AuthInfo {
+    fn none() -> AuthInfo {
+        AuthInfo { state: AuthState::None, detail: String::new() }
+    }
+}
+
+/// 从 Claude credentials 文本探测订阅登录态（OAuth 凭据文件，含 oauth 字段才算）。
+pub fn claude_credentials_text(raw: &str) -> bool {
+    let v: serde_json::Value = serde_json::from_str(raw).unwrap_or(serde_json::Value::Null);
+    v.get("claudeAiOauth").is_some()
+        || v.get("oauthAccount").is_some()
+        || v.get("access_token").is_some()
+        || v.get("tokens").is_some()
+}
+
+/// 从 Claude settings 文本探测 API 配置态（env 里有 AUTH_TOKEN / API_KEY）。
+pub fn claude_settings_has_api(raw: &str) -> bool {
+    let v: serde_json::Value = serde_json::from_str(raw).unwrap_or(serde_json::Value::Null);
+    let env = v.get("env");
+    ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
+        .iter()
+        .any(|k| {
+            env.and_then(|e| e.get(k))
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.trim().is_empty())
+        })
+}
+
+/// 从 Codex auth.json 文本探测：tokens = 订阅；OPENAI_API_KEY = API。
+pub fn codex_auth_text(raw: &str) -> AuthState {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return AuthState::None;
+    };
+    if v.get("tokens").map(|t| !t.is_null()).unwrap_or(false) {
+        return AuthState::Subscription;
+    }
+    let key = v
+        .get("OPENAI_API_KEY")
+        .or_else(|| v.get("openai_api_key"))
+        .and_then(|k| k.as_str());
+    if key.is_some_and(|k| !k.trim().is_empty()) {
+        return AuthState::Api;
+    }
+    AuthState::None
+}
+
+/// 通用「auth.json 非空对象 = 已配置」探测（pi / opencode 用）。
+pub fn auth_json_nonempty(raw: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    v.as_object().is_some_and(|o| !o.is_empty())
+}
+
+/// 按预置 harness id 探测认证态（home 注入便于单测；生产传 None 用 dirs::home_dir）。
+pub fn probe_auth(adapter_id: &str, home: Option<&std::path::Path>) -> AuthInfo {
+    let Some(home) = home.map(|h| h.to_path_buf()).or_else(dirs::home_dir) else {
+        return AuthInfo::none();
+    };
+    match adapter_id {
+        "claude-code" => {
+            let creds = std::fs::read_to_string(home.join(".claude/.credentials.json"))
+                .ok()
+                .map(|raw| claude_credentials_text(&raw))
+                .unwrap_or(false);
+            if creds {
+                return AuthInfo { state: AuthState::Subscription, detail: "已登录订阅".into() };
+            }
+            let api = std::fs::read_to_string(home.join(".claude/settings.json"))
+                .ok()
+                .map(|raw| claude_settings_has_api(&raw))
+                .unwrap_or(false);
+            if api {
+                AuthInfo { state: AuthState::Api, detail: "API 已配置".into() }
+            } else {
+                AuthInfo::none()
+            }
+        }
+        "codex" => {
+            match std::fs::read_to_string(home.join(".codex/auth.json")) {
+                Ok(raw) => match codex_auth_text(&raw) {
+                    AuthState::Subscription => {
+                        AuthInfo { state: AuthState::Subscription, detail: "已登录 ChatGPT 订阅".into() }
+                    }
+                    AuthState::Api => AuthInfo { state: AuthState::Api, detail: "API 已配置".into() },
+                    AuthState::None => AuthInfo::none(),
+                },
+                Err(_) => AuthInfo::none(),
+            }
+        }
+        "pi" | "omp" => {
+            // pi / omp 同属 pi 体系，共用 ~/.pi/agent/auth.json
+            match std::fs::read_to_string(home.join(".pi/agent/auth.json")) {
+                Ok(raw) if auth_json_nonempty(&raw) => {
+                    AuthInfo { state: AuthState::Api, detail: "已配置".into() }
+                }
+                _ => AuthInfo::none(),
+            }
+        }
+        "opencode" => {
+            let p = home.join(".local/share/opencode/auth.json");
+            match std::fs::read_to_string(&p) {
+                Ok(raw) if auth_json_nonempty(&raw) => {
+                    AuthInfo { state: AuthState::Api, detail: "已配置".into() }
+                }
+                _ => AuthInfo::none(),
+            }
+        }
+        _ => AuthInfo::none(),
+    }
+}
+
+/// 检测结果详情：四态 + 绝对路径与命中来源 + CLI 安装信息 + 认证态（UI 展示与一键装用）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdapterStatus {
@@ -185,6 +319,8 @@ pub struct AdapterStatus {
     pub bridge: Option<BridgeInfo>,
     /// P29：CLI 一键安装元信息（CLI 已在或非登记程序为 None）
     pub cli: Option<CliInstallInfo>,
+    /// P29：认证态（订阅登录 / API 配置 / 未配置）
+    pub auth: AuthInfo,
 }
 
 #[tauri::command]
@@ -218,6 +354,7 @@ pub fn compute_status_inner(
             ),
             bridge: None,
             cli: None,
+            auth: probe_auth_by_program(program),
         };
     }
     // CLI 已在但桥不在 → bridge_status 分支（installable / absent）
@@ -257,7 +394,18 @@ fn cli_status(program: &str) -> AdapterStatus {
         source: None,
         bridge: None,
         cli,
+        auth: probe_auth_by_program(program),
     }
+}
+
+/// program 名 → adapter id 映射（probe_auth 按预置 id 分派；程序名与 id 不同名时经此转换）。
+fn probe_auth_by_program(program: &str) -> AuthInfo {
+    let id = match program {
+        "claude-agent-acp" => "claude-code",
+        "pi-acp" => "pi",
+        other => other,
+    };
+    probe_auth(id, None)
 }
 
 /// 桥程序在「本体 CLI 已在」前提下的状态归类（纯函数）。
@@ -275,6 +423,7 @@ pub fn bridge_status(
             source: Some("ManagedBridge".into()),
             bridge: None,
             cli: None,
+            auth: probe_auth_by_program(spec.cli_program),
         };
     }
     let bridge = BridgeInfo {
@@ -292,6 +441,7 @@ pub fn bridge_status(
         source: None,
         bridge: Some(bridge),
         cli: None,
+        auth: probe_auth_by_program(spec.cli_program),
     }
 }
 
@@ -423,5 +573,115 @@ mod tests {
             assert!(s.cli.is_some());
             assert!(s.bridge.is_none());
         }
+    }
+
+    // ---------------- P29 任务二：认证态探测 ----------------
+
+    #[test]
+    fn claude_credentials_detects_oauth_shapes() {
+        // 各种可能的 OAuth 凭据形态（官方结构演进过）都算订阅
+        assert!(claude_credentials_text(r#"{"claudeAiOauth":{"accessToken":"x"}}"#));
+        assert!(claude_credentials_text(r#"{"oauthAccount":{"emailAddress":"a@b.c"}}"#));
+        assert!(claude_credentials_text(r#"{"access_token":"x","refresh_token":"y"}"#));
+        // API key 形态 / 空对象 / 损坏 → 非订阅
+        assert!(!claude_credentials_text(r#"{"apiKey":"sk"}"#));
+        assert!(!claude_credentials_text("{}"));
+        assert!(!claude_credentials_text("not json"));
+    }
+
+    #[test]
+    fn claude_settings_api_detection() {
+        assert!(claude_settings_has_api(
+            r#"{"env":{"ANTHROPIC_BASE_URL":"https://x","ANTHROPIC_AUTH_TOKEN":"sk"}}"#
+        ));
+        assert!(claude_settings_has_api(r#"{"env":{"ANTHROPIC_API_KEY":"sk"}}"#));
+        // 空串不算配置
+        assert!(!claude_settings_has_api(r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"  "}}"#));
+        assert!(!claude_settings_has_api(r#"{"model":"opus"}"#));
+        assert!(!claude_settings_has_api("not json"));
+    }
+
+    #[test]
+    fn codex_auth_three_states() {
+        // 订阅：tokens 字段（ChatGPT 登录形态）
+        assert_eq!(
+            codex_auth_text(r#"{"tokens":{"id_token":"x","access_token":"y"}}"#),
+            AuthState::Subscription
+        );
+        // API：OPENAI_API_KEY（两种大小写历史形态）
+        assert_eq!(codex_auth_text(r#"{"OPENAI_API_KEY":"sk"}"#), AuthState::Api);
+        assert_eq!(codex_auth_text(r#"{"openai_api_key":"sk"}"#), AuthState::Api);
+        // 空串 key 不算
+        assert_eq!(codex_auth_text(r#"{"OPENAI_API_KEY":""}"#), AuthState::None);
+        assert_eq!(codex_auth_text("{}"), AuthState::None);
+        assert_eq!(codex_auth_text("broken"), AuthState::None);
+    }
+
+    #[test]
+    fn nonempty_auth_json_matrix() {
+        assert!(auth_json_nonempty(r#"{"provider":{"type":"api","key":"sk"}}"#));
+        assert!(!auth_json_nonempty("{}"));
+        assert!(!auth_json_nonempty("[]"));
+        assert!(!auth_json_nonempty("junk"));
+    }
+
+    #[test]
+    fn probe_auth_home_injection_matrix() {
+        let dir = std::env::temp_dir().join(format!("ainone-auth-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        std::fs::create_dir_all(dir.join(".codex")).unwrap();
+        std::fs::create_dir_all(dir.join(".pi/agent")).unwrap();
+
+        // 全空 → 全 None
+        assert_eq!(probe_auth("claude-code", Some(&dir)).state, AuthState::None);
+        assert_eq!(probe_auth("codex", Some(&dir)).state, AuthState::None);
+        assert_eq!(probe_auth("pi", Some(&dir)).state, AuthState::None);
+        assert_eq!(probe_auth("omp", Some(&dir)).state, AuthState::None);
+        assert_eq!(probe_auth("opencode", Some(&dir)).state, AuthState::None);
+        // 未登记 id → None 不报错
+        assert_eq!(probe_auth("custom-x", Some(&dir)).state, AuthState::None);
+
+        // claude：订阅凭据优先于 API
+        std::fs::write(dir.join(".claude/.credentials.json"), r#"{"claudeAiOauth":{}}"#).unwrap();
+        let a = probe_auth("claude-code", Some(&dir));
+        assert_eq!(a.state, AuthState::Subscription);
+        std::fs::remove_file(dir.join(".claude/.credentials.json")).unwrap();
+        std::fs::write(
+            dir.join(".claude/settings.json"),
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"sk"}}"#,
+        )
+        .unwrap();
+        assert_eq!(probe_auth("claude-code", Some(&dir)).state, AuthState::Api);
+
+        // codex：tokens = 订阅
+        std::fs::write(dir.join(".codex/auth.json"), r#"{"tokens":{}}"#).unwrap();
+        assert_eq!(probe_auth("codex", Some(&dir)).state, AuthState::Subscription);
+
+        // pi / omp：非空 auth.json = Api
+        std::fs::write(dir.join(".pi/agent/auth.json"), r#"{"openai":{"key":"k"}}"#).unwrap();
+        assert_eq!(probe_auth("pi", Some(&dir)).state, AuthState::Api);
+        assert_eq!(probe_auth("omp", Some(&dir)).state, AuthState::Api);
+
+        // home 不存在（None 且无 HOME 环境）→ None 不 panic 由 dirs 兜底
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod real_machine_tests {
+    // P29 验收 2.2 实机快照：本机 claude（env TOKEN）→ Api；codex（OPENAI_API_KEY）→ Api。
+    // 该测试依赖真机环境，任何断言失败都意味着探测规则或本机配置结构变化，需要人工核对。
+    use super::*;
+
+    #[test]
+    fn real_machine_auth_snapshot() {
+        let claude = probe_auth("claude-code", None);
+        println!("claude-code auth: {:?}", claude.state);
+        assert_eq!(claude.state, AuthState::Api, "本机 claude 应为 API 配置态");
+
+        let codex = probe_auth("codex", None);
+        println!("codex auth: {:?}", codex.state);
+        assert_eq!(codex.state, AuthState::Api, "本机 codex 应为 API 配置态");
     }
 }
