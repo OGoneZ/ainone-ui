@@ -4,7 +4,7 @@
 // 自定义 harness 保留完整编辑。主题保留顶部。
 // 验收目标（plan-p29-onboarding.md 任务四 4.1-4.7）。
 
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Adapter, AdapterState, BridgeInfo, CliInstallInfo, AuthInfo } from "@/ipc/adapters";
 import { installBridge, installCli, refreshAdapterStatus, harnessConfigRead, harnessConfigSave, permissionModeRead, permissionModeSave } from "@/ipc/adapters";
@@ -176,10 +176,35 @@ const THEME_OPTIONS: Array<{ value: string; Icon: typeof ThemeLightIcon; title: 
 
 function ThemeSelect({ theme, onChange }: { theme: string; onChange: (t: string) => void }) {
   const current = THEME_OPTIONS.find((o) => o.value === theme) ?? THEME_OPTIONS[2];
+  // WKWebView 原生鼠标不派发 pointerdown（同仓库 wkwebview-no-native-pointerdown 坑），
+  // radix DropdownMenuTrigger 只靠 onPointerDown 开局 → 原生点击永远开不了菜单。
+  // 兜底：在 trigger 的 mousedown（WKWebView 正常派发）里向自身合成 pointerdown；用
+  // 真实 pointerdown 的时间戳去重——不在真实事件后补发（防 Chrome/jsdom 双触发关闭）。
+  const lastRealPointerDown = useRef(0);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button type="button" className="theme-select-trigger" data-testid="theme-select" aria-label="选择主题">
+      <DropdownMenuTrigger asChild onPointerDownCapture={() => { lastRealPointerDown.current = performance.now(); }}>
+        <button
+          type="button"
+          className="theme-select-trigger"
+          data-testid="theme-select"
+          aria-label="选择主题"
+          onMouseDown={(e) => {
+            if (performance.now() - lastRealPointerDown.current > 250) {
+              e.currentTarget.dispatchEvent(
+                new PointerEvent("pointerdown", {
+                  bubbles: true,
+                  cancelable: true,
+                  button: 0,
+                  buttons: 1,
+                  pointerId: 1,
+                  pointerType: "mouse",
+                  isPrimary: true,
+                }),
+              );
+            }
+          }}
+        >
           <span className="theme-select-value">
             <current.Icon style={{ width: 15, height: 15, strokeWidth: 1.75 }} />
             {current.title}

@@ -166,6 +166,25 @@ describe("SettingsModal 外观分区（P26 R3 主题自工具栏迁入）", () =
     await userEvent.setup().click(await screen.findByTestId("theme-option-dark"));
     expect(onThemeChange).toHaveBeenCalledWith("dark");
   });
+
+  it("WKWebView 无 pointerdown 时 mousedown 补丁可开下拉（防回归：radix Trigger 依赖 pointerdown 开局）", async () => {
+    // 模拟 WKWebView：只派发 mousedown + mouseup + click，不发 pointerdown
+    // （用户实测点不开的根因）。ThemeSelect trigger 的 mousedown 兜底会向自身
+    // 补发合成 pointerdown → radix 照常 toggle 开菜单。
+    const onThemeChange = vi.fn();
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={onThemeChange} />);
+
+    const { fireEvent } = await import("@testing-library/react");
+    const trigger = await screen.findByTestId("theme-select");
+    fireEvent.mouseDown(trigger);
+    fireEvent.mouseUp(trigger);
+    fireEvent.click(trigger);
+
+    // 菜单项出现 = 补丁生效（radix 开局成功）；且未误触发 onThemeChange
+    expect(await screen.findByTestId("theme-option-dark")).toBeInTheDocument();
+    expect(onThemeChange).not.toHaveBeenCalled();
+  });
 });
 
 // —— P29：四态徽标 / 一键安装串联 / 配置模型表单 ——
