@@ -35,3 +35,6 @@ CLAUDE.md
 
 # Claude Code 本地会话产物
 .claude/
+
+# P31 内嵌 bun 二进制（CI/prepare-runtime.mjs 构建期下载，不入库）
+src-tauri/resources/runtime/

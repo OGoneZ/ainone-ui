@@ -102,6 +102,7 @@ impl Runtime {
 
 impl CliCandidateKind {
     /// 测试与文案用：Package 的包名（Script 无包名，返回 url）。
+    #[allow(dead_code)] // P31 后 CLI pin 路线放弃，保留供未来诊断文案用
     pub fn pkg_name(&self) -> &'static str {
         match self {
             CliCandidateKind::Script { url } => url,
@@ -263,21 +264,88 @@ pub fn resolve_managed(app: &AppHandle, spec: &BridgeSpec) -> Option<ResolvedBri
     resolve_in(&config_dir, spec)
 }
 
-/// 安装运行时候选：bun 优先，失败回退 npm（node 无包管理器不算候选）。
-fn install_runtime_candidates() -> Vec<(PathBuf, Vec<&'static str>)> {
+/// 一条安装候选：运行时 × registry 的组合（P31 镜像回退）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallCandidate {
+    /// 包管理器可执行文件绝对路径
+    pub program: PathBuf,
+    /// 完整参数（含子命令；registry 回退时含 --registry）
+    pub args: Vec<String>,
+    /// 日志/文案标签（如 "bun (system)"、"bun (npmmirror)"）
+    pub label: String,
+}
+
+/// npmmirror 镜像（中国网络官方源不稳的回退，DeepChat 同款策略）。
+const NPM_MIRROR: &str = "https://registry.npmmirror.com";
+
+/// 纯函数：把一组运行时命中组装成「官方源 → npmmirror」的候选序列。
+/// 顺序 = 运行时优先级优先于镜像回退（同一运行时先官方后镜像，再换下一运行时）。
+/// bun_args/npm_args 由调用方按场景给（桥装用 --omit=optional，CLI 装用 --global）。
+pub fn build_install_candidates(
+    buns: &[PathBuf],
+    npms: &[PathBuf],
+    bun_args: &[&str],
+    npm_args: &[&str],
+) -> Vec<InstallCandidate> {
     let mut out = Vec::new();
-    if let Some(h) = crate::env_path::find_program("bun") {
-        out.push((h.path, vec!["add", "--omit=optional"]));
-    }
-    if let Some(h) = crate::env_path::find_program("npm") {
-        out.push((h.path, vec!["install", "--omit=optional", "--no-audit", "--no-fund"]));
+    for (paths, base_args, kind) in [
+        (buns, bun_args, "bun"),
+        (npms, npm_args, "npm"),
+    ] {
+        for path in paths {
+            // 官方源
+            out.push(InstallCandidate {
+                program: path.clone(),
+                args: base_args.iter().map(|s| s.to_string()).collect(),
+                label: format!("{kind} (官方源)"),
+            });
+            // npmmirror 回退
+            let mut mirror_args: Vec<String> = base_args.iter().map(|s| s.to_string()).collect();
+            mirror_args.push("--registry".into());
+            mirror_args.push(NPM_MIRROR.into());
+            out.push(InstallCandidate {
+                program: path.clone(),
+                args: mirror_args,
+                label: format!("{kind} (npmmirror)"),
+            });
+        }
     }
     out
 }
 
+/// 安装运行时候选（P31 三级运行时 × 双 registry）：
+/// system bun → system npm → bundled bun，各自先官方源后 npmmirror。
+fn install_runtime_candidates(app: &AppHandle) -> Vec<InstallCandidate> {
+    let mut buns: Vec<PathBuf> = Vec::new();
+    let mut npms: Vec<PathBuf> = Vec::new();
+    // system bun
+    if let Some(h) = crate::env_path::find_program("bun") {
+        buns.push(h.path);
+    }
+    // system npm（resolve_npm 内含 node 同级探测；NpmSource::System 才算 npm 候选，
+    // BundledBun 形态归入 bundled bun 候选避免重复）
+    match crate::embedded_runtime::resolve_npm(app) {
+        Some((p, crate::embedded_runtime::NpmSource::System)) => npms.push(p),
+        _ => {}
+    }
+    // bundled bun（system bun 已在时 resolve_bun 返回 system，须单独取 bundled）
+    if let Some((p, src)) = crate::embedded_runtime::resolve_bun(app) {
+        if src == "bundled" {
+            buns.push(p);
+        }
+    }
+    build_install_candidates(
+        &buns,
+        &npms,
+        &["add", "--omit=optional"],
+        &["install", "--omit=optional", "--no-audit", "--no-fund"],
+    )
+}
+
 /// 环境是否具备懒装条件（adapter_status 的 installable 判据之一）。
-pub fn install_runtime_available() -> bool {
-    crate::env_path::find_program("bun").is_some() || crate::env_path::find_program("npm").is_some()
+/// P31：内嵌 bun 兜底后预置桥恒可装（bundled 在则真），保留函数保语义清晰。
+pub fn install_runtime_available(app: &AppHandle) -> bool {
+    !install_runtime_candidates(app).is_empty()
 }
 
 /// 触发安装（幂等：已装直接返回）。bun→npm 依次尝试，逐行推进度；
@@ -296,9 +364,9 @@ pub async fn install_bridge(
         return Ok(b); // 等锁期间别的调用装完了
     }
 
-    let candidates = install_runtime_candidates();
+    let candidates = install_runtime_candidates(app);
     if candidates.is_empty() {
-        return Err("未找到 bun 或 npm，无法安装桥接器。请先安装 bun（curl -fsSL https://bun.sh/install | bash）或 Node.js ≥20。".into());
+        return Err("未找到可用的包管理器（bun/npm/内嵌 bun 均不可用），无法安装桥接器。".into());
     }
     let dir = bridges_root(app)?.join(spec.program);
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建桥目录失败: {e}"))?;
@@ -311,10 +379,16 @@ pub async fn install_bridge(
 
     let spec_arg = format!("{}@{}", spec.pkg, spec.version);
     let mut last_err = String::new();
-    for (idx, (runtime, base_args)) in candidates.iter().enumerate() {
+    for (idx, candidate) in candidates.iter().enumerate() {
         let is_last = idx + 1 == candidates.len();
-        log::info!("[bridge] 安装 {} → {}（{}）", spec_arg, runtime.display(), dir.display());
-        match run_install(runtime, base_args, &spec_arg, &dir, &on_event).await {
+        log::info!(
+            "[bridge] 安装 {} → {} [{}]（{}）",
+            spec_arg,
+            candidate.program.display(),
+            candidate.label,
+            dir.display()
+        );
+        match run_install(&candidate.program, &candidate.args, &spec_arg, &dir, &on_event).await {
             Ok(()) => {
                 std::fs::write(marker_path(&dir, spec.version), spec.version)
                     .map_err(|e| format!("写入安装标记失败: {e}"))?;
@@ -327,7 +401,7 @@ pub async fn install_bridge(
             }
             Err(e) => {
                 last_err = e;
-                log::warn!("[bridge] 运行时 {} 失败: {last_err}", runtime.display());
+                log::warn!("[bridge] 候选 {} 失败: {last_err}", candidate.label);
                 if is_last {
                     // 自愈：删半成品，下次重试从干净状态开始
                     let _ = std::fs::remove_dir_all(&dir);
@@ -336,14 +410,14 @@ pub async fn install_bridge(
         }
     }
     Err(format!(
-        "桥接器 {spec_arg} 安装失败：{last_err}。检查网络后重试。"
+        "桥接器 {spec_arg} 安装失败（已尝试官方源与 npmmirror 镜像）：{last_err}。检查网络后重试。"
     ))
 }
 
 /// 跑一轮安装器，逐行转发输出；超时 kill。
 async fn run_install(
     runtime: &Path,
-    base_args: &[&'static str],
+    base_args: &[String],
     spec_arg: &str,
     dir: &Path,
     on_event: &Option<Channel<BridgeEvent>>,
@@ -433,6 +507,7 @@ pub async fn cli_install(
 
 /// 已装 CLI 就直接返回（幂等）；否则按候选链依次尝试。
 /// 候选可用性前置判定：全不可用直接报缺失运行时，不空跑。
+/// P31：bun 判定走三级解析（system → bundled），registry 镜像回退在候选执行层。
 pub async fn install_cli(
     app: &AppHandle,
     spec: &CliSpec,
@@ -441,8 +516,8 @@ pub async fn install_cli(
     if crate::env_path::find_program(spec.program).is_some() {
         return Ok(());
     }
-    let bun_in = crate::env_path::find_program("bun").is_some();
-    let npm_in = crate::env_path::find_program("npm").is_some();
+    let bun_in = crate::embedded_runtime::resolve_bun(app).is_some();
+    let npm_in = crate::embedded_runtime::resolve_npm(app).is_some();
     if !cli_installable(spec, bun_in, npm_in) {
         return Err(format!(
             "无法安装 {}：缺少 bun 或 npm（脚本安装候选不存在）。请先安装 bun（curl -fsSL https://bun.sh/install | bash）或 Node.js ≥20。",
@@ -528,21 +603,46 @@ async fn run_cli_candidate(
             r
         }
         CliCandidateKind::Package { runtime, pkg } => {
-            let hit = crate::env_path::find_program(runtime.program())
-                .map(|h| h.path)
-                .ok_or_else(|| format!("未找到 {}", runtime.program()))?;
-            let mut argv = vec![hit.to_string_lossy().into_owned()];
-            match runtime {
-                Runtime::Bun => argv.extend(["add".to_string(), "--global".to_string(), (*pkg).to_string()]),
-                Runtime::Npm => argv.extend([
-                    "install".to_string(),
-                    "--global".to_string(),
-                    "--no-audit".to_string(),
-                    "--no-fund".to_string(),
-                    (*pkg).to_string(),
-                ]),
+            // P31：运行时三级链 × registry 双源——bun 候选走 system→bundled bun，
+            // npm 候选走 system npm；每级先官方源后 npmmirror（build_install_candidates）。
+            let (buns, npms) = runtime_paths(app);
+            let (bun_args, npm_args): (&[&str], &[&str]) = match runtime {
+                Runtime::Bun => (&["add", "--global"], &[]),
+                Runtime::Npm => (
+                    &[],
+                    &["install", "--global", "--no-audit", "--no-fund"],
+                ),
+            };
+            let (paths, base, kind): (&[PathBuf], &[&str], &str) = match runtime {
+                Runtime::Bun => (&buns, bun_args, "bun"),
+                Runtime::Npm => (&npms, npm_args, "npm"),
+            };
+            let mut candidates = build_install_candidates(paths, &[], base, &[]);
+            let _ = kind;
+            // npmmirror 回退候选（官方源失败逐级补上）
+            let mirrors = build_mirror_candidates(paths, base, kind_label(kind));
+            candidates.extend(mirrors);
+            if candidates.is_empty() {
+                return Err(format!("未找到 {}（bun/npm/内嵌 bun 均不可用）", runtime.program()));
             }
-            run_argv(app, &RunSpec { argv }, on_event).await
+            let mut last_err = String::new();
+            for cand in &candidates {
+                let mut argv = vec![cand.program.to_string_lossy().into_owned()];
+                argv.extend(cand.args.iter().cloned());
+                argv.push((*pkg).to_string());
+                progress_line(on_event, &format!("尝试 {}…", cand.label));
+                match run_argv(app, &RunSpec { argv }, on_event).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        last_err = e;
+                        log::warn!("[cli] {} 候选失败: {last_err}", cand.label);
+                    }
+                }
+            }
+            Err(format!(
+                "{} 安装失败（已尝试官方源与 npmmirror 镜像）：{last_err}",
+                runtime.program()
+            ))
         }
     }
 }
@@ -550,6 +650,58 @@ async fn run_cli_candidate(
 /// 一次进程调用的参数（统一走 run_argv：增强 PATH env + 逐行进度 + 15min 超时）。
 struct RunSpec {
     argv: Vec<String>,
+}
+
+/// 当前机器的 bun/npm 可执行路径集（P31 CLI Package 候选执行层用）：
+/// buns = [system bun?, bundled bun?]；npms = [system npm?]。
+fn runtime_paths(app: &AppHandle) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut buns = Vec::new();
+    let mut npms = Vec::new();
+    // system bun（resolve_bun 只回一个，bundled 被 system 遮蔽时单独补）
+    let system_bun = crate::env_path::find_program("bun");
+    if let Some(h) = &system_bun {
+        buns.push(h.path.clone());
+    }
+    if system_bun.is_none() {
+        if let Some((p, "bundled")) = crate::embedded_runtime::resolve_bun(app) {
+            buns.push(p);
+        }
+    }
+    if let Some((p, crate::embedded_runtime::NpmSource::System)) =
+        crate::embedded_runtime::resolve_npm(app)
+    {
+        npms.push(p);
+    }
+    (buns, npms)
+}
+
+/// kind 标签（日志/进度文案用）。
+fn kind_label(kind: &str) -> &'static str {
+    match kind {
+        "bun" => "bun",
+        _ => "npm",
+    }
+}
+
+/// 纯函数：镜像回退候选（官方源失败后逐个补上，--registry 追加在尾部）。
+fn build_mirror_candidates(
+    paths: &[PathBuf],
+    base_args: &[&str],
+    kind: &'static str,
+) -> Vec<InstallCandidate> {
+    paths
+        .iter()
+        .map(|path| {
+            let mut args: Vec<String> = base_args.iter().map(|s| s.to_string()).collect();
+            args.push("--registry".into());
+            args.push(NPM_MIRROR.into());
+            InstallCandidate {
+                program: path.clone(),
+                args,
+                label: format!("{kind} (npmmirror)"),
+            }
+        })
+        .collect()
 }
 
 fn progress_line(on_event: &Option<Channel<CliInstallEvent>>, line: &str) {
@@ -781,5 +933,51 @@ mod tests {
         assert_eq!(sanitize_progress_line("10%\r\n25%\r50%"), "50%");
         // OSC 标题序列
         assert_eq!(sanitize_progress_line("\x1b]0;title\x07done"), "done");
+    }
+
+    // ---------------- P31 任务三：安装候选 × registry 矩阵 ----------------
+
+    #[test]
+    fn install_candidates_official_then_mirror_per_runtime() {
+        // 单 bun：官方源 → npmmirror（同运行时先官方后镜像）
+        let buns = vec![PathBuf::from("/x/bun")];
+        let c = build_install_candidates(&buns, &[], &["add", "--omit=optional"], &[]);
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0].label, "bun (官方源)");
+        assert_eq!(c[0].args, vec!["add", "--omit=optional"]);
+        assert_eq!(c[1].label, "bun (npmmirror)");
+        assert_eq!(
+            c[1].args,
+            vec!["add", "--omit=optional", "--registry", "https://registry.npmmirror.com"]
+        );
+    }
+
+    #[test]
+    fn install_candidates_runtime_priority_before_mirror() {
+        // bun+npm 双在：bun 官方 → bun 镜像 → npm 官方 → npm 镜像
+        // （运行时优先级优先于镜像回退，不跳级）
+        let buns = vec![PathBuf::from("/x/bun")];
+        let npms = vec![PathBuf::from("/y/npm")];
+        let c = build_install_candidates(
+            &buns,
+            &npms,
+            &["add"],
+            &["install", "--no-audit"],
+        );
+        assert_eq!(c.len(), 4);
+        assert_eq!(c[0].label, "bun (官方源)");
+        assert_eq!(c[1].label, "bun (npmmirror)");
+        assert_eq!(c[2].label, "npm (官方源)");
+        assert_eq!(c[3].label, "npm (npmmirror)");
+        // npm 官方参数不被镜像候选污染
+        assert_eq!(c[2].args, vec!["install", "--no-audit"]);
+        assert_eq!(c[0].program, PathBuf::from("/x/bun"));
+        assert_eq!(c[3].program, PathBuf::from("/y/npm"));
+    }
+
+    #[test]
+    fn install_candidates_empty_when_no_runtime() {
+        let c = build_install_candidates(&[], &[], &["add"], &["install"]);
+        assert!(c.is_empty());
     }
 }

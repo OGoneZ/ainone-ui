@@ -11,6 +11,7 @@ mod adapters;
 mod agent;
 mod asr;
 mod connector;
+mod embedded_runtime;
 mod env_path;
 mod fs;
 mod fslist;
@@ -77,6 +78,7 @@ pub fn run() {
             adapters::default_cwd,
             connector::bridge_install,
             connector::cli_install,
+            embedded_runtime::runtime_diagnostics_cmd,
             harness_config::harness_config_read,
             harness_config::harness_config_save,
             harness_config::permission_mode_read,

@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Adapter, AdapterState, BridgeInfo, CliInstallInfo, AuthInfo } from "@/ipc/adapters";
 import { installBridge, installCli, refreshAdapterStatus, harnessConfigRead, harnessConfigSave, permissionModeRead, permissionModeSave } from "@/ipc/adapters";
+import { runtimeDiagnostics, runtimeSummaryLine } from "@/ipc/runtime";
 import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
@@ -154,6 +155,8 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
   const [loading, setLoading] = useState(false);
   // P29：「更多服务」折叠区（快问 + 语音）展开态
   const [moreOpen, setMoreOpen] = useState(false);
+  /** P31：运行时状态一行文案（harness 区块尾部小字，诊断排障用） */
+  const [runtimeLine, setRuntimeLine] = useState("运行时：探测中…");
   // F-8-7 快问模型配置（P22：protocol/source 由 Rust 回传，视图展示来源徽标）
   const [qa, setQa] = useState<QuickAskConfigView>({
     base_url: "",
@@ -188,6 +191,9 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     asrConfigGet()
       .then((v) => setAsr(v ?? { base_url: "", model: "", has_api_key: false }))
       .catch(() => {});
+    runtimeDiagnostics()
+      .then((d) => setRuntimeLine(runtimeSummaryLine(d)))
+      .catch(() => setRuntimeLine("运行时：未知"));
   }, [open]);
 
   // 逐项探测可用性（adapter_status：四态 + 解析路径与来源 + CLI/认证元信息）
@@ -690,6 +696,10 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
             <div className="adapter-list">
               {items.map(adapterCard)}
             </div>
+            {/* P31：运行时状态一行小字（bun/npm 解析结果与内嵌兜底状态，排障用） */}
+            <p className="settings-hint" data-testid="runtime-summary">
+              {runtimeLine}
+            </p>
           </section>
 
           {/* ============ 分区三：更多服务（P29 折叠：快问 + 语音） ============ */}

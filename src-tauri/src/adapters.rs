@@ -135,7 +135,14 @@ fn save_to(path: &PathBuf, adapters: &[Adapter]) -> Result<(), String> {
 pub fn adapter_available(app: tauri::AppHandle, program: String) -> bool {
     let managed = crate::connector::bridge_spec(&program)
         .and_then(|s| crate::connector::resolve_managed(&app, s));
-    compute_status_inner(&program, managed.as_ref()).state == AdapterState::Ready
+    compute_status_inner(&program, managed.as_ref(), runtime_ok(&app)).state
+        == AdapterState::Ready
+}
+
+/// P31：真机运行时可用性（bun/npm/bundled bun 任一在）。
+/// 调 install_runtime_candidates 空跑组装一次（纯内存查文件，无进程拉起，微秒级）。
+fn runtime_ok(app: &tauri::AppHandle) -> bool {
+    crate::connector::install_runtime_available(app)
 }
 
 /// 四态（P29 扩展）：已可用 / 可懒装桥 / **CLI 可一键装（新增）** / 真未装。
@@ -327,7 +334,7 @@ pub struct AdapterStatus {
 pub fn adapter_status(app: tauri::AppHandle, program: String) -> AdapterStatus {
     let managed = crate::connector::bridge_spec(&program)
         .and_then(|s| crate::connector::resolve_managed(&app, s));
-    compute_status_inner(&program, managed.as_ref())
+    compute_status_inner(&program, managed.as_ref(), runtime_ok(&app))
 }
 
 /// 四态判定核心（PATH 检索走 env_path 真机；桥/CLI 分支的可用性输入由调用方注入
@@ -337,9 +344,12 @@ pub fn adapter_status(app: tauri::AppHandle, program: String) -> AdapterStatus {
 ///   3. 懒装桥 + 本体 CLI 在 + 运行时在 → installable
 ///   4. CLI 未装 + 登记在 CLI_INSTALLERS + 有可用候选 → cli_installable（P29）
 ///   5. 其余                         → absent（bridge/cli 元信息解释缺哪块）
+/// P31：runtime_ok 参数注入（bun/npm/bundled bun 任一在 = true），
+/// 纯函数不依赖 AppHandle，真机判定由调用方算好传入。
 pub fn compute_status_inner(
     program: &str,
     managed: Option<&crate::connector::ResolvedBridge>,
+    runtime_ok: bool,
 ) -> AdapterStatus {
     if let Some(hit) = crate::env_path::find_program(program) {
         return AdapterStatus {
@@ -363,28 +373,21 @@ pub fn compute_status_inner(
         Some(s) => {
             let cli_hit = crate::env_path::find_program(s.cli_program);
             match cli_hit {
-                Some(_) => bridge_status(
-                    s,
-                    managed,
-                    true,
-                    crate::connector::install_runtime_available(),
-                ),
-                None => cli_status(program),
+                Some(_) => bridge_status(s, managed, true, runtime_ok),
+                None => cli_status(program, runtime_ok),
             }
         }
-        None => cli_status(program),
+        None => cli_status(program, runtime_ok),
     }
 }
 
 /// CLI 未装前提下的状态归类（纯逻辑层——cli 分支不涉及桥）。
-fn cli_status(program: &str) -> AdapterStatus {
+/// P31：runtime_ok = bun/npm/bundled bun 任一可用（真机判定由调用方注入）。
+fn cli_status(program: &str, runtime_ok: bool) -> AdapterStatus {
     let cli = crate::connector::cli_spec(program).map(|s| CliInstallInfo {
         display: s.display.into(),
-        installable: crate::connector::cli_installable(
-            s,
-            crate::env_path::find_program("bun").is_some(),
-            crate::env_path::find_program("npm").is_some(),
-        ),
+        installable: runtime_ok
+            && crate::connector::cli_installable(s, true, true),
     });
     let installable = cli.as_ref().is_some_and(|c| c.installable);
     AdapterStatus {
@@ -549,26 +552,30 @@ mod tests {
 
     #[test]
     fn cli_status_branch_reports_installable_and_absent() {
-        // 本机 bun/npm 都在（开发机前提）→ claude/opencode 登记 → cli_installable
-        let s = cli_status("claude");
+        // runtime_ok=true → 登记程序 cli_installable（claude 只有脚本候选恒可装）
+        let s = cli_status("claude", true);
         assert_eq!(s.state, AdapterState::CliInstallable);
         assert!(!s.available);
         let c = s.cli.expect("claude 应有 CliInstallInfo");
         assert_eq!(c.display, "Claude Code");
         // 未登记程序 → absent 且 cli=None（文案点名「未知程序」由前端兜底）
-        let s = cli_status("my-unknown-agent");
+        let s = cli_status("my-unknown-agent", true);
         assert_eq!(s.state, AdapterState::Absent);
         assert!(s.cli.is_none());
+        // P31 矩阵：runtime_ok=false → 登记程序也 absent（装不了）
+        let s = cli_status("claude", false);
+        assert_eq!(s.state, AdapterState::Absent);
+        assert!(!s.cli.unwrap().installable);
+        // P31 矩阵：runtime_ok=true 但只有 Package 候选的程序照常判定
+        let s = cli_status("codex", true);
+        assert_eq!(s.state, AdapterState::CliInstallable);
     }
 
     #[test]
     fn cli_in_bridge_program_falls_to_cli_status() {
         // pi-acp（桥程序）但 pi 本体不在：compute_status_inner 走 cli 分支
-        // （本机 pi 若真装了此测会翻——用未装的原生程序 omp-acp-unknown 规避？不行，
-        // 就用 omp：本机可能装。真正可移植的断言：桥 spec 命中且 CLI 不在时返回值
-        // 携带 cli 字段而非 bridge 字段。这里直接验证 bridge 分支的 CLI-missing
-        // 已由 cli_status 接管——通过 cli_status("pi") 的 cli 字段存在性验证）
-        let s = cli_status("pi");
+        // （真正可移植的断言：桥 spec 命中且 CLI 不在时返回值携带 cli 字段而非 bridge 字段）
+        let s = cli_status("pi", true);
         if s.state == AdapterState::CliInstallable {
             assert!(s.cli.is_some());
             assert!(s.bridge.is_none());
