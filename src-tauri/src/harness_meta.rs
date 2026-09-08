@@ -96,7 +96,7 @@ pub(crate) fn harness_meta_inner(adapter_id: &str, home: Option<&Path>) -> Optio
     }
 }
 
-/// Claude settings.json：env.ANTHROPIC_BASE_URL / model（去 [1m]）；key 看 ANTHROPIC_AUTH_TOKEN。
+/// Claude settings.json：env.ANTHROPIC_BASE_URL / model（去 [1m]）；key 判定走 claude_key_present。
 pub(crate) fn meta_claude(raw: &str) -> Option<HarnessMeta> {
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
     let base = v
@@ -111,13 +111,24 @@ pub(crate) fn meta_claude(raw: &str) -> Option<HarnessMeta> {
         .and_then(|m| m.as_str())
         .map(crate::harness_probe::strip_model_suffix)
         .filter(|m| !m.is_empty());
-    let key_present = v
-        .get("env")
-        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
-        .and_then(|k| k.as_str())
-        .map(|k| !k.trim().is_empty())
-        .unwrap_or(false);
+    let key_present = claude_key_present(&v);
     Some(HarnessMeta { base_url: base, model, api_key_present: key_present })
+}
+
+/// Claude「已配置 key」的唯一判定（P32a R3）：env.ANTHROPIC_AUTH_TOKEN 或
+/// env.ANTHROPIC_API_KEY 任一非空。三处消费点（harness_meta 回显 / harness_config
+/// 代写回显 / adapters 认证探测）必须经由此函数，禁止各自再写判定防分叉。
+pub(crate) fn claude_key_present(v: &serde_json::Value) -> bool {
+    v.get("env")
+        .and_then(|e| e.as_object())
+        .map(|env| {
+            ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"].iter().any(|k| {
+                env.get(*k)
+                    .and_then(|x| x.as_str())
+                    .is_some_and(|s| !s.trim().is_empty())
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Codex config.toml：model_providers.<active>.base_url + 顶层 model；key 看 ~/.codex/auth.json。
@@ -671,6 +682,11 @@ fn codex_api_key(home: Option<&Path>) -> Option<String> {
 fn omp_api_key(home: Option<&Path>) -> Option<String> {
     let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
     let raw = std::fs::read_to_string(home.join(".omp/agent/models.yml")).ok()?;
+    omp_key_from_text(&raw)
+}
+
+/// omp models.yml 文本 → apiKey 明文（锚定 `apiKey:` 行；omp_api_key 与快问 probe 共用）。
+pub(crate) fn omp_key_from_text(raw: &str) -> Option<String> {
     for line in raw.lines() {
         let t = line.trim();
         if t.starts_with("apiKey:") {
@@ -681,6 +697,17 @@ fn omp_api_key(home: Option<&Path>) -> Option<String> {
         }
     }
     None
+}
+
+/// omp「已配置 key」判定（P32a：认证探测唯一事实源——omp 自身 models.yml，非 pi 的 auth.json）。
+pub(crate) fn omp_api_key_present(home: Option<&Path>) -> bool {
+    let Some(home) = home.map(PathBuf::from).or_else(dirs::home_dir) else {
+        return false;
+    };
+    std::fs::read_to_string(home.join(".omp/agent/models.yml"))
+        .ok()
+        .and_then(|raw| omp_key_from_text(&raw))
+        .is_some()
 }
 
 /// OpenCode opencode.json 的 provider.<ainone|首个含 baseURL>.options.apiKey
@@ -781,6 +808,26 @@ wire_api = "responses"
         assert_eq!(m.base_url, None);
         assert_eq!(m.model, None);
         assert!(!m.api_key_present);
+    }
+
+    // —— P32a R3：claude_key_present 双字段唯一判定（三处消费点统一语义） ——
+
+    #[test]
+    fn claude_key_present_dual_field_matrix() {
+        let parse = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        assert!(claude_key_present(&parse(r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"sk"}}"#)));
+        assert!(claude_key_present(&parse(r#"{"env":{"ANTHROPIC_API_KEY":"sk"}}"#)));
+        assert!(claude_key_present(&parse(
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"a","ANTHROPIC_API_KEY":"b"}}"#
+        )));
+        assert!(!claude_key_present(&parse(r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"  "}}"#)));
+        assert!(!claude_key_present(&parse(r#"{"env":{}}"#)));
+        assert!(!claude_key_present(&parse(r#"{}"#)));
+        // 非 JSON 输入的防御路径由调用方 from_str 兜住（此处仅验对象语义）
+        // 空白值 + 另一字段有效 → 仍算已配置（任一非空即可）
+        assert!(claude_key_present(&parse(
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"  ","ANTHROPIC_API_KEY":"sk"}}"#
+        )));
     }
 
     #[test]

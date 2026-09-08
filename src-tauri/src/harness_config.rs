@@ -63,15 +63,14 @@ pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, Str
     match adapter_id {
         "claude-code" => {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else { return empty };
-            let env = v.get("env");
-            let endpoint = env
+            let endpoint = v
+                .get("env")
                 .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
                 .and_then(|x| x.as_str())
                 .unwrap_or("")
                 .to_string();
-            let has_key = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
-                .iter()
-                .any(|k| env.and_then(|e| e.get(k)).and_then(|x| x.as_str()).is_some_and(|s| !s.trim().is_empty()));
+            // P32a：key 判定统一走 harness_meta::claude_key_present（双字段单一实现）
+            let has_key = crate::harness_meta::claude_key_present(&v);
             let model = v.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
             (endpoint, has_key, model)
         }

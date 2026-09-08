@@ -217,17 +217,12 @@ pub fn claude_credentials_text(raw: &str) -> bool {
         || v.get("tokens").is_some()
 }
 
-/// 从 Claude settings 文本探测 API 配置态（env 里有 AUTH_TOKEN / API_KEY）。
+/// 从 Claude settings 文本探测 API 配置态（统一走 harness_meta::claude_key_present 双字段判定）。
 pub fn claude_settings_has_api(raw: &str) -> bool {
-    let v: serde_json::Value = serde_json::from_str(raw).unwrap_or(serde_json::Value::Null);
-    let env = v.get("env");
-    ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
-        .iter()
-        .any(|k| {
-            env.and_then(|e| e.get(k))
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| !s.trim().is_empty())
-        })
+    match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(v) => crate::harness_meta::claude_key_present(&v),
+        Err(_) => false,
+    }
 }
 
 /// 从 Codex auth.json 文本探测：tokens = 订阅；OPENAI_API_KEY = API。
@@ -292,8 +287,14 @@ pub fn probe_auth(adapter_id: &str, home: Option<&std::path::Path>) -> AuthInfo 
                 Err(_) => AuthInfo::none(),
             }
         }
-        "pi" | "omp" => {
-            // pi / omp 同属 pi 体系，共用 ~/.pi/agent/auth.json
+        "omp" => {
+            // P32a：omp 认证事实源 = 自身 models.yml 的 apiKey（此前误读 pi 的 auth.json）
+            match crate::harness_meta::omp_api_key_present(Some(&home)) {
+                true => AuthInfo { state: AuthState::Api, detail: "API 已配置（models.yml）".into() },
+                false => AuthInfo::none(),
+            }
+        }
+        "pi" => {
             match std::fs::read_to_string(home.join(".pi/agent/auth.json")) {
                 Ok(raw) if auth_json_nonempty(&raw) => {
                     AuthInfo { state: AuthState::Api, detail: "已配置".into() }
@@ -665,9 +666,17 @@ mod tests {
         std::fs::write(dir.join(".codex/auth.json"), r#"{"tokens":{}}"#).unwrap();
         assert_eq!(probe_auth("codex", Some(&dir)).state, AuthState::Subscription);
 
-        // pi / omp：非空 auth.json = Api
+        // pi：非空 auth.json = Api；omp：自身 models.yml 的 apiKey（P32a 分家，不再读 pi 凭据）
         std::fs::write(dir.join(".pi/agent/auth.json"), r#"{"openai":{"key":"k"}}"#).unwrap();
         assert_eq!(probe_auth("pi", Some(&dir)).state, AuthState::Api);
+        // omp 的 yml 尚未创建 → None（即便 pi 的 auth.json 非空也不串扰）
+        assert_eq!(probe_auth("omp", Some(&dir)).state, AuthState::None);
+        std::fs::create_dir_all(dir.join(".omp/agent")).unwrap();
+        std::fs::write(
+            dir.join(".omp/agent/models.yml"),
+            "providers:\n  zhubaoduo:\n    baseUrl: https://x/v1\n    apiKey: sk-omp\n",
+        )
+        .unwrap();
         assert_eq!(probe_auth("omp", Some(&dir)).state, AuthState::Api);
 
         // home 不存在（None 且无 HOME 环境）→ None 不 panic 由 dirs 兜底
@@ -690,5 +699,14 @@ mod real_machine_tests {
         let codex = probe_auth("codex", None);
         println!("codex auth: {:?}", codex.state);
         assert_eq!(codex.state, AuthState::Api, "本机 codex 应为 API 配置态");
+
+        // P32a R2 真机快照：omp 读自身 models.yml（本机含 apiKey）→ Api；
+        // pi 的 auth.json 为空对象 {} → None。两家互不串扰。
+        let omp = probe_auth("omp", None);
+        println!("omp auth: {:?}", omp.state);
+        assert_eq!(omp.state, AuthState::Api, "本机 omp models.yml 含 apiKey 应为 API 态");
+        let pi = probe_auth("pi", None);
+        println!("pi auth: {:?}", pi.state);
+        assert_eq!(pi.state, AuthState::None, "本机 pi auth.json 为空对象应为未配置");
     }
 }
