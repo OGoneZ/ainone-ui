@@ -1210,13 +1210,19 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // 而不是点了报错）。回溯不 gate——软回溯是纯本地能力，与 harness 无关。
   const forkEnabled = canFork(rt?.capabilities ?? null);
 
-  // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
+  // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息。
+  // P32 R7：enabled: active——flexlayout 非激活窗格 display:none，滚动容器
+  // rect=0 会让 calculateRange 短路（outerSize=0 → range=null）→ 全部虚拟项
+  // 卸载，切回时整列表重挂载 + measureElement 全量重测 + Streamdown 重解析。
+  // enabled=false 时 virtualizer 冻结（源码核实：scrollRect/scrollOffset 置
+  // null、不挂 ResizeObserver、不消费 scrollElement），切回自动恢复观察。
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => chatScrollRef.current,
     estimateSize: () => 120,
     overscan: 8,
+    enabled: active,
   });
 
   // F-11-9 上一条指令回跳气泡
