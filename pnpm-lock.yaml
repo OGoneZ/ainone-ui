@@ -57,8 +57,8 @@ importers:
         specifier: ^0.11.0
         version: 0.11.0
       '@xterm/xterm':
-        specifier: ^6.0.0
-        version: 6.0.0
+        specifier: 6.1.0-beta.190
+        version: 6.1.0-beta.190
       ansi-to-react:
         specifier: ^6.2.6
         version: 6.2.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -1874,8 +1874,8 @@ packages:
   '@xterm/addon-fit@0.11.0':
     resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
 
-  '@xterm/xterm@6.0.0':
-    resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
+  '@xterm/xterm@6.1.0-beta.190':
+    resolution: {integrity: sha512-bgBH20uQ50gFAsVjraStzP73BsyNMBD8f39hnC5yPql2YWOraJNwSzGhfk97X3ACsMdGl4TDRvJXi9MnunnvUQ==}
 
   anser@2.3.5:
     resolution: {integrity: sha512-vcZjxvvVoxTeR5XBNJB38oTu/7eDCZlwdz32N1eNgpyPF7j/Z7Idf+CUwQOkKKpJ7RJyjxgLHCM7vdIK0iCNMQ==}
@@ -4910,7 +4910,7 @@ snapshots:
 
   '@xterm/addon-fit@0.11.0': {}
 
-  '@xterm/xterm@6.0.0': {}
+  '@xterm/xterm@6.1.0-beta.190': {}
 
   anser@2.3.5: {}
 

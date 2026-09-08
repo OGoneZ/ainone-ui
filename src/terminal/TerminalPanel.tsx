@@ -14,6 +14,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { createTerminal, type TerminalSession } from "@/ipc/pty";
+import { installImeCompositionGuard } from "@/terminal/imeCompositionGuard";
 import { useTerminalStore } from "@/store/terminalStore";
 import { TerminalIcon } from "@/components/ui/icons";
 
@@ -62,6 +63,7 @@ export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPan
   const ptyRef = useRef<TerminalSession | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  const guardDisposeRef = useRef<(() => void) | null>(null);
   const [exited, setExited] = useState(false);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [spawnError, setSpawnError] = useState<string | null>(null);
@@ -85,6 +87,9 @@ export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPan
     setExited(false);
     setExitCode(null);
     setSpawnError(null);
+    // 重建前先卸掉旧 textarea 的 guard（旧 xterm 实例即将 dispose）
+    guardDisposeRef.current?.();
+    guardDisposeRef.current = null;
 
     const term = new Terminal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -100,6 +105,11 @@ export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPan
     const host = containerRef.current;
     if (!host) return;
     term.open(host);
+
+    // Linux（WebKitGTK + fcitx5/IBus/Rime）打字重复修复：归一化 IME 提交序列
+    // （详见 imeCompositionGuard.ts 头注释）。textarea 在 open() 后才存在。
+    const helper = host.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+    if (helper) guardDisposeRef.current = installImeCompositionGuard(helper);
 
     createTerminal({
       cwd,
@@ -159,6 +169,8 @@ export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPan
     return () => {
       killedRef.current = true;
       observer.disconnect();
+      guardDisposeRef.current?.();
+      guardDisposeRef.current = null;
       ptyRef.current?.kill();
       ptyRef.current = null;
       termRef.current?.dispose();
