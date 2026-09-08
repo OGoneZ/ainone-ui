@@ -61,9 +61,13 @@ describe("canResume / canClose / canList（对象型能力：key presence，与 
 });
 
 describe("capabilitySnapshot（P32d：五布尔单一事实源）", () => {
-  // 五家真机 initialize 实测样本（2026-09-08）：opencode 四能力全声明；
-  // claude-code 声明 fork（loadSession=true）；omp/pi 未声明 sessionCapabilities。
-  it("opencode 实测样本 → list/resume/close/fork 全 true", () => {
+  // 五家真机 initialize 实测快照（2026-09-08 P32 验收，本机握手）：
+  //   opencode 1.18.29  → loadSession=true, sessionCaps: close/fork/list/resume
+  //   claude-agent-acp  → loadSession=true, sessionCaps: close/fork/list/resume(+delete/subagents/additionalDirs)
+  //   codex-acp 1.10.0  → loadSession=true, sessionCaps: close/fork/list/resume(+同上)
+  //   omp 18.1.0        → loadSession=true, sessionCaps: close/fork/list/resume
+  //   pi-acp 0.0.33     → loadSession=true, sessionCaps: list(+delete)——resume/close/fork 无
+  it("opencode / claude-code / codex / omp 实测样本 → 四能力全 true", () => {
     const snap = capabilitySnapshot(cap({
       loadSession: true,
       sessionCapabilities: { close: {}, fork: {}, list: {}, resume: {} },
@@ -71,12 +75,12 @@ describe("capabilitySnapshot（P32d：五布尔单一事实源）", () => {
     expect(snap).toEqual({ fork: true, load: true, resume: true, close: true, list: true });
   });
 
-  it("claude-code 实测样本（sessionCapabilities 仅 fork）→ 只 fork + load", () => {
-    const snap = capabilitySnapshot(cap({ loadSession: true, sessionCapabilities: { fork: {} } }));
-    expect(snap).toEqual({ fork: true, load: true, resume: false, close: false, list: false });
+  it("pi-acp 0.0.33 实测样本（仅 list/delete）→ 只 list + load", () => {
+    const snap = capabilitySnapshot(cap({ loadSession: true, sessionCapabilities: { list: {}, delete: {} } }));
+    expect(snap).toEqual({ fork: false, load: true, resume: false, close: false, list: true });
   });
 
-  it("omp/pi 样本（无 sessionCapabilities）→ 全 false 但 load 宽松 true", () => {
+  it("pi 实测样本（无 sessionCapabilities）→ 全 false 但 load 宽松 true", () => {
     expect(capabilitySnapshot(cap({ loadSession: true }))).toEqual({
       fork: false, load: true, resume: false, close: false, list: false,
     });
