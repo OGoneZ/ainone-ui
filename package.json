@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --features webdriver",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
     "tauri:build": "tauri build",
     "dev:port": "vite --port 1430 --strictPort"
   },
