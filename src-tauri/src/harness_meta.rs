@@ -28,6 +28,7 @@ pub enum HarnessConfigKind {
     Claude,
     Codex,
     Omp,
+    Pi,
 }
 
 pub fn config_kind(adapter_id: &str) -> Option<HarnessConfigKind> {
@@ -35,6 +36,7 @@ pub fn config_kind(adapter_id: &str) -> Option<HarnessConfigKind> {
         "claude-code" => Some(HarnessConfigKind::Claude),
         "codex" => Some(HarnessConfigKind::Codex),
         "omp" => Some(HarnessConfigKind::Omp),
+        "pi" => Some(HarnessConfigKind::Pi),
         _ => None,
     }
 }
@@ -44,6 +46,7 @@ fn settings_path(kind: HarnessConfigKind, home: &Path) -> PathBuf {
         HarnessConfigKind::Claude => home.join(".claude/settings.json"),
         HarnessConfigKind::Codex => home.join(".codex/config.toml"),
         HarnessConfigKind::Omp => home.join(".omp/agent/models.yml"),
+        HarnessConfigKind::Pi => home.join(".pi/agent/models.json"),
     }
 }
 
@@ -82,6 +85,7 @@ pub(crate) fn harness_meta_inner(adapter_id: &str, home: Option<&Path>) -> Optio
         HarnessConfigKind::Claude => meta_claude(&raw),
         HarnessConfigKind::Codex => meta_codex(&raw),
         HarnessConfigKind::Omp => meta_omp(&raw),
+        HarnessConfigKind::Pi => meta_pi(&raw),
     }
 }
 
@@ -170,6 +174,48 @@ pub(crate) fn meta_omp(raw: &str) -> Option<HarnessMeta> {
     Some(HarnessMeta { base_url, model: None, api_key_present: key_present })
 }
 
+/// Pi models.json：providers.<ainone|首个含 baseUrl>.baseUrl + apiKey 判存在。
+/// 与 harness_config::read_provider_fallback 同构（ainone 优先，回落用户自配 provider）。
+pub(crate) fn meta_pi(raw: &str) -> Option<HarnessMeta> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let providers = v.get("providers")?.as_object()?;
+    let mut names: Vec<&String> = Vec::new();
+    if let Some(k) = providers.keys().find(|k| k.as_str() == "ainone") {
+        names.push(k);
+    }
+    for k in providers.keys() {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        let p = &providers[name];
+        let base_url = p
+            .get("baseUrl")
+            .and_then(|b| b.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if base_url.is_none() {
+            continue;
+        }
+        let model = p
+            .get("models")
+            .and_then(|m| m.as_array())
+            .and_then(|a| a.first())
+            .and_then(|m| m.get("id"))
+            .and_then(|i| i.as_str())
+            .map(String::from)
+            .filter(|m| !m.is_empty());
+        let key_present = p
+            .get("apiKey")
+            .and_then(|k| k.as_str())
+            .map(|k| !k.trim().is_empty())
+            .unwrap_or(false);
+        return Some(HarnessMeta { base_url, model, api_key_present: key_present });
+    }
+    None
+}
+
 // ---------- 写回 ----------
 
 pub(crate) const BAK_SUFFIX: &str = ".ainone-bak";
@@ -217,6 +263,10 @@ pub(crate) fn harness_settings_write_inner(
         HarnessConfigKind::Claude => write_claude(&raw, model, base_url)?,
         HarnessConfigKind::Codex => write_codex(&raw, model, base_url)?,
         HarnessConfigKind::Omp => write_omp(&raw, base_url)?,
+        // pi 无验证过的定点替换语义 → 引导走配置代写（三格齐落盘）
+        HarnessConfigKind::Pi => {
+            return Err("pi 不支持定点替换，请走设置页配置保存".into())
+        }
     };
     backup(&path)?;
     std::fs::write(&path, updated).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
@@ -256,6 +306,13 @@ pub(crate) fn write_claude(raw: &str, model: Option<&str>, base_url: Option<&str
                 }
             }
         }
+        // availableModels allowlist 合并：网关模型并入后，新会话的 configOptions
+        // 选择器即包含它，set_config_option 不再拒绝（连接器 applyAvailableModelsAllowlist
+        // 把用户条目逐字透出为可选值）。
+        if let Some(list) = merge_available_models(v.get("availableModels"), m) {
+            v["availableModels"] =
+                serde_json::Value::Array(list.into_iter().map(serde_json::Value::String).collect());
+        }
     }
     if let Some(b) = base_url {
         if let Some(env) = v.get_mut("env").and_then(|e| e.as_object_mut()) {
@@ -269,6 +326,45 @@ pub(crate) fn write_claude(raw: &str, model: Option<&str>, base_url: Option<&str
         }
     }
     serde_json::to_string_pretty(&v).map_err(|e| format!("settings.json 序列化失败: {e}"))
+}
+
+/// 纯函数：合并 Claude settings.json 顶层 availableModels allowlist（claude-code 会话级
+/// 任意网关模型切换的官方逃生门——连接器把用户条目逐字透出为 configOptions 可选值）。
+/// 合并策略：
+///   键缺失 → 种子 ["opus","sonnet","haiku"] + model（allowlist 是限制性白名单，
+///            只写 model 会把 SDK 档位挤出 picker；default 由连接器恒保留不写入）
+///   是数组 → 只追加去重（用户手写 allowlist 视为有意限制，绝不注入种子）
+///   非字符串数组（损坏）→ None 不动（连接器对非数组按无 allowlist 处理，行为不变）
+/// 保序追加 + trim + 幂等（同 model 二次写零变化）。
+pub(crate) fn merge_available_models(existing: Option<&serde_json::Value>, model: &str) -> Option<Vec<String>> {
+    const SEED: [&str; 3] = ["opus", "sonnet", "haiku"];
+    let entry = model.trim();
+    if entry.is_empty() {
+        return None;
+    }
+    let had_key = existing.is_some();
+    let existing: Option<Vec<String>> = existing.and_then(|a| a.as_array()).map(|arr| {
+        let mut list: Vec<String> = Vec::new();
+        for x in arr {
+            if let Some(s) = x.as_str() {
+                let s = s.trim();
+                if !s.is_empty() && !list.iter().any(|m| m == s) {
+                    list.push(s.to_string());
+                }
+            }
+        }
+        list
+    });
+    // 键存在但不是字符串数组 → 不动（避免破坏用户手写结构）
+    if had_key && existing.is_none() {
+        log::warn!("[harness_meta] availableModels 非字符串数组，跳过 allowlist 合并");
+        return None;
+    }
+    let mut list = existing.unwrap_or_else(|| SEED.iter().map(|s| s.to_string()).collect());
+    if !list.iter().any(|m| m == entry) {
+        list.push(entry.to_string());
+    }
+    Some(list)
 }
 
 /// Codex config.toml：行级锚定替换顶层 `model =` 与该 provider 的 `base_url =`，注释全保留。
@@ -376,33 +472,64 @@ pub async fn probe_models(
     base_url: &str,
     home: Option<&Path>,
 ) -> Result<Vec<String>, ProbeError> {
-    let url = models_url(base_url);
+    probe_models_with_key(adapter_id, base_url, None, home).await
+}
+
+/// 带显式 key 的探测：key Some 非空优先（设置页表单直传），空/None 回落本机配置自取。
+/// Claude 鉴权头另取 baseUrl：无表单值时优先本机 settings.json 的 env.ANTHROPIC_BASE_URL
+/// （用户走中转网关时官方地址必 403，探测必须打实际生效的网关）。
+pub async fn probe_models_with_key(
+    adapter_id: &str,
+    base_url: &str,
+    api_key: Option<&str>,
+    home: Option<&Path>,
+) -> Result<Vec<String>, ProbeError> {
     let kind = config_kind(adapter_id).ok_or_else(|| ProbeError {
         kind: "bad_url".into(),
         message: format!("{adapter_id} 未配置协议，无法探测"),
     })?;
-    // 鉴权头按协议分叉：anthropic → x-api-key；openai → Bearer。key 从静态配置自取。
+    // Claude：表单 baseUrl 为空 → 本机配置的 BASE_URL 优先（中转场景官方地址必挂），再回落传入值
+    let url_base = if kind == HarnessConfigKind::Claude
+        && base_url.trim().is_empty()
+    {
+        claude_base_url(home).unwrap_or_else(|| base_url.to_string())
+    } else {
+        base_url.to_string()
+    };
+    if url_base.trim().is_empty() {
+        return Err(ProbeError { kind: "bad_url".into(), message: "无接口地址，无法探测".into() });
+    }
+    let url = models_url(&url_base);
+    // 鉴权头按协议分叉：anthropic → x-api-key；openai → Bearer。
+    // key 来源：表单显式值 > 本机静态配置；均无 → 部分网关允许匿名列模型，不拦截直接发。
+    let key = api_key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
     let mut req = reqwest::Client::new()
         .get(&url)
         .timeout(std::time::Duration::from_secs(10))
         .header("Accept", "application/json");
     match kind {
         HarnessConfigKind::Claude => {
-            let key = claude_api_key(home)
-                .ok_or_else(|| ProbeError { kind: "bad_url".into(), message: "未找到 ANTHROPIC_AUTH_TOKEN，无法鉴权".into() })?;
-            req = req
-                .header("x-api-key", &key)
-                .header("anthropic-version", "2023-06-01")
-                .header("Authorization", format!("Bearer {key}"));
-        }
-        HarnessConfigKind::Codex | HarnessConfigKind::Omp => {
-            let key = match kind {
-                HarnessConfigKind::Codex => codex_api_key(home),
-                HarnessConfigKind::Omp => omp_api_key(home),
-                _ => None,
+            let key = key.or_else(|| claude_api_key(home));
+            if let Some(k) = key {
+                req = req
+                    .header("x-api-key", &k)
+                    .header("anthropic-version", "2023-06-01")
+                    .header("Authorization", format!("Bearer {k}"));
             }
-            .ok_or_else(|| ProbeError { kind: "bad_url".into(), message: "未找到 API key，无法鉴权".into() })?;
-            req = req.header("Authorization", format!("Bearer {key}"));
+        }
+        HarnessConfigKind::Codex | HarnessConfigKind::Omp | HarnessConfigKind::Pi => {
+            let key = match key {
+                Some(k) => Some(k),
+                None => match kind {
+                    HarnessConfigKind::Codex => codex_api_key(home),
+                    HarnessConfigKind::Omp => omp_api_key(home),
+                    HarnessConfigKind::Pi => pi_api_key(home),
+                    _ => None,
+                },
+            };
+            if let Some(k) = key {
+                req = req.header("Authorization", format!("Bearer {k}"));
+            }
         }
     }
     let resp = req.send().await.map_err(|e| {
@@ -440,6 +567,46 @@ fn claude_api_key(home: Option<&Path>) -> Option<String> {
         .filter(|k| !k.trim().is_empty())
 }
 
+/// Claude settings.json 的 env.ANTHROPIC_BASE_URL（探测基准：中转网关场景官方地址必 403）。
+fn claude_base_url(home: Option<&Path>) -> Option<String> {
+    let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
+    let raw = std::fs::read_to_string(home.join(".claude/settings.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("env")
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .and_then(|b| b.as_str())
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Pi models.json 的 apiKey（与 meta_pi 同一 provider 优先级：ainone 优先，回落首个含 baseUrl）。
+fn pi_api_key(home: Option<&Path>) -> Option<String> {
+    let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
+    let raw = std::fs::read_to_string(home.join(".pi/agent/models.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let providers = v.get("providers")?.as_object()?;
+    let mut names: Vec<&String> = Vec::new();
+    if let Some(k) = providers.keys().find(|k| k.as_str() == "ainone") {
+        names.push(k);
+    }
+    for k in providers.keys() {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        let p = &providers[name];
+        if p.get("baseUrl").and_then(|b| b.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false) {
+            return p
+                .get("apiKey")
+                .and_then(|k| k.as_str())
+                .map(String::from)
+                .filter(|k| !k.trim().is_empty());
+        }
+    }
+    None
+}
+
 fn codex_api_key(home: Option<&Path>) -> Option<String> {
     let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
     let raw = std::fs::read_to_string(home.join(".codex/auth.json")).ok()?;
@@ -466,9 +633,14 @@ fn omp_api_key(home: Option<&Path>) -> Option<String> {
 }
 
 /// 探测网关模型列表（命令入口；key 全程 Rust 侧流转）。
+/// api_key：设置页表单显式直传（非空优先），空/None 回落本机配置自取。
 #[tauri::command]
-pub async fn models_probe(adapter_id: String, base_url: String) -> Result<Vec<String>, ProbeError> {
-    probe_models(&adapter_id, &base_url, None).await
+pub async fn models_probe(
+    adapter_id: String,
+    base_url: String,
+    api_key: Option<String>,
+) -> Result<Vec<String>, ProbeError> {
+    probe_models_with_key(&adapter_id, &base_url, api_key.as_deref(), None).await
 }
 
 #[cfg(test)]
@@ -545,8 +717,34 @@ wire_api = "responses"
         assert_eq!(config_kind("claude-code"), Some(HarnessConfigKind::Claude));
         assert_eq!(config_kind("codex"), Some(HarnessConfigKind::Codex));
         assert_eq!(config_kind("omp"), Some(HarnessConfigKind::Omp));
-        assert_eq!(config_kind("pi"), None);
+        assert_eq!(config_kind("pi"), Some(HarnessConfigKind::Pi));
         assert_eq!(config_kind("opencode"), None);
+    }
+
+    const PI: &str = r#"{"providers":{"ainone":{"baseUrl":"https://pi.example.com/v1","apiKey":"sk-pi","models":[{"id":"pi-model-1"}]}}}"#;
+
+    #[test]
+    fn pi_meta_reads_provider_base_and_model() {
+        let m = meta_pi(PI).unwrap();
+        assert_eq!(m.base_url.as_deref(), Some("https://pi.example.com/v1"));
+        assert_eq!(m.model.as_deref(), Some("pi-model-1"));
+        assert!(m.api_key_present);
+    }
+
+    #[test]
+    fn pi_meta_falls_back_to_user_provider() {
+        // ainone 缺失 → 回落首个含 baseUrl 的 provider（与配置代写读回显同构）
+        let raw = r#"{"providers":{"my-gw":{"baseUrl":"https://mygw/v1","apiKey":"sk","models":[{"id":"m1"}]}}}"#;
+        let m = meta_pi(raw).unwrap();
+        assert_eq!(m.base_url.as_deref(), Some("https://mygw/v1"));
+        assert_eq!(m.model.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn pi_meta_broken_or_empty_providers_is_none() {
+        assert!(meta_pi("not json").is_none());
+        assert!(meta_pi("{}").is_none());
+        assert!(meta_pi(r#"{"providers":{}}"#).is_none());
     }
 
     #[test]
@@ -560,6 +758,64 @@ wire_api = "responses"
         // 无关字段保留
         assert_eq!(v["theme"], "dark");
         assert_eq!(v["cleanupPeriodDays"], 36500);
+    }
+
+    // —— availableModels allowlist 合并（会话级任意网关模型切换，见 merge_available_models） ——
+
+    #[test]
+    fn write_claude_seeds_allowlist_on_first_model_write() {
+        // 无 availableModels 键 → 种子三档位 + 追加模型；无关键保留
+        let out = write_claude(CLAUDE, Some("gemini-3.7-flash"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["availableModels"],
+            serde_json::json!(["opus", "sonnet", "haiku", "gemini-3.7-flash"])
+        );
+        assert_eq!(v["theme"], "dark");
+        assert_eq!(v["cleanupPeriodDays"], 36500);
+        assert_eq!(v["model"], "gemini-3.7-flash");
+    }
+
+    #[test]
+    fn write_claude_allowlist_merge_is_idempotent() {
+        let once = write_claude(CLAUDE, Some("gemini-3.7-flash"), None).unwrap();
+        let twice = write_claude(&once, Some("gemini-3.7-flash"), None).unwrap();
+        assert_eq!(once, twice, "同模型二次写应字节级等价");
+    }
+
+    #[test]
+    fn write_claude_existing_allowlist_appends_without_seed() {
+        // 用户手写 allowlist = 有意限制 → 只追加，绝不注入档位种子
+        let raw = r#"{"model":"m1","availableModels":["custom-1"]}"#;
+        let out = write_claude(raw, Some("gemini-3.7-flash"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["availableModels"], serde_json::json!(["custom-1", "gemini-3.7-flash"]));
+    }
+
+    #[test]
+    fn write_claude_allowlist_cleans_blank_and_dup_entries() {
+        let raw = r#"{"model":"m1","availableModels":["custom-1","custom-1","  ","custom-2"]}"#;
+        let out = write_claude(raw, Some("custom-2"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        // 空白剔除、去重、保序；custom-2 已在列表（trim 后）→ 不重复追加
+        assert_eq!(v["availableModels"], serde_json::json!(["custom-1", "custom-2"]));
+    }
+
+    #[test]
+    fn write_claude_corrupt_allowlist_left_untouched() {
+        // 非字符串数组（用户配置损坏）→ 原样保留、不合并、不报错
+        let raw = r#"{"model":"m1","availableModels":"oops"}"#;
+        let out = write_claude(raw, Some("new-model"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["availableModels"], "oops");
+        assert_eq!(v["model"], "new-model");
+    }
+
+    #[test]
+    fn write_claude_baseurl_only_does_not_create_allowlist() {
+        let out = write_claude(CLAUDE, None, Some("https://x.example.com")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("availableModels").is_none(), "base_url-only 写不得创建 allowlist 键");
     }
 
     #[test]
@@ -666,7 +922,28 @@ wire_api = "responses"
 
     #[tokio::test]
     async fn probe_models_unsupported_adapter_errors() {
-        let e = probe_models("pi", "https://x.example.com", None).await.unwrap_err();
+        let e = probe_models_with_key("opencode", "https://x.example.com", None, None).await.unwrap_err();
         assert_eq!(e.kind, "bad_url");
+    }
+
+    #[tokio::test]
+    async fn probe_models_claude_empty_url_falls_back_to_config() {
+        // 表单 baseUrl 为空 → 回落本机 settings.json 的 env.ANTHROPIC_BASE_URL（中转网关场景）
+        let dir = std::env::temp_dir().join(format!("ainone-probe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        std::fs::write(dir.join(".claude/settings.json"), CLAUDE).unwrap();
+        // 不发真请求：断言 URL 组装走了配置值（探测失败也应是网络/HTTP 类，而非「无接口地址」）
+        let e = probe_models_with_key("claude-code", "", None, Some(&dir)).await.unwrap_err();
+        assert_ne!(e.message, "无接口地址，无法探测");
+        assert_ne!(e.message, "claude-code 未配置协议，无法探测");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn probe_models_pi_without_config_still_attempts() {
+        // pi 无本地 key 也允许探测（部分网关可匿名列模型）——不再硬拦「未找到 API key」
+        let e = probe_models_with_key("pi", "https://x.example.com/v1", None, None).await.unwrap_err();
+        assert_ne!(e.kind, "bad_url", "无 key 不应被 bad_url 拦截: {e:?}");
     }
 }

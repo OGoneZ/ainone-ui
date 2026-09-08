@@ -36,9 +36,14 @@ export async function writeHarnessSettings(
 }
 
 /** P29 R5：探测网关支持的模型列表（GET {base}/v1/models；key Rust 侧自取不进 WebView）。
+ *  apiKey 可选：设置页表单显式直传（非空优先），空/缺省回落 Rust 本机配置自取。
  *  失败抛结构化错误 { kind, message }。 */
-export async function probeModels(adapterId: string, baseUrl: string): Promise<string[]> {
-  return invoke<string[]>("models_probe", { adapterId, baseUrl });
+export async function probeModels(
+  adapterId: string,
+  baseUrl: string,
+  apiKey?: string,
+): Promise<string[]> {
+  return invoke<string[]>("models_probe", { adapterId, baseUrl, apiKey: apiKey ?? null });
 }
 
 /** 该 harness 是否支持配置写回（决定元数据面板模型/URL 行是否可点编辑） */

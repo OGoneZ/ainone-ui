@@ -231,6 +231,9 @@ fn spawn_bridge(
 /// CLAUDE_CODE_EXECUTABLE）。用户没装本体时不注入，由桥报清晰错误引导安装。
 /// P29：codex 桥额外注入 AINONE_CODEX_API_KEY（配置代写把 key 存在应用侧 keys.json，
 /// 经 Codex 官方 env_key 机制生效；未存则不注入，由 Codex 报原生错误）。
+/// claude-code 桥注入 settings.json 的 ANTHROPIC_BASE_URL/AUTH_TOKEN：连接器的
+/// providers/list 读进程 env（acp-agent.js defaultProviderConfig），不注入时回落
+/// 官方地址——中转网关场景侧栏显示谎报的 api.anthropic.com（探测 403 的根因）。
 fn bridge_env_inject(program: &str) -> Vec<(String, String)> {
     let mut env = Vec::new();
     let Some(spec) = crate::connector::bridge_spec(program) else {
@@ -249,7 +252,31 @@ fn bridge_env_inject(program: &str) -> Vec<(String, String)> {
             }
         }
     }
+    if program == "claude-agent-acp" {
+        env.extend(claude_env_from_settings());
+    }
     env
+}
+
+/// 从 ~/.claude/settings.json 读 env 表里的 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN
+/// （存在且非空才注入；读失败静默——连接器回落默认行为，与未修复前一致）。
+fn claude_env_from_settings() -> Vec<(String, String)> {
+    let Some(home) = dirs::home_dir() else { return Vec::new() };
+    let Ok(raw) = std::fs::read_to_string(home.join(".claude/settings.json")) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { return Vec::new() };
+    ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
+        .iter()
+        .filter_map(|k| {
+            v.get("env")
+                .and_then(|e| e.get(*k))
+                .and_then(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .map(|s| ((*k).to_string(), s))
+        })
+        .collect()
 }
 
 /// app 配置目录（codex keys.json 的宿主；取不到返回 None 不注入）。

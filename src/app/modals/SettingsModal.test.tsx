@@ -264,18 +264,16 @@ describe("P29 设置页卡片化", () => {
     // 读取回显
     await vi.waitFor(() => expect(screen.getByTestId("cfg-form-omp")).toBeInTheDocument());
     expect(await screen.findByDisplayValue("https://old.example.com")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("old-model")).toBeInTheDocument();
-    // 修改模型后保存
-    await user.clear(screen.getByDisplayValue("old-model"));
-    await user.type(screen.getByPlaceholderText("model-id"), "new-model");
+    // 模型名已改为探测入口按钮：显示回显模型
+    expect(await screen.findByTestId("cfg-model-pick-omp")).toHaveTextContent("old-model");
     await user.click(screen.getByTestId("cfg-save-omp"));
     await vi.waitFor(() => expect(screen.getByText(/已写入/)).toBeInTheDocument());
     const saveCall = calls.find((c) => c.cmd === "harness_config_save");
     expect(saveCall).toBeTruthy();
-    expect(saveCall!.args.input.model).toBe("new-model");
+    expect(saveCall!.args.input.model).toBe("old-model");
   });
 
-  it("P29 S6：配置模型表单有 endpoint 时出现「探测可用模型」入口，点击弹出 ModelSwitchPanel", async () => {
+  it("P29 S6：模型名探测入口——点击弹 ModelSwitchPanel，表单 endpoint+key 直传探测", async () => {
     const { probeModels, writeHarnessSettings } = await import("@/ipc/harnessMeta");
     vi.mocked(probeModels).mockResolvedValue(["m-a", "m-b"]);
     vi.mocked(writeHarnessSettings).mockResolvedValue({ path: "/p/settings.json", backup: "/p/settings.json.ainone-bak" });
@@ -284,10 +282,14 @@ describe("P29 设置页卡片化", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByTestId("cfg-toggle-omp"));
-    await vi.waitFor(() => expect(screen.getByTestId("cfg-probe-omp")).toBeInTheDocument());
-    // 打开面板 → ModelSwitchPanel 打开即探测
-    await user.click(screen.getByTestId("cfg-probe-omp"));
-    await vi.waitFor(() => expect(probeModels).toHaveBeenCalledWith("omp", "https://old.example.com"));
+    await vi.waitFor(() => expect(screen.getByTestId("cfg-model-pick-omp")).toBeInTheDocument());
+    // 旧的「探测可用模型」独立按钮已删除
+    expect(screen.queryByTestId("cfg-probe-omp")).not.toBeInTheDocument();
+    // 点击模型名入口 → ModelSwitchPanel 打开即探测
+    await user.click(screen.getByTestId("cfg-model-pick-omp"));
+    await vi.waitFor(() =>
+      expect(probeModels).toHaveBeenCalledWith("omp", "https://old.example.com", undefined),
+    );
     // 模型列表出现
     await vi.waitFor(() => expect(screen.getByText("m-b")).toBeInTheDocument());
   });

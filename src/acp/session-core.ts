@@ -195,10 +195,34 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
     if (w) w(n);
     else updateQueue.push(n);
   };
-  const nextUpdate = (): Promise<acp.SessionNotification> =>
-    updateQueue.length
-      ? Promise.resolve(updateQueue.shift()!)
-      : new Promise((r) => waiters.push(r));
+  // 可取消的「取下一条 update」：prompt 消费循环每次迭代注册一个 waiter，
+  // race 输给 null/死亡信号时 waiter 若留在数组里，下一轮会被 enqueue 命中、
+  // 消息送给已废弃的 promise（吞消息）→ cancel 摘除；若已命中但无人消费，
+  // 回插队首不丢消息。
+  const takeUpdate = (): {
+    promise: Promise<acp.SessionNotification>;
+    cancel: () => void;
+  } => {
+    if (updateQueue.length) {
+      return { promise: Promise.resolve(updateQueue.shift()!), cancel: () => {} };
+    }
+    let resolve!: (n: acp.SessionNotification) => void;
+    let hit: acp.SessionNotification | null = null;
+    const w = (n: acp.SessionNotification) => {
+      hit = n;
+      resolve(n);
+    };
+    const promise = new Promise<acp.SessionNotification>((r) => (resolve = r));
+    waiters.push(w);
+    return {
+      promise,
+      cancel: () => {
+        const i = waiters.indexOf(w);
+        if (i >= 0) waiters.splice(i, 1);
+        else if (hit) updateQueue.unshift(hit);
+      },
+    };
+  };
   const drainQueue = () => {
     updateQueue.length = 0;
   };
@@ -380,22 +404,66 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
         sessionId,
         prompt: [{ type: "text", text }],
       });
+      // 标记已处理：循环经 procDied 抛出退出后，SDK 会因连接断开 reject 掉
+      // 这个没人 await 的 promise → unhandled rejection（noop catch 不影响
+      // race/await 处照常拿到 rejection）
+      promptPromise.catch(() => {});
+      // 进程退出兜底：harness 中途死亡（被 kill / 崩溃）时 response 可能永不
+      // settle → 主循环悬挂在 nextUpdate，UI 停在 busy，滞留 update 无界堆积。
+      // closed 进 race：死亡即报错收口（ChatPanel catch 会提示并回插队列）。
+      // 复用同一个 promise 对象：race 会为它挂 handler，正常结束后
+      // closed 后到不会触发 unhandled rejection。
+      const procDied: Promise<never> = opts.closed
+        ? opts.closed.then(({ code }): never => {
+            throw new Error(
+              `turn 执行中 harness 进程退出${code === null || code === undefined ? "（被信号终止）" : `（退出码 ${code}）`}`,
+            );
+          })
+        : new Promise<never>(() => {});
+      // turn 正常结束后 closed 后到（空闲回收 kill）会让 procDied 悬空 reject，
+      // 挂无害 catch 标记已处理；race 内 await 该 promise 仍正常拿到 rejection
+      procDied.catch(() => {});
       // 消费 update 直到 response resolve（本轮结束）
       for (;;) {
-        const msg = await Promise.race([nextUpdate(), promptPromise.then(() => null)]);
-        if (msg === null) break;
+        const t = takeUpdate();
+        const msg = await Promise.race([t.promise, promptPromise.then(() => null), procDied]);
+        if (msg === null) {
+          t.cancel(); // race 输给结束信号：摘 waiter（期间到达的消息回插队首）
+          break;
+        }
         dispatchUpdate(msg, onOutgoing);
       }
       const resp = await promptPromise;
       // H12（F4）：response resolve 与最后几条 update（usage_update 等）存在竞速——
-      // 不能直接丢弃：把队列里残余 update 派发完再收口（有界：队列此刻不再增长）
+      // 不能直接丢弃：把队列里残余 update 派发完再收口。
+      // 「有界」前提不成立（事故实锤：滞留 update 会先于 250ms 空闲判据持续
+      // 到达，循环永不退出，每条派发全量重渲染 → WebView 主线程满载冻结）。
+      // 双上限强制收口：时间 5s / 条数 1000，超限丢弃剩余滞留（后果同入口
+      // 丢弃逻辑：usage 下一 turn 重报，tool 状态停在非终态）。
+      const drainDeadline = Date.now() + 5_000;
+      let drained = 0;
       for (;;) {
+        const remaining = drainDeadline - Date.now();
+        if (remaining <= 0 || drained >= 1_000) {
+          const dropped = updateQueue.length;
+          drainQueue();
+          console.warn(`[acp] 收尾补派达上限（${drained} 条）收口，丢弃滞留 update ${dropped} 条`);
+          break;
+        }
+        // 进程死亡在收尾阶段不再升级为错误（response 已正常拿到，turn 成功），
+        // 视同空闲直接收口
+        const t = takeUpdate();
         const msg = await Promise.race([
-          nextUpdate(),
-          new Promise<null>((r) => setTimeout(() => r(null), 250)),
+          t.promise,
+          new Promise<null>((r) => setTimeout(() => r(null), Math.min(250, remaining))),
+          opts.closed ? opts.closed.then(() => null) : new Promise<null>(() => {}),
         ]);
-        if (msg === null) break;
+        if (msg === null) {
+          t.cancel(); // 同上：输给空闲/死亡信号才摘 waiter
+          break;
+        }
         dispatchUpdate(msg, onOutgoing);
+        drained++;
       }
       console.info("[acp] session/prompt 结束 stopReason=", resp.stopReason);
       onOutgoing({ type: "turn_stop", stopReason: resp.stopReason });
