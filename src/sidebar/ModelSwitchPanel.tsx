@@ -42,6 +42,11 @@ interface Props {
   onWritten: () => void;
   /** 设置页配置表单上下文（设置页传入；元数据面板不传） */
   formContext?: FormContext | null;
+  /** P32c：快问场景（settingsPage + qaMode）——无 harness 配置写回语义，
+   *  点选只更新 quickask.json 的 model 字段（qaModelOnly 由 onQaModelPick 承载）。 */
+  qaMode?: boolean;
+  /** 快问模型点选回调（qaMode=true 时必传）；resolve 后由外层保存 quickask 配置 */
+  onQaModelPick?: (model: string) => void;
 }
 
 export function ModelSwitchPanel({
@@ -55,6 +60,8 @@ export function ModelSwitchPanel({
   onSessionModelChange,
   onWritten,
   formContext,
+  qaMode,
+  onQaModelPick,
 }: Props) {
   const [models, setModels] = useState<string[] | null>(null);
   const [probing, setProbing] = useState(false);
@@ -106,6 +113,14 @@ export function ModelSwitchPanel({
 
   async function pick(model: string) {
     setSaving(model);
+    // P32c：快问场景——只回填模型名，由外层随「保存」写 quickask.json
+    if (qaMode && onQaModelPick) {
+      onQaModelPick(model);
+      toast.success(`快问模型已选择 ${model}`, { description: "点「保存」后生效（写入快问配置，不影响任何 harness）" });
+      setSaving(null);
+      onClose();
+      return;
+    }
     try {
       // ① 会话级即时生效（有 model configOption 且有活跃会话）。
       //    resolve(false) = 连接器拒绝（claude-code 选择器外的网关模型，写入的
@@ -225,7 +240,9 @@ export function ModelSwitchPanel({
 
         <div className="msm-foot">
           {models !== null && <span>{models.length} 个模型 · 来自 {formContext ? formContext.endpoint : baseUrl}</span>}
-          {writable || formContext ? (
+          {qaMode ? (
+            <span>选择后作为快问模型（仅写入快问配置）</span>
+          ) : writable || formContext ? (
             <span>选择后写入本机配置{sessionSwitchable ? "并即时应用到会话" : "（对新会话生效）"}</span>
           ) : sessionSwitchable ? (
             <span>该 harness 无配置写回，仅切换当前会话</span>
