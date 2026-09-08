@@ -123,4 +123,75 @@ describe("streamCommitThrottle", () => {
     expect(commit.mock.calls.length).toBeGreaterThanOrEqual(FRAMES - perFrame);
     expect(commit.mock.calls.length).toBeLessThan(EVENTS);
   });
+
+  // —— P32 R1：lastEventAt 并入节流提交 ——
+  // 复核发现（2026-09-08）：事件循环内逐条 patch(lastEventAt) 的写频率仍是
+  // 事件率（P31 节流未覆盖），prop 下传所有 MessageLine 还会击穿 memo。
+  // 语义：commit 时一并写入，事件侧只记局部变量。
+
+  it("P32：帧内多条事件的 lastEventAt 合并——commit 只读一次（caller 闭包模式验证）", () => {
+    const frame = manualFrame();
+    // 复刻 ChatPanel 的接线：commit 回调里消费「最新一次」lastEventAt
+    let lastEventAtPending: number | undefined;
+    const storeWrites: Array<number | undefined> = [];
+    const commit = () => {
+      if (lastEventAtPending !== undefined) {
+        storeWrites.push(lastEventAtPending);
+        lastEventAtPending = undefined;
+      }
+    };
+    const t = createStreamCommitThrottle(commit, frame.scheduleFrame);
+
+    // 一帧内到达 3 条事件（时间戳递增）
+    for (const ts of [100, 200, 300]) {
+      lastEventAtPending = ts;
+      t.schedule();
+    }
+    frame.tick();
+    // 3 条事件 → 1 次写，且取最后时间戳
+    expect(storeWrites).toEqual([300]);
+    // 提交后 pending 清空，同帧后续 commit 不再重复写
+    frame.tick();
+    expect(storeWrites).toEqual([300]);
+  });
+
+  it("P32：跨帧稳态——每帧写一次 lastEventAt，写次数 = 提交次数 ≤ 帧数", () => {
+    const frame = manualFrame();
+    let lastEventAtPending: number | undefined;
+    let writes = 0;
+    const t = createStreamCommitThrottle(() => {
+      if (lastEventAtPending !== undefined) {
+        writes += 1;
+        lastEventAtPending = undefined;
+      }
+    }, frame.scheduleFrame);
+
+    let ts = 0;
+    for (let f = 0; f < 10; f++) {
+      for (let i = 0; i < 5; i++) {
+        lastEventAtPending = ++ts;
+        t.schedule();
+      }
+      frame.tick();
+    }
+    // 50 条事件 → 10 次写（事件率 50 → 帧率 10）
+    expect(writes).toBe(10);
+  });
+
+  it("P32：无 pending 事件时 commit 不写 lastEventAt（即时事件路径零开销）", () => {
+    const frame = manualFrame();
+    let lastEventAtPending: number | undefined = undefined;
+    let writes = 0;
+    const t = createStreamCommitThrottle(() => {
+      if (lastEventAtPending !== undefined) {
+        writes += 1;
+        lastEventAtPending = undefined;
+      }
+    }, frame.scheduleFrame);
+
+    // caller 未记 pending（无内容事件，如纯 usage turn）→ schedule 后 commit 不写
+    t.schedule();
+    frame.tick();
+    expect(writes).toBe(0);
+  });
 });

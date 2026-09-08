@@ -936,8 +936,17 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     // 「累积结果 → store」按渲染帧合并提交。实测 8 条/s 的 update 频率 ×
     // 每条全量重渲染是 WebView 满载主因（2026-09-08 事故），节流后每帧
     // 最多一次提交，流式期间的渲染次数与帧率对齐而非与事件到达率对齐。
+    // P32 R1：lastEventAt 并入节流提交——旧实现每条内容事件都 patch 一次
+    // lastEventAt（事件率 8-10/s），store 写频率未被 P31 节流覆盖，且 prop
+    // 下传所有 MessageLine 击穿 memo。改为 commit 时一并写入（帧级），事件
+    // 循环内只记到局部变量。
+    let lastEventAtPending: number | undefined;
     const throttle = createStreamCommitThrottle(() => {
       useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
+      if (lastEventAtPending !== undefined) {
+        useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
+        lastEventAtPending = undefined;
+      }
     });
     const p = (async () => {
       try {
@@ -993,14 +1002,20 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           }
           const next = applyEvent(turnRef.current, e, Date.now);
           turnRef.current = next;
-          // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）；
-          // lastEventAt 是标量 patch，跟随节流提交（不额外触发整列表重渲染）
-          useSessionStore.getState().patch(tabKey, { lastEventAt: Date.now() });
+          // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）。
+          // P32 R1：不再逐事件 patch store（事件率写库击穿 memo），记到局部变量
+          // 随节流提交（帧级），flush 时一并落定终态
+          lastEventAtPending = Date.now();
           throttle.schedule();
         });
         // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）；
         // 空 turn（无事件）不新起 assistant 气泡（编辑重试后的静默重开场景）
         throttle.flush(); // 强制提交帧内未落的累积快照（终态必须可见）
+        if (lastEventAtPending !== undefined) {
+          // P32 R1：帧内事件无 pending 提交时（如 flush 前 schedule 未触发），终态 lastEventAt 仍落定
+          useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
+          lastEventAtPending = undefined;
+        }
         if (turnRef.current.blocks.length > 0) {
           useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
         }
@@ -1015,6 +1030,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
         };
         useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
+        if (lastEventAtPending !== undefined) {
+          // P32 R1：异常收口同样落定 lastEventAt（finally 会清空，此写只为语义完整：
+          // 静默计时基准在错误块渲染期间仍可用）
+          useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
+          lastEventAtPending = undefined;
+        }
         // 队列条目执行失败 → 回插队首（条目不丢）。重试语义：isRetry 防死循环
         //（retried 条目失败不再回插）；不撤 user 气泡——已发生的尝试是事实。
         if (opts?.queueItemId && !opts?.isRetry) {
@@ -1452,7 +1473,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   adapter={adapter}
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
-                  lastEventAt={rt?.lastEventAt}
+                  // P32 R1：lastEventAt 只传末条——消费点（TurnElapsed）仅
+                  // busy && isLast 需要；传所有行会让每次提交击穿全部 MessageLine 的 memo
+                  lastEventAt={vi.index === messages.length - 1 ? rt?.lastEventAt : undefined}
                   onSelect={onSelectText}
                   onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}
