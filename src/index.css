@@ -156,17 +156,19 @@
 /* ======================= 基础复位与全局 ======================= */
 
 /* —— 主题切换过渡（P26 主题快捷钮）：仅在切换瞬间挂 .theme-fading，350ms 后由 JS 摘除。
-   不设永久 transition——WKWebView 冻结 transition 时会永停中间态（P26c 同坑）。 —— */
+   不设永久 transition——WKWebView 冻结 transition 时会永停中间态（P26c 同坑）。
+   只过渡背景/边框/图标描边，**不过渡文字颜色**：文字在低对比中段会「看不清」
+   （浅→深灰过渡中灰字衬灰底），背景换色、文字随 data-theme 立即换色反而清晰。
+   背景过渡稍慢（320ms）带出渐变感，文字零过渡。 —— */
 html.theme-fading,
 html.theme-fading *,
 html.theme-fading *::before,
 html.theme-fading *::after {
   transition:
-    background-color 280ms ease,
-    color 280ms ease,
-    border-color 280ms ease,
-    fill 280ms ease,
-    stroke 280ms ease !important;
+    background-color 320ms ease,
+    border-color 320ms ease,
+    fill 320ms ease,
+    stroke 320ms ease !important;
   transition-delay: 0ms !important;
 }
 
