@@ -24,6 +24,7 @@ pub enum NpmSource {
 }
 
 impl NpmSource {
+    #[allow(dead_code)] // 诊断命令（任务五）接入后消费
     pub fn as_str(&self) -> &'static str {
         match self {
             NpmSource::System => "system",
@@ -174,6 +175,7 @@ fn resource_root(app: &tauri::AppHandle) -> Option<PathBuf> {
 
 /// 跑 `<path> --version` 取版本号（5s 超时；失败 None 不阻塞调用方）。
 /// 诊断用途，spawn 主链路不调用。
+#[allow(dead_code)] // 诊断命令（任务五）接入后消费
 pub fn runtime_version(path: &Path) -> Option<String> {
     let out = std::process::Command::new(path)
         .arg("--version")
@@ -194,8 +196,10 @@ pub fn runtime_version(path: &Path) -> Option<String> {
 
 // ---------------------------------------------------------------------------
 // runtime-versions.json 清单解析（编译期 include_str!，运行期无文件 IO）
+// 诊断命令（任务五）接入前 dead_code 允许；解析/校验逻辑已被单测覆盖。
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 const RUNTIME_VERSIONS_JSON: &str = include_str!("../resources/runtime-versions.json");
 
 /// 清单解析结果（bun 版本 + 各 target 的 sha256）。
@@ -207,6 +211,7 @@ pub struct RuntimeManifest {
 }
 
 /// 纯函数：解析清单文本（build.rs 同款校验失败的形态直接 Err）。
+#[allow(dead_code)]
 pub fn parse_runtime_manifest(raw: &str) -> Result<RuntimeManifest, String> {
     let v: serde_json::Value =
         serde_json::from_str(raw).map_err(|e| format!("runtime-versions.json 解析失败: {e}"))?;
@@ -246,6 +251,7 @@ pub fn parse_runtime_manifest(raw: &str) -> Result<RuntimeManifest, String> {
 }
 
 /// 当前平台的清单 sha256（target 不在清单 → None）。
+#[allow(dead_code)]
 pub fn bundled_bun_sha256() -> Option<String> {
     let m = parse_runtime_manifest(RUNTIME_VERSIONS_JSON).ok()?;
     m.artifacts
@@ -255,6 +261,7 @@ pub fn bundled_bun_sha256() -> Option<String> {
 
 /// sha256 比对（诊断命令用；低频路径，~100ms 可接受）。
 /// 三态：文件缺失 → Err("missing")；哈希不符 → Err(实际哈希)；匹配 → Ok(())。
+#[allow(dead_code)]
 pub fn verify_bundled_sha256(file: &Path, expect_hex: &str) -> Result<(), String> {
     use sha2::Digest;
     use std::io::Read;

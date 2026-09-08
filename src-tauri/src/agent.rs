@@ -179,6 +179,8 @@ pub async fn spawn_inner(
 }
 
 /// spawn 应用管理的桥：`bun <entry> <args>`（桥纯 ESM JS，bun/node 均可跑）。
+/// P31：运行时三级解析——system bun → 内嵌 bun → system node（node 不内嵌，
+/// 排最后作纯兜底；内嵌 bun 优先于 node 因其同时是安装链路的兜底运行时）。
 fn spawn_bridge(
     app: &AppHandle,
     agent_id: u64,
@@ -187,21 +189,25 @@ fn spawn_bridge(
     args: &[String],
     cwd: &str,
 ) -> Result<tauri::async_runtime::Receiver<CommandEvent>, String> {
-    let runtime = crate::env_path::find_program("bun")
-        .map(|h| h.path)
-        .or_else(|| crate::env_path::find_program("node").map(|h| h.path))
-        .ok_or_else(|| format!("未找到 bun 或 node 运行时，无法启动 {} 桥接器", spec.pkg))?;
+    let runtime = crate::embedded_runtime::resolve_bun(app)
+        .map(|(p, src)| (p, format!("bun:{src}")))
+        .or_else(|| {
+            crate::env_path::find_program("node").map(|h| (h.path, "node:system".to_string()))
+        })
+        .map(|(p, src)| (p, src))
+        .ok_or_else(|| format!("未找到 bun 或 node 运行时（含内嵌），无法启动 {} 桥接器", spec.pkg))?;
     log::info!(
-        "[agent:{agent_id}] spawn {}(managed v{}) → {} {} {:?} cwd={cwd}",
+        "[agent:{agent_id}] spawn {}(managed v{}) → {} [{}] {} {:?} cwd={cwd}",
         spec.program,
         bridge.version,
-        runtime.display(),
+        runtime.0.display(),
+        runtime.1,
         bridge.entry,
         args
     );
     let mut cmd = app
         .shell()
-        .command(&runtime)
+        .command(&runtime.0)
         .arg(&bridge.entry)
         .args(args)
         .set_raw_out(true)
