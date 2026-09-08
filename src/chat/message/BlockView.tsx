@@ -8,6 +8,7 @@ import type { BlockMsg } from "@/acp/message-log";
 import type { ToolContent } from "@/acp/session-core";
 import { kindIcon, toolSubtitle } from "@/acp/toolDisplay";
 import type { DiffComment } from "@/chat/logic/diffComments";
+import { shouldAutoOpen } from "@/chat/logic/disclosure";
 import { MarkdownView } from "./MarkdownView";
 import { DiffView } from "./DiffView";
 import { ToolTextView } from "./ToolTextView";
@@ -162,22 +163,23 @@ function ToolBlock({
   onActivityOverrideClear?: () => void;
 }) {
   // P25：全局覆写优先；null 回局部态。
-  // P30：含 diff（写操作）默认展开 +「无 diff→有 diff」边沿（tool_update 带结果到达时）
-  // 自动展开——写操作不该静默藏进折叠卡。userToggledRef：用户手动操作过（开/合）后
-  // 不再自动干预（AC-3.2 尊重用户选择）。覆写态（Ctrl+O）仍由 P25 语义优先。
-  const hasDiff = content.some((c) => c.kind === "diff");
-  const [localOpen, setLocalOpen] = useState(hasDiff);
+  // P32 AC-2.2/2.3：折叠策略收敛到 disclosure 纯函数——含 diff 默认展开、「无 diff→
+  // 有 diff」边沿自动展开、用户手动操作后永不自动干预。P32 S2：组件实例跨分组迁移
+  // 存活（MessageLine 稳定键），open/userToggledRef 不再被重挂重置——「手动收起后
+  // 被强开」的复发路径已从根上消除。
+  const isDiff = content.some((c) => c.kind === "diff");
+  const [localOpen, setLocalOpen] = useState(isDiff);
   const userToggledRef = useRef(false);
-  const prevHasDiffRef = useRef(hasDiff);
+  const prevHasDiffRef = useRef(isDiff);
   useEffect(() => {
     // 边沿判定：上一帧无 diff、本帧有 diff（初始挂载 prevHasDiffRef 已同值，不触发）
-    const becameDiff = !prevHasDiffRef.current && hasDiff;
-    prevHasDiffRef.current = hasDiff;
+    const becameDiff = shouldAutoOpen(prevHasDiffRef.current, isDiff);
+    prevHasDiffRef.current = isDiff;
     if (becameDiff && !userToggledRef.current) {
       userToggledRef.current = true; // 边沿置位后不再自动干预（已展开即用户可见状态）
       setLocalOpen(true);
     }
-  }, [hasDiff]);
+  }, [isDiff]);
   const open = activityOverride ?? localOpen;
   // P16b：运行中（pending/in_progress）→ 实时秒表；终态 → 封口的 ms
   const running = status === "pending" || status === "in_progress";

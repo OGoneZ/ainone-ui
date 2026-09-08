@@ -11,6 +11,7 @@ import type { AdapterWithStatus } from "@/ipc/adapters";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import type { RenderItem } from "@/chat/logic/activity";
 import { buildActivityGroups, buildStreamingItems } from "@/chat/logic/activity";
+import { groupDefaultOpen } from "@/chat/logic/disclosure";
 import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 import { aggregateFileChanges } from "@/chat/logic/fileChanges";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -110,6 +111,19 @@ export const MessageLine = memo(function MessageLine({
   // 非流式（历史回填/turn 结束后）保持原分组语义。
   const streaming = busy && isLast;
   const renderItems = streaming ? buildStreamingItems(msg.blocks) : buildActivityGroups(msg.blocks);
+  // P32 AC-2.4：渲染项稳定键——块迁移（独立↔组卡）时 ToolBlock 实例不被卸载重挂，
+  // open state / userToggledRef 得以跨分组存活（位置索引 key 是重挂丢 state 的根因）。
+  // tool 块用 toolCallId（协议保证 turn 内唯一）；thought/text 段在 turn 内只追加不重排，
+  // 段序键 + kind 前缀稳定（turn.ts 相邻同类块合并语义保证）；组卡用首成员块键派生。
+  const itemKey = (item: RenderItem, i: number): string => {
+    if (item.type === "block") {
+      const b = item.block;
+      if (b.kind === "tool") return `tool-${b.toolCallId}`;
+      return `${b.kind}-${i}`;
+    }
+    const first = item.blocks[0];
+    return first.kind === "tool" ? `group-tool-${first.toolCallId}` : `group-${first.kind}-${i}`;
+  };
   return (
     <div className="group flex gap-2.5 my-2.5">
       <AgentAvatar adapterId={adapter.id} name={adapter.name} brandColor={adapter.logo} size={32} className="shrink-0 mt-0.5" />
@@ -117,7 +131,7 @@ export const MessageLine = memo(function MessageLine({
         {renderItems.map((item, i) =>
           item.type === "block" ? (
             <BlockView
-              key={i}
+              key={itemKey(item, i)}
               block={item.block}
               /* P32 AC-1.1/1.3：live 与「渲染树位置」解耦——只看数据（流式 turn 中且 ms 未落），
                  thought 后跟 tool 时不再被误判非 live 而闪收。text 块沿用「最后一个渲染项」判定
@@ -134,7 +148,7 @@ export const MessageLine = memo(function MessageLine({
               onActivityOverrideClear={onActivityOverrideClear}
             />
           ) : (
-            <ActivityGroupCard key={i} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
+            <ActivityGroupCard key={itemKey(item, i)} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
           ),
         )}
         {/* p22e：turn 总耗时并入活动组卡实时走秒；纯 text 轮次不显示计时。
@@ -200,7 +214,9 @@ function ActivityGroupCard({
   /** P25：手动点击单卡 → 清除全局覆写 */
   onActivityOverrideClear?: () => void;
 }) {
-  const [localOpen, setLocalOpen] = useState(false);
+  // P32 AC-2.6：组内含 diff → 组默认展开（写操作收组后仍可见）；其余折叠。
+  // 初始值只在挂载时计算，之后纯手动/覆写驱动——流式重渲染不会强开已手动收起的组。
+  const [localOpen, setLocalOpen] = useState(groupDefaultOpen(item.blocks));
   // P25：全局覆写优先；null 回局部态。手动点击时若覆写存在则清除覆写
   const open = activityOverride ?? localOpen;
   // p22e 实时总耗时：墙钟口径——运行中从组首块 startTs 起持续走秒（不管内部各段耗时），
@@ -286,8 +302,19 @@ function ActivityGroupCard({
               ))}
             </div>
           )}
-          {item.blocks.map((b, i) => (
-            <BlockView key={i} block={b} live={false} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
+          {/* P32 AC-2.4：组内块也用稳定键——组展开态切换时块实例存活，ToolBlock 的
+              展开态/userToggledRef 不被重置（组卡 open 收起再展开不折腾块级状态） */}
+          {item.blocks.map((b) => (
+            <BlockView
+              key={b.kind === "tool" ? `tool-${b.toolCallId}` : `${b.kind}-${b.kind === "thought" ? b.text.slice(0, 16) : b.text.slice(0, 16)}`}
+              block={b}
+              live={false}
+              onSelect={onSelect}
+              diffComments={diffComments}
+              onAddDiffComment={onAddDiffComment}
+              activityOverride={activityOverride}
+              onActivityOverrideClear={onActivityOverrideClear}
+            />
           ))}
         </div>
       )}

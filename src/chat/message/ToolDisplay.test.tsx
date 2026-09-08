@@ -75,7 +75,7 @@ describe("ToolBlock 细化显示（P30 AC-2.3）", () => {
     expect(screen.getByText("完成")).toBeTruthy();
   });
 
-  it("P30 AC-2.1：含 diff 的工具块在组内展开时 diff 可见", () => {
+  it("P30 AC-2.1 + P32 AC-2.6：含 diff 的工具块收组后组默认展开、diff 直接可见", () => {
     renderMsg(
       [
         toolBlock({
@@ -83,8 +83,9 @@ describe("ToolBlock 细化显示（P30 AC-2.3）", () => {
           content: [{ kind: "diff", diff: { path: "/a.ts", oldText: "old", newText: "new" } }],
         }),
       ],
-      { expandGroup: true },
+      { expandGroup: false },
     );
+    // P32：含 diff 组默认展开（无需手动点开），组内 ToolBlock 也默认展开
     expect(screen.getByText("/a.ts")).toBeTruthy();
   });
 
@@ -105,7 +106,7 @@ describe("ToolBlock 细化显示（P30 AC-2.3）", () => {
 });
 
 describe("活动组卡折叠态文件变更徽标（P30 AC-2.4）", () => {
-  it("组内有 diff → 折叠态摘要行显示 +N −N M 个文件", () => {
+  it("组内有 diff → 折叠态摘要行显示 +N −N M 个文件（P32：组默认展开，徽标在组头不变）", () => {
     renderMsg([
       { kind: "text", text: "正文" },
       toolBlock({
@@ -114,11 +115,12 @@ describe("活动组卡折叠态文件变更徽标（P30 AC-2.4）", () => {
         content: [{ kind: "diff", diff: { path: "/a.ts", oldText: "1\n2", newText: "1\n2\n3" } }],
       }),
     ]);
-    // 折叠态（默认）摘要行可见：+2 −1 1 个文件（oldText 2 行 vs newText 3 行 → +2/−1）
-    // 「1」与「个文件」是分开的文本节点，用正则匹配
-    expect(screen.getByText("+2")).toBeTruthy();
-    expect(screen.getByText("−1")).toBeTruthy();
+    // P32 AC-2.6：含 diff 的组默认展开——展开态组头徽标仍在（+2 −1 1 个文件），
+    // 且 diff 正文直接可见（组内 ToolBlock 默认展开）。徽标 + diff 行各出现一次 +2
+    expect(screen.getAllByText("+2").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("−1").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/个文件/)).toBeTruthy();
+    expect(screen.getByText("/a.ts")).toBeTruthy();
   });
 
   it("组内无 diff → 不显示徽标", () => {
