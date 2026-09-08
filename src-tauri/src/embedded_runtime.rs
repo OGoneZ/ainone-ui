@@ -12,6 +12,7 @@
 // AppHandle 包装层薄到不值得测（与 connector.rs resolve_in 同款手法）。
 
 use std::path::{Path, PathBuf};
+use serde::Serialize;
 
 /// npm 解析的来源标签（诊断与日志展示用）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -24,7 +25,6 @@ pub enum NpmSource {
 }
 
 impl NpmSource {
-    #[allow(dead_code)] // 诊断命令（任务五）接入后消费
     pub fn as_str(&self) -> &'static str {
         match self {
             NpmSource::System => "system",
@@ -175,7 +175,6 @@ fn resource_root(app: &tauri::AppHandle) -> Option<PathBuf> {
 
 /// 跑 `<path> --version` 取版本号（5s 超时；失败 None 不阻塞调用方）。
 /// 诊断用途，spawn 主链路不调用。
-#[allow(dead_code)] // 诊断命令（任务五）接入后消费
 pub fn runtime_version(path: &Path) -> Option<String> {
     let out = std::process::Command::new(path)
         .arg("--version")
@@ -196,10 +195,8 @@ pub fn runtime_version(path: &Path) -> Option<String> {
 
 // ---------------------------------------------------------------------------
 // runtime-versions.json 清单解析（编译期 include_str!，运行期无文件 IO）
-// 诊断命令（任务五）接入前 dead_code 允许；解析/校验逻辑已被单测覆盖。
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 const RUNTIME_VERSIONS_JSON: &str = include_str!("../resources/runtime-versions.json");
 
 /// 清单解析结果（bun 版本 + 各 target 的 sha256）。
@@ -211,7 +208,6 @@ pub struct RuntimeManifest {
 }
 
 /// 纯函数：解析清单文本（build.rs 同款校验失败的形态直接 Err）。
-#[allow(dead_code)]
 pub fn parse_runtime_manifest(raw: &str) -> Result<RuntimeManifest, String> {
     let v: serde_json::Value =
         serde_json::from_str(raw).map_err(|e| format!("runtime-versions.json 解析失败: {e}"))?;
@@ -251,7 +247,6 @@ pub fn parse_runtime_manifest(raw: &str) -> Result<RuntimeManifest, String> {
 }
 
 /// 当前平台的清单 sha256（target 不在清单 → None）。
-#[allow(dead_code)]
 pub fn bundled_bun_sha256() -> Option<String> {
     let m = parse_runtime_manifest(RUNTIME_VERSIONS_JSON).ok()?;
     m.artifacts
@@ -261,7 +256,6 @@ pub fn bundled_bun_sha256() -> Option<String> {
 
 /// sha256 比对（诊断命令用；低频路径，~100ms 可接受）。
 /// 三态：文件缺失 → Err("missing")；哈希不符 → Err(实际哈希)；匹配 → Ok(())。
-#[allow(dead_code)]
 pub fn verify_bundled_sha256(file: &Path, expect_hex: &str) -> Result<(), String> {
     use sha2::Digest;
     use std::io::Read;
@@ -281,6 +275,77 @@ pub fn verify_bundled_sha256(file: &Path, expect_hex: &str) -> Result<(), String
     } else {
         Err(actual)
     }
+}
+
+// ---------------------------------------------------------------------------
+// 诊断命令（P31 任务五）：设置页可见的运行时状态
+// ---------------------------------------------------------------------------
+
+/// 单个运行时的解析结果（诊断展示用）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeInfo {
+    /// 绝对路径
+    pub path: String,
+    /// "system" | "bundled"
+    pub source: String,
+    /// `<path> --version` 输出（失败 None）
+    pub version: Option<String>,
+}
+
+/// 运行时诊断快照（runtime_diagnostics 命令的返回体）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDiagnostics {
+    pub bun: Option<RuntimeInfo>,
+    pub npm: Option<RuntimeInfo>,
+    /// 内嵌目录是否落位（resource_root/runtime 存在）
+    pub bundled_dir_exists: bool,
+    /// 内嵌 bun sha 校验：Some(true)=通过 / Some(false)=不符 / None=缺文件或不在清单
+    pub bundled_sha_verified: Option<bool>,
+}
+
+/// 诊断快照（低频路径：跑两次 --version 子进程 + 一次 61M sha256，~100-300ms）。
+pub fn runtime_diagnostics(app: &tauri::AppHandle) -> RuntimeDiagnostics {
+    let bun = resolve_bun(app).map(|(p, src)| RuntimeInfo {
+        path: p.to_string_lossy().into_owned(),
+        source: src.to_string(),
+        version: runtime_version(&p),
+    });
+    let npm = resolve_npm(app).map(|(p, src)| RuntimeInfo {
+        path: p.to_string_lossy().into_owned(),
+        source: src.as_str().to_string(),
+        version: runtime_version(&p),
+    });
+    let (bundled_dir_exists, bundled_sha_verified) = match resource_root(app) {
+        Some(root) => {
+            let dir = root.join("runtime");
+            if !dir.is_dir() {
+                (false, None)
+            } else {
+                let file = bundled_bun_in(&root, current_target_triple());
+                match (bundled_bun_sha256(), file.exists()) {
+                    (Some(expect), true) => {
+                        (true, Some(verify_bundled_sha256(&file, &expect).is_ok()))
+                    }
+                    _ => (true, None),
+                }
+            }
+        }
+        None => (false, None),
+    };
+    RuntimeDiagnostics {
+        bun,
+        npm,
+        bundled_dir_exists,
+        bundled_sha_verified,
+    }
+}
+
+/// 诊断命令（前端 ipc/runtime.ts 消费）。
+#[tauri::command]
+pub fn runtime_diagnostics_cmd(app: tauri::AppHandle) -> RuntimeDiagnostics {
+    runtime_diagnostics(&app)
 }
 
 #[cfg(test)]
