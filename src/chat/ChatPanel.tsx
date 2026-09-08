@@ -513,7 +513,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             options: params.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind ?? null })),
           };
           patch(tabKey, { perm });
-          // P32 F-32-1：窗口失焦时通知「等待权限批准」（决策在 shouldNotify 纯函数）
+          // P33 F-32-1：窗口失焦时通知「等待权限批准」（决策在 shouldNotify 纯函数）
           {
             const decision = shouldNotify({ reason: "perm", windowFocused: document.hasFocus() });
             if (decision.send) {
@@ -679,7 +679,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       if (ok) toast.success(`已加入队列（第 ${(useQueueStore.getState().queues[tabKey] ?? []).length} 位）`);
       return;
     }
-    follow.scrollToBottom(); // P32 AC-3.6：发送新消息强制回底并恢复跟随
+    follow.scrollToBottom(); // P33 AC-3.6：发送新消息强制回底并恢复跟随
     appendUser(tabKey, full);
     await runPrompt(full);
   }
@@ -1017,7 +1017,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         if (turnRef.current.blocks.length > 0) {
           useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
         }
-        // P32 F-32-1：窗口失焦时通知「任务完成」（用户自己取消不发——shouldNotify 决策）
+        // P33 F-32-1：窗口失焦时通知「任务完成」（用户自己取消不发——shouldNotify 决策）
         {
           const reason = stopReasonRef.current ?? "end_turn";
           const decision = shouldNotify({ reason: "turn_end", windowFocused: document.hasFocus(), stopReason: reason });
@@ -1216,7 +1216,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const lastUserIdx = useMemo(() => lastUserIndex(messages), [messages]);
   const lastUserText = lastUserIdx >= 0 && messages[lastUserIdx].role === "user" ? messages[lastUserIdx].text : "";
   const [atBottom, setAtBottom] = useState(true);
-  // P32 AC-3.x：自动滚动跟随——流式/折叠展开引起内容增高时贴底；wheel 向上/远端按下
+  // P33 AC-3.x：自动滚动跟随——流式/折叠展开引起内容增高时贴底；wheel 向上/远端按下
   // 接管（跟随暂停）；滚回近底、点回底按钮、发送新消息恢复。逻辑在 followBottom.ts
   // （纯逻辑注入可测），此处只做事件接线 + atBottom 显隐合一（一个来源，同一阈值）。
   const followRef = useRef<ReturnType<typeof createFollowBottom> | null>(null);
@@ -1249,7 +1249,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       el.removeEventListener("scroll", onScroll);
     };
   }, [follow]);
-  // P32：用户手势接管——wheel 向上立即接管；按下（WKWebView 原生点击无 pointerdown，
+  // P33：用户手势接管——wheel 向上立即接管；按下（WKWebView 原生点击无 pointerdown，
   // 记忆 P23）用 mousedown/touchstart 双通道。passive 不阻断默认滚动行为。
   useEffect(() => {
     const el = chatScrollRef.current;
@@ -1268,7 +1268,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       el.removeEventListener("touchstart", onPress);
     };
   }, [follow]);
-  // P32 AC-3.7：内容增高驱动跟随——虚拟容器（getTotalSize 撑高的节点）尺寸变化即
+  // P33 AC-3.7：内容增高驱动跟随——虚拟容器（getTotalSize 撑高的节点）尺寸变化即
   // onContentGrow，rAF 合帧推底。流式 chunk 与 diff 展开/收起共用该路径。
   const streamContentRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1549,7 +1549,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         {perm && (
           <PermCard title={perm.title} options={perm.options} onDecide={onPerm} />
         )}
-        {/* P32 AC-3.4：回到底部悬浮按钮——接管（上翻）后出现，点击恢复跟随。
+        {/* P33 AC-3.4：回到底部悬浮按钮——接管（上翻）后出现，点击恢复跟随。
             与「你最后说的」回跳气泡互斥布局冲突小（一上一下），各自独立显隐。 */}
         {!atBottom && (
           <button

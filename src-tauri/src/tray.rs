@@ -1,9 +1,9 @@
-// P32 F-32-2 系统托盘：图标常驻 + 运行中会话数 + 菜单退出（先清理后退出）。
+// P33 F-32-2 系统托盘：图标常驻 + 运行中会话数 + 菜单退出（先清理后退出）。
 //
 // tauri 2 内建 tray-icon feature（无第三方插件）。Rust 保持薄——不反查业务状态，
 // 运行中会话数由前端在 busy 集变化时经 tray_set_busy_count 推送。
 // 退出语义复用既有清理链：app.exit(0) 触发 RunEvent::Exit → agent/terminal
-// 的 on_exit_cleanup（负 pgid SIGKILL），与关窗退出等价（AC-P32-8）。
+// 的 on_exit_cleanup（负 pgid SIGKILL），与关窗退出等价（AC-P33-8）。
 
 use tauri::{
     menu::{Menu, MenuItem},

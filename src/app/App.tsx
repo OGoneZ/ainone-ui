@@ -1046,7 +1046,7 @@ function App() {
     return out;
   }, [tabs, runtime]);
 
-  // P32 F-32-2：运行中会话数推送托盘（busy 集 + 权限等待均计——托盘要回答
+  // P33 F-32-2：运行中会话数推送托盘（busy 集 + 权限等待均计——托盘要回答
   // 「有活干/等我确认」。变化才 invoke，防抖由 zustand 渲染合并天然保证）
   const busyCount = useMemo(() => {
     const seen = new Set<string>();

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { shouldNotify, turnEndBody, USER_CANCELLED, type NotifyDecisionInput } from "./notify";
 
-// P32 AC-P32-5：触发决策四态矩阵。意图——防打扰原则下，
+// P33 AC-P33-5：触发决策四态矩阵。意图——防打扰原则下，
 // 「失焦 + 非用户取消」才提醒；用户盯着屏幕或自己叫停时保持安静。
 
 const base: NotifyDecisionInput = { reason: "turn_end", windowFocused: false };

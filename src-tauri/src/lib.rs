@@ -35,9 +35,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        // P32 F-32-1 系统通知（触发决策在前端 shouldNotify，Rust 只发）
+        // P33 F-32-1 系统通知（触发决策在前端 shouldNotify，Rust 只发）
         .plugin(tauri_plugin_notification::init())
-        // P32 F-32-3 自动更新（设置页手动检查，不自动）
+        // P33 F-32-3 自动更新（设置页手动检查，不自动）
         .plugin(tauri_plugin_updater::Builder::new().build());
     // 内嵌终端 PTY（P23，p23g 重构）：portable-pty + 自管读线程 + Channel 推送，
     // 命令 terminal_spawn/write/resize/kill 由 terminal.rs 注册（不再用
@@ -66,7 +66,7 @@ pub fn run() {
         .setup(|app| {
             agent::init_state(app);
             terminal::init_state(app);
-            // P32 F-32-2 系统托盘：图标常驻 + 会话数 + 菜单退出（app.exit 走清理链）
+            // P33 F-32-2 系统托盘：图标常驻 + 会话数 + 菜单退出（app.exit 走清理链）
             if let Err(e) = tray::setup_tray(app.handle()) {
                 // 托盘创建失败不阻塞应用（R-32-4：无 appindicator 的 Linux 桌面）
                 log::warn!("[tray] 托盘初始化失败（功能降级为无托盘）: {e}");

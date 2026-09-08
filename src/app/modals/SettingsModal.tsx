@@ -205,7 +205,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
   const [loading, setLoading] = useState(false);
   // P29：「更多服务」折叠区（快问 + 语音）展开态
   const [moreOpen, setMoreOpen] = useState(false);
-  // P32 F-32-3：检查更新（设置页手动触发，不自动查）
+  // P33 F-32-3：检查更新（设置页手动触发，不自动查）
   const [updateState, setUpdateState] = useState<
     | { kind: "idle" }
     | { kind: "checking" }
@@ -760,7 +760,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
             </div>
           </section>
 
-          {/* ============ 分区：版本与更新（P32 F-32-3，手动检查） ============ */}
+          {/* ============ 分区：版本与更新（P33 F-32-3，手动检查） ============ */}
           <section className="settings-section">
             <h3 className="settings-section-title">版本与更新</h3>
             <div className="settings-card">
