@@ -54,6 +54,15 @@
   z-index: 10;
 }
 
+/* P26c：slash/@ 联想菜单弹出时放开 dock 裁剪——菜单 absolute 挂 .input-wrap、
+   bottom:100% 朝上弹出，dock overflow-y:auto 会裁掉超出 dock 顶部的部分
+   （实测 235px 菜单被裁 187px：看不清 + 高亮项不可见无法键盘选择）。
+   :has 检测菜单存在（WKWebView/Safari 15.4+）；弹出瞬间 dock 内容未超高，放开无副作用，
+   菜单关闭即恢复 auto（PermCard 等超高滚动机制不受影响）。 */
+.composer-dock:has(.slash-menu) {
+  overflow: visible;
+}
+
 @supports (backdrop-filter: blur(1px)) {
   .composer-dock {
     background: color-mix(in srgb, var(--bg-1) 72%, transparent);

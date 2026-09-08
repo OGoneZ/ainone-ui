@@ -47,7 +47,15 @@ const WS = [
   { id: "ws-dev", name: "dev", cwd: "/Users/me/dev", created_ms: 1 },
   { id: "ws-asr", name: "asr-server", cwd: "/Users/me/dev/asr-server", created_ms: 2 },
 ];
-const SESSIONS = [
+const SESSIONS: Array<{
+  session_id: string;
+  adapter_id: string;
+  title: string;
+  cwd: string;
+  workspace_id: string;
+  mtime_ms: number;
+  deleted_at_ms?: number;
+}> = [
   { session_id: "s-1", adapter_id: "omp", title: "你好", cwd: "/Users/me/dev", workspace_id: "ws-dev", mtime_ms: 10 },
   { session_id: "s-2", adapter_id: "omp", title: "总结目录", cwd: "/Users/me/dev/asr-server", workspace_id: "ws-asr", mtime_ms: 20 },
 ];
@@ -58,7 +66,7 @@ function defaultHandlers() {
       { id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: "#7c3aed" },
       { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: "#d97706" },
     ],
-    adapter_status: () => ({ available: true, resolved_path: "/usr/local/bin/omp", source: "ProcessPath" }),
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/usr/local/bin/omp", source: "ProcessPath", bridge: null }),
     sessions_list: () => SESSIONS,
     workspaces_list: () => WS,
     log_read: () => "",
@@ -92,15 +100,17 @@ describe("App 编排（工作区分组）", () => {
     render(<App />);
 
     const user = userEvent.setup();
-    // toolbar「新建会话」按钮与空态 EmptyState 的「新建会话」文案相同 → 取第一个（toolbar）
-    const newBtns = await screen.findAllByRole("button", { name: "新建会话" });
-    await user.click(newBtns[0]);
+    // P26 R1 删 toolbar 后入口 = 侧栏头部「＋」按钮（aria-label 新建工作区）
+    const newBtn = await screen.findByRole("button", { name: "新建工作区" });
+    await user.click(newBtn);
 
-    // 弹层出现
-    const modal = await screen.findByRole("heading", { name: "新建会话" });
+    // 弹层出现（P26 两步向导第一步标题）
+    const modal = await screen.findByRole("heading", { name: "新建会话 · 选择 Harness" });
     expect(modal).toBeInTheDocument();
 
-    // 默认 harness = 第一个（Oh My Pi），直接点开始对话（工作区默认第一个 dev）
+    // P26b 两步：点 harness 项仅选中 → 点「下一步」进第二步 → 开始对话（默认工作区第一个 dev）
+    await user.click(await screen.findByText("Oh My Pi"));
+    await user.click(screen.getByTestId("ns-next-btn"));
     await user.click(screen.getByRole("button", { name: "开始对话" }));
 
     // 生成 Tab（Tab 标题「新会话」）+ 聊天面板的 harness 徽标
@@ -119,5 +129,256 @@ describe("App 编排（工作区分组）", () => {
     // 只应有一个聊天面板（harness 徽标唯一）
     const badges = await screen.findAllByText(/正在和 Oh My Pi 对话/);
     expect(badges).toHaveLength(1);
+  });
+});
+
+// —— P25 App 级全局四键（Ctrl+B/M/N/T）——
+describe("P25 App 全局快捷键", () => {
+  it("Ctrl+B 切换左侧栏显隐（持久化同步翻转）", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<App />);
+    await screen.findByText("dev");
+    expect(screen.getByRole("button", { name: "收起侧栏" })).toBeInTheDocument();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByRole("button", { name: "收起侧栏" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
+    // 再按一次恢复
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.getByRole("button", { name: "收起侧栏" })).toBeInTheDocument();
+  });
+
+  it("Ctrl+K 切换右侧栏显隐", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<App />);
+    // 打开一个会话让 RightRail 挂载
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "你好" }));
+    await screen.findByTestId("right-rail");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByTestId("right-rail")).not.toBeInTheDocument();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.getByTestId("right-rail")).toBeInTheDocument();
+  });
+
+  it("Ctrl+N 打开新建会话弹层", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<App />);
+    await screen.findByText("dev");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(await screen.findByRole("heading", { name: "新建会话 · 选择 Harness" })).toBeInTheDocument();
+  });
+
+  it("Ctrl+T 新建终端 tab", async () => {
+    const calls = mockTauriIpc({ handlers: defaultHandlers() });
+    // TerminalPanel 依赖 xterm DOM 测量，jsdom 下挂载链路不完整——
+    // mock 掉面板本体，只验证 App 编排（tab 入模型 + 索引落盘 + 面板分派）
+    vi.mock("@/terminal/TerminalPanel", () => ({
+      TerminalPanel: () => <div data-testid="terminal-panel">终端</div>,
+    }));
+    render(<App />);
+    await screen.findByText("dev");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", code: "KeyT", ctrlKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    // 终端 tab 已入索引（sessions_upsert 携带 kind=terminal / title=终端）
+    const upsert = calls.find((c) => c.cmd === "sessions_upsert");
+    expect(upsert).toBeTruthy();
+    expect(upsert!.args.entry.kind).toBe("terminal");
+    expect(upsert!.args.entry.title).toBe("终端");
+    // 终端面板被 factory 分派渲染
+    expect(await screen.findByTestId("terminal-panel")).toBeInTheDocument();
+  });
+
+  it("P30：终端 tab 聚焦时右侧栏不消失，只显示文件 tab（文件树可用）", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    // TerminalPanel mock（同上，jsdom 无 xterm 测量链路）
+    vi.mock("@/terminal/TerminalPanel", () => ({
+      TerminalPanel: () => <div data-testid="terminal-panel">终端</div>,
+    }));
+    render(<App />);
+    await screen.findByText("dev");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", code: "KeyT", ctrlKey: true, bubbles: true, cancelable: true }));
+    // 终端 tab 创建并聚焦
+    await screen.findByTestId("terminal-panel");
+
+    // 旧缺陷：终端不在 adapters 注册表 → activeAdapter=undefined → 整个右栏消失。
+    // 期望：右栏仍在（terminalOnly 模式），只有「文件」tab，无元数据/历史
+    expect(screen.getByTestId("right-rail")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "文件" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "元数据" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "历史" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "文件" })).toHaveAttribute("aria-selected", "true");
+    // 终端 cwd 落到文件树（default_cwd 返回 "/"，workspace_list_dir mock 返回 []，树容器在即可）
+    expect(document.querySelector(".filetree")).toBeTruthy();
+
+    // 切回 agent 会话 → 三 tab 恢复（互斥模式切换）
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "你好" }));
+    expect(await screen.findByRole("tab", { name: "元数据" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "历史" })).toBeInTheDocument();
+  });
+});
+
+describe("P26e Ctrl+Enter 临时全屏", () => {
+  it("命中键位表 pane.temp-maximize（Ctrl/Cmd+Enter），裸 Enter 不命中", async () => {
+    const { matchShortcut, DEFAULT_DEFS } = await import("@/app/logic/keymap");
+    expect(matchShortcut({ code: "Enter", ctrlKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(true);
+    expect(matchShortcut({ code: "Enter", metaKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(true);
+    // 裸 Enter / Shift+Enter 不命中
+    expect(matchShortcut({ code: "Enter" }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(false);
+    expect(matchShortcut({ code: "Enter", shiftKey: true }, DEFAULT_DEFS, "pane.temp-maximize")).toBe(false);
+  });
+});
+
+describe("P30 窗格内 Ctrl+Tab 循环切 tab", () => {
+  it("键位表注册 pane.tab-next / pane.tab-prev（Ctrl+Tab / Ctrl+Shift+Tab），可改绑基础存在", async () => {
+    const { matchShortcut, DEFAULT_DEFS } = await import("@/app/logic/keymap");
+    expect(matchShortcut({ code: "Tab", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next")).toBe(true);
+    expect(matchShortcut({ code: "Tab", ctrlKey: true, shiftKey: true }, DEFAULT_DEFS, "pane.tab-prev")).toBe(true);
+    // 裸 Tab / alt+Tab 不命中（不吞浏览器焦点移动 / 窗口切换）
+    expect(matchShortcut({ code: "Tab" }, DEFAULT_DEFS, "pane.tab-next")).toBe(false);
+    expect(matchShortcut({ code: "Tab", altKey: true, ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next")).toBe(false);
+    // 覆盖改绑生效（P25 overrides 机制天然支持）
+    expect(matchShortcut({ code: "KeyJ", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next", { "pane.tab-next": [{ code: "KeyJ", ctrl: true }] })).toBe(true);
+    expect(matchShortcut({ code: "Tab", ctrlKey: true }, DEFAULT_DEFS, "pane.tab-next", { "pane.tab-next": [{ code: "KeyJ", ctrl: true }] })).toBe(false);
+  });
+
+  it("Ctrl+Tab 在激活窗格内循环切 tab（0→1→2→0），Shift 反向（AC-R2-2）", async () => {
+    const flexlayout = await import("flexlayout-react");
+    const { Model } = flexlayout as any;
+    // 驱动 App 的 keydown 处理需要完整 flexlayout Layout DOM（jsdom 高度 0 不渲染），
+    // 这里等价验证：真实 Model 构造三 tab tabset + 循环索引纯函数（App.onKey 内
+    // 用的同一条链：getChildren → nextTabIndex → selectTab(children[next])）。
+    const m = Model.fromJson({
+      layout: {
+        type: "row", children: [{
+          type: "tabset", children: [
+            { type: "tab", id: "t0", name: "0" },
+            { type: "tab", id: "t1", name: "1" },
+            { type: "tab", id: "t2", name: "2" },
+          ],
+        }],
+      },
+    });
+    m.doAction((flexlayout as any).Actions.selectTab("t0"));
+    const tabset = m.getActiveTabset();
+    expect(tabset).toBeTruthy();
+    const children = tabset!.getChildren();
+    expect(children.length).toBe(3);
+    // 模拟 App.onKey 的循环推进：getSelected → nextTabIndex → children[next]
+    const { nextTabIndex } = await import("@/app/logic/layout");
+    const seq: string[] = [];
+    let cur = tabset!.getSelected();
+    for (let i = 0; i < 4; i++) {
+      cur = nextTabIndex(children.length, cur, "next")!;
+      seq.push(children[cur].getId());
+    }
+    expect(seq).toEqual(["t1", "t2", "t0", "t1"]);
+    // 反向（从当前选中回退）
+    let back = tabset!.getSelected();
+    const seqB: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      back = nextTabIndex(children.length, back, "prev")!;
+      seqB.push(children[back].getId());
+    }
+    expect(seqB).toEqual(["t2", "t1", "t0"]);
+  });
+
+  it("焦点切换不携带源 tabset 的 selected idx（AC-R1-1 源码级锁定在 layout.test.ts）", async () => {
+    // 源码级回归断言在 node 环境的 layout.test.ts（jsdom 无 node:fs 类型）；
+    // 这里保留键位表回归断言。
+    const { DEFAULT_DEFS } = await import("@/app/logic/keymap");
+    expect(DEFAULT_DEFS.find((d) => d.id === "pane.tab-next")?.defaults[0].code).toBe("Tab");
+    expect(DEFAULT_DEFS.find((d) => d.id === "pane.tab-prev")?.defaults[0].shift).toBe(true);
+  });
+});
+
+// —— P30 回收站（软删除 + 恢复 + 删除确认「不再提示」）——
+describe("P30 回收站", () => {
+  /** 可变假后端：sessions_remove 打 deleted_at_ms 标记，restore 清除，与 Rust 语义一致 */
+  function recycleHandlers() {
+    const rows = SESSIONS.map((s) => ({ ...s }));
+    return {
+      handlers: {
+        ...defaultHandlers(),
+        sessions_list: () => rows.filter((r) => !r.deleted_at_ms),
+        sessions_deleted_list: () => rows.filter((r) => r.deleted_at_ms),
+        sessions_remove: (a: { sessionId: string }) => {
+          const r = rows.find((x) => x.session_id === a.sessionId);
+          if (r) r.deleted_at_ms = Date.now();
+        },
+        sessions_restore: (a: { sessionId: string }) => {
+          const r = rows.find((x) => x.session_id === a.sessionId);
+          if (r) delete r.deleted_at_ms;
+        },
+      },
+    };
+  }
+
+  it("删除走确认弹窗；确认后软删除（sessions_remove），条目离开侧栏", async () => {
+    const calls = mockTauriIpc(recycleHandlers());
+    render(<App />);
+    const user = userEvent.setup();
+    // 点会话行（你好）的删除（X）按钮——两条会话各有一个，取第一条
+    await user.click((await screen.findAllByRole("button", { name: "删除会话" }))[0]);
+    // 弹窗出现，说明可从回收站恢复
+    expect(await screen.findByRole("heading", { name: /删除会话「你好」？/ })).toBeInTheDocument();
+    expect(screen.getByText(/回收站恢复/)).toBeInTheDocument();
+    // 确认删除 → sessions_remove 被调
+    await user.click(screen.getByTestId("delete-confirm-ok"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.find((c) => c.cmd === "sessions_remove")?.args.sessionId).toBe("s-1");
+    // 侧栏不再渲染该会话
+    expect(screen.queryByRole("button", { name: "你好" })).not.toBeInTheDocument();
+    // 另一条不受影响
+    expect(screen.getByRole("button", { name: "总结目录" })).toBeInTheDocument();
+  });
+
+  it("勾选「以后不再提示」后再次删除直接执行（不弹窗）", async () => {
+    mockTauriIpc(recycleHandlers());
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole("button", { name: "删除会话" }))[0]);
+    await screen.findByRole("heading", { name: /删除会话「你好」？/ });
+    // 勾选不再提示并确认
+    await user.click(screen.getByTestId("delete-confirm-skip"));
+    await user.click(screen.getByTestId("delete-confirm-ok"));
+    expect(localStorage.getItem("ainone-delete-confirm-skip")).toBe("1");
+    // 第二次删除：无弹窗，直接落软删除
+    await user.click(screen.getByRole("button", { name: "删除会话" }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByRole("heading", { name: /删除会话/ })).not.toBeInTheDocument();
+  });
+
+  it("回收站弹窗列出已删会话，点恢复（ArchiveRestore）后回到侧栏", async () => {
+    // 预置一条已软删除（直接用带「已删一条」状态的假后端）
+    const rows = SESSIONS.map((s) => ({ ...s }));
+    rows[0].deleted_at_ms = 1000;
+    mockTauriIpc({
+      handlers: {
+        ...defaultHandlers(),
+        sessions_list: () => rows.filter((r) => !r.deleted_at_ms),
+        sessions_deleted_list: () => rows.filter((r) => r.deleted_at_ms),
+        sessions_restore: (a: { sessionId: string }) => {
+          const r = rows.find((x) => x.session_id === a.sessionId);
+          if (r) delete r.deleted_at_ms;
+        },
+      },
+    });
+    render(<App />);
+    const user = userEvent.setup();
+    // 已删会话不在侧栏
+    expect(screen.queryByRole("button", { name: "你好" })).not.toBeInTheDocument();
+    // 打开回收站
+    await user.click(await screen.findByRole("button", { name: "回收站" }));
+    expect(await screen.findByTestId("recycle-list")).toBeInTheDocument();
+    expect(screen.getByText("你好")).toBeInTheDocument();
+    // 点恢复 → 条目回到侧栏
+    await user.click(screen.getByTestId("recycle-restore-s-1"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await screen.findByRole("button", { name: "你好" })).toBeInTheDocument();
   });
 });

@@ -43,6 +43,7 @@ export function Composer({
   onPickSlash,
   onPickAt,
   expandPortalTarget,
+  registerVoiceToggle,
 }: {
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
@@ -65,6 +66,8 @@ export function Composer({
   /** F-21-5 全屏编辑的 portal 宿主：传入 session 窗格容器（.panel）→ 只铺满自己窗格；
    *  缺省 body（fixed + 100vw 旧语义，测试/兜底用） */
   expandPortalTarget?: HTMLElement | null;
+  /** P25：语音开关注册透传（Alt+\ 快捷键 → ChatPanel ref → VoiceInput） */
+  registerVoiceToggle?: (fn: () => void) => void;
 }) {
   // L1：Esc 显式关闭 slash 菜单（下次输入变化时重置重新可开）
   const [slashClosed, setSlashClosed] = useState(false);
@@ -84,6 +87,19 @@ export function Composer({
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 8 * 22)}px`;
   }, [input, expanded, textareaRef]);
+
+  // P26c：键盘高亮项滚动跟随——↑↓ 选到菜单可视区外时高亮项自动滚入（block:nearest 不扰动当前视图）
+  useEffect(() => {
+    const menu = slashMenuRef.current;
+    if (!menu || !slashOpen || slashMatches.length === 0) return;
+    menu.querySelector(".slash-item.active")?.scrollIntoView({ block: "nearest" });
+  }, [slashHighlight, slashOpen, slashMatches, slashMenuRef]);
+
+  useEffect(() => {
+    const menu = atMenuRef.current;
+    if (!menu || !atMenu || atMatches.length === 0) return;
+    menu.querySelector(".slash-item.active")?.scrollIntoView({ block: "nearest" });
+  }, [atHighlight, atMenu, atMatches, atMenuRef]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -263,7 +279,7 @@ export function Composer({
       <button type="button" className="attach-btn" aria-label="添加文件" title="添加文件" onClick={onPickFiles}>
         ＋
       </button>
-      <VoiceInput onTranscribed={onVoice} />
+      <VoiceInput onTranscribed={onVoice} registerToggle={registerVoiceToggle} />
       <div className="input-wrap">
         {slashOpen && slashMatches.length > 0 && (
           <div className="slash-menu" ref={slashMenuRef}>

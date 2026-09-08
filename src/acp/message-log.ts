@@ -16,7 +16,7 @@ import type { ToolContent } from "./session-core";
 
 export type BlockMsg =
   | { kind: "text"; text: string }
-  | { kind: "thought"; text: string; ms?: number }
+  | { kind: "thought"; text: string; ms?: number; startTs?: number }
   | {
       kind: "tool";
       toolCallId: string;
@@ -123,14 +123,15 @@ export function appendText(blocks: BlockMsg[], chunk: string): BlockMsg[] {
   return [...blocks, { kind: "text", text: chunk }];
 }
 
-export function appendThought(blocks: BlockMsg[], chunk: string): BlockMsg[] {
+export function appendThought(blocks: BlockMsg[], chunk: string, startTs?: number): BlockMsg[] {
   if (blocks.length > 0 && blocks[blocks.length - 1].kind === "thought") {
     const copy = blocks.slice();
     const last = copy[copy.length - 1];
     if (last.kind === "thought") copy[copy.length - 1] = { ...last, text: last.text + chunk };
     return copy;
   }
-  return [...blocks, { kind: "thought", text: chunk }];
+  // p22e：新 thought 段落定 startTs（墙钟起点，活动组实时总耗时用）；旧日志无此字段
+  return [...blocks, { kind: "thought", text: chunk, ...(startTs !== undefined ? { startTs } : {}) }];
 }
 
 export function appendTool(blocks: BlockMsg[], tool: BlockMsg & { kind: "tool" }): BlockMsg[] {

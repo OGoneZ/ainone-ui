@@ -31,6 +31,26 @@ export function extractModel(args: string[]): string | null {
   return null;
 }
 
+/** P29：模型 ID 去上下文后缀（"saver/glm-5.3-flash[1m]" → "saver/glm-5.3-flash"；与 Rust strip_model_suffix 对齐） */
+export function stripModelSuffix(model: string | null): string | null {
+  if (!model) return null;
+  return model.trim().replace(/\[1m\]$/, "") || null;
+}
+
+/** P29 R3：从会话配置选项提取当前模型（category="model" 的 select 项 currentValue）。
+ *  ACP 官方稳定通道（Session Config Options RFD 已 stabilized）；omp/pi 实测提供。 */
+export function extractSessionModel(
+  configOptions: Array<{ category?: string | null; type: string; currentValue?: string | boolean }> | null | undefined,
+): string | null {
+  if (!configOptions) return null;
+  for (const opt of configOptions) {
+    if (opt.category === "model" && opt.type === "select" && typeof opt.currentValue === "string" && opt.currentValue) {
+      return stripModelSuffix(opt.currentValue);
+    }
+  }
+  return null;
+}
+
 /** 上下文占用百分比（0-100）；size 为 0 时返回 0 防除零。 */
 export function usagePercent(info: UsageInfo): number {
   if (info.size <= 0) return 0;

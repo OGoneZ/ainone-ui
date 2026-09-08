@@ -1,7 +1,7 @@
 // P22 打赏作者弹窗：微信/支付宝两收款码并排 + 轻文案。
-// 收款码已用 sips 压缩（alipay.jpg / wxpay.png，均 <100KB），扫码经人工验证可用。
+// 收款码已等比缩至 512 宽、底部裁至 700 高，存无损 PNG（均 <120KB），扫码经人工验证可用。
 
-import alipayQr from "@/assets/donate/alipay.jpg";
+import alipayQr from "@/assets/donate/alipay.png";
 import wxpayQr from "@/assets/donate/wxpay.png";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 

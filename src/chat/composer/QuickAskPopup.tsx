@@ -1,15 +1,17 @@
 // F-8-7 快问悬浮窗：选中文本 → 批注/快速解释入口 → 结果/错误三态。
 // F-11-6：点外/Esc 关闭（监听在 ChatPanel 容器上，本组件只渲染）。
 // H6：absolute 定位锚点由 ChatPanel 换算为 .chat 内容区坐标后经 props 传入。
-// 自 ChatPanel 拆出（P13 C3b）。
+// 自 ChatPanel 拆出（P13 C3b）。P27c：解释正文走 MarkdownView（复用消息域
+// Streamdown 渲染，流式中 live=true 不完整块兜底），与消息区观感一致。
 
 import { toast } from "sonner";
+import { MarkdownView } from "../message/MarkdownView";
 
 export interface QuickAskState {
   /** 选中的待解释文本（null = 悬浮窗关闭） */
   quickSel: string;
-  /** null = 等待用户选择动作；loading/ok/error 三态 */
-  quickPop: { state: "loading" | "ok" | "error"; text: string } | null;
+  /** null = 等待用户选择动作；streaming/ok/error 三态（P27：流式中边收边渲染） */
+  quickPop: { state: "streaming" | "ok" | "error"; text: string } | null;
   anchor: { x: number; y: number };
   /** 快问模型是否已配置（未配置则「快速解释」禁用） */
   ready: boolean;
@@ -60,25 +62,33 @@ export function QuickAskPopup({
             </button>
           </div>
         </>
-      ) : quickPop.state === "loading" ? (
-        <div className="quick-pop-body">解释中…</div>
       ) : quickPop.state === "error" ? (
         <div className="quick-pop-body quick-pop-error">解释失败：{quickPop.text}</div>
       ) : (
         <>
-          <div className="quick-pop-body">{quickPop.text}</div>
+          {/* P27c 流式：streaming 与 ok 共用渲染体，MarkdownView live 跟随流式态
+              （streaming 下 Streamdown 解析不完整 markdown 块不闪断） */}
+          <div className="quick-pop-body" data-streaming={quickPop.state === "streaming"}>
+            <MarkdownView
+              text={quickPop.text}
+              live={quickPop.state === "streaming"}
+            />
+            {quickPop.state === "streaming" && <span className="quick-pop-caret" />}
+          </div>
           <div className="quick-pop-actions">
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(quickPop.text).then(
-                  () => toast.success("已复制"),
-                  () => toast.error("复制失败"),
-                );
-              }}
-            >
-              复制
-            </button>
+            {quickPop.state === "ok" && (
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(quickPop.text).then(
+                    () => toast.success("已复制"),
+                    () => toast.error("复制失败"),
+                  );
+                }}
+              >
+                复制
+              </button>
+            )}
           </div>
         </>
       )}

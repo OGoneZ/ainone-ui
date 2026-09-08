@@ -594,3 +594,117 @@ tree-row:hover .filetree-ref {
   bottom: 0;
   left: 0;
 }
+
+/* ===== P29 R5 模型切换面板 ===== */
+.model-switch-modal {
+  max-width: 480px;
+}
+
+.model-switch-modal .msm-base {
+  display: block;
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  margin-top: 2px;
+}
+
+.model-switch-modal .msm-filter {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.model-switch-modal .msm-filter:focus {
+  border-color: var(--brand);
+}
+
+.model-switch-modal .msm-state {
+  padding: 16px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.model-switch-modal .msm-error {
+  color: var(--danger);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-switch-modal .msm-retry {
+  padding: 4px 14px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.model-switch-modal .msm-retry:hover {
+  background: var(--bg-hover);
+}
+
+.model-switch-modal .msm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-switch-modal .msm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background var(--motion-fast) var(--ease-out-soft);
+}
+
+.model-switch-modal .msm-row:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.model-switch-modal .msm-row.active {
+  background: var(--bg-2);
+}
+
+.model-switch-modal .msm-row:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.model-switch-modal .msm-row .meta-mono {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.model-switch-modal .msm-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}

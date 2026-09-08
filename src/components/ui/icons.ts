@@ -9,6 +9,7 @@
 // 注：lucide 已把 CheckCircle2 更名为 CircleCheck，此处按语义导出，映射表仍成立。
 
 import {
+  ArchiveRestore,
   ArrowRight,
   ArrowUp,
   BellRing,
@@ -20,6 +21,7 @@ import {
   CircleCheck,
   Coffee,
   Copy,
+  ArrowLeftRight,
   FileDiff,
   FileText,
   Folder,
@@ -42,8 +44,10 @@ import {
   Search,
   Settings,
   Square,
+  SquareTerminal,
   Terminal,
   Trash2,
+  CircleHelp,
   Undo2,
   User,
   Wrench,
@@ -58,6 +62,7 @@ export const AgentIcon = Bot; // agent 头像兜底
 export const ThinkingIcon = Brain; // thinking 块
 export const ToolIcon = Wrench; // 工具调用
 export const TerminalIcon = Terminal; // 终端输出
+export const NewTerminalIcon = SquareTerminal; // P25 新建终端入口（侧栏头部图标钮）
 // P30：ToolKind 图标（toolDisplay.kindIcon 消费；read 复用 FileTextIcon / think 复用 ThinkingIcon）
 export const EditIconKind = Pencil; // kind=edit
 export const DeleteIcon = Trash2; // kind=delete
@@ -79,6 +84,8 @@ export const SettingsIcon = Settings; // 设置
 export const SendIcon = ArrowUp; // 发送
 export const StopIcon = Square; // 停止
 export const ArrowRightIcon = ArrowRight; // 建议 prompt hover 箭头
+export const SwitchIcon = ArrowLeftRight; // P29 模型/URL 切换入口
+export const RestoreIcon = ArchiveRestore; // P30 回收站「恢复」按钮（箱中取出向上箭头）
 
 // 通用符号
 export const ChevronDownIcon = ChevronDown;
@@ -97,3 +104,4 @@ export const SidebarExpandIcon = PanelLeftOpen; // F-15-7 左侧栏展开
 export const ExpandIcon = Maximize2; // F-18-2 输入框全屏编辑
 export const ShrinkIcon = Minimize2; // F-18-2 退出全屏编辑
 export const DonateIcon = Coffee; // P22 打赏作者入口
+export const HelpIcon = CircleHelp; // P25 快捷键帮助入口

@@ -1,0 +1,240 @@
+name: Release
+
+# 打 tag（v*）触发：门禁 → 四作业矩阵构建 → 产物汇总 → 上传 Cloudflare R2 + 生成 latest.json
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    # 第一道门禁（stage 1）：ubuntu 单作业、默认 bash，30 秒内出结论。
+    # 门禁不过，build 四腿根本不启动（needs 硬依赖），不再复制进矩阵作业跑 4 遍。
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches tauri.conf.json
+        # 门禁：tag 版本必须与 tauri.conf.json 的 version 完全一致，不等直接失败。
+        # 产物文件名内嵌 conf 版本、app「关于」显示 conf 版本——分叉即错版
+        # （v0.2.0 首发实锤：tag v0.2.0 而 conf 0.1.0，产物全名 0.1.0）。
+        # 不一致 = 开发者忘了 bump，打回对齐后重新打 tag，无任何自动改写补丁。
+        env:
+          EXPECTED: ${{ steps.ver.outputs.version }}
+        run: |
+          ACTUAL=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "tag version: $EXPECTED / tauri.conf.json version: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::tag 版本($EXPECTED)与 tauri.conf.json 版本($ACTUAL)不一致——先 bump src-tauri/tauri.conf.json（及 package.json）到 $EXPECTED，再重新打 tag"
+            exit 1
+          fi
+
+  build:
+    needs: preflight
+    strategy:
+      # 任一平台失败立即取消其余矩阵作业：发版语义是「全平台齐活才发布」，
+      # 一条腿挂了其余继续跑只是浪费 runner 分钟数
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ''
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # 本地与 lockfile（lockfileVersion 9.0）均为 pnpm 10；CI 用 9 会因
+          # workspace 协议解析差异报 "packages field missing or empty"
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # 注意：不开 cache: pnpm。该缓存机制依赖 `pnpm store path`，本仓库
+          # pnpm-workspace.yaml 仅含 onlyBuiltDependencies（非真 workspace），
+          # 会报 "packages field missing or empty" 使构建作业全挂（首发实锤）
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.target }}
+
+      - name: Install Linux dependencies (Tauri)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install frontend dependencies
+        # 本仓库 .npmrc 指向 npmmirror，CI 上覆盖为官方 registry
+        run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
+
+      - name: Prepare embedded bun runtime
+        # P31：按矩阵 target 下载内嵌 bun（sha256 校验失败即失败），落位
+        # src-tauri/resources/runtime/{target}/——tauri build 经 bundle.resources
+        # 打进安装包。Windows 默认 pwsh 也强制 bash（与门禁同款跨平台纪律）。
+        shell: bash
+        run: node scripts/prepare-runtime.mjs --target ${{ matrix.target }}
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v1
+        # 版本一致性由 preflight 门禁保证（tag == conf 才放行），产物文件名内嵌
+        # 的就是 conf 版本 = tag 版本，无需 --config 注入、无需改文件名补丁。
+        # 注意：签名/公证 env 只在 Apple secrets 实际配置后才注入。secrets 引用会把
+        # 空字符串设进环境，tauri bundler 判 APPLE_CERTIFICATE 非空即走 keychain
+        # setup——空串触发 security import 必炸 SecKeychainItemImport（首发实锤）。
+        # 未来配好证书后把下面这段 env 注释还原即可。
+        # env:
+        #   APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        #   APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        #   APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        #   APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        #   APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        #   APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+        with:
+          args: ${{ matrix.args }}
+
+      - name: Upload bundles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            src-tauri/target/*/release/bundle/**
+            src-tauri/target/release/bundle/**
+          if-no-files-found: error
+
+  publish:
+    needs: [build, preflight]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bundles-*
+          merge-multiple: true
+          path: bundles
+
+      - name: List bundles (debug)
+        run: find bundles -type f | sort
+
+      - name: Generate latest.json
+        # 版本号直接复用 preflight 的 outputs（单一事实源），不再本地重推
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BASE_URL: https://pkg.zhubaoduo.com/v${{ needs.preflight.outputs.version }}
+        run: |
+          cd bundles
+          # 产物布局（targets "all" 全格式）：macOS → dmg×2 架构；Windows → nsis/*.exe + msi/*.msi；
+          # Linux → deb/*.deb + rpm/*.rpm + appimage/*.AppImage。七产物全上架，与门户七卡对齐
+          DMG_ARM=$(find . -path '*aarch64*' -name '*.dmg' | head -1)
+          DMG_X64=$(find . -path '*x64*' -name '*.dmg' | head -1)
+          # NSIS 的 exe 靠路径含 nsis 识别——但 publish 在 find+mv 展平【之后】才跑
+          # 生成逻辑时该前缀已不存在，改为按文件名特征匹配（tauri NSIS 安装器
+          # 固定 -setup.exe 后缀；msi 按扩展名全桶唯一，无歧义）
+          NSIS=$(find . -name '*-setup.exe' | head -1)
+          MSI=$(find . -name '*.msi' | head -1)
+          DEB=$(find . -name '*.deb' | head -1)
+          RPM=$(find . -name '*.rpm' | head -1)
+          APPIMAGE=$(find . -name '*.AppImage' | head -1)
+
+          # 任一产物缺失即失败（fail loud，不许半份清单上架）
+          for f in "$DMG_ARM" "$DMG_X64" "$NSIS" "$MSI" "$DEB" "$RPM" "$APPIMAGE"; do
+            [ -z "$f" ] && { echo "ERROR: bundle missing"; exit 1; }
+          done
+
+          url() { echo "$BASE_URL/$(basename "$1")"; }
+          sha() { sha256sum "$1" | cut -d' ' -f1; }
+
+          # jq 原生构建对象（避免手工拼 JSON 片段）
+          jq -n --arg v "$VERSION" \
+            --arg arm "$(url "$DMG_ARM")"     --arg armSha "$(sha "$DMG_ARM")" \
+            --arg x64 "$(url "$DMG_X64")"     --arg x64Sha "$(sha "$DMG_X64")" \
+            --arg nsis "$(url "$NSIS")"       --arg nsisSha "$(sha "$NSIS")" \
+            --arg msi "$(url "$MSI")"         --arg msiSha "$(sha "$MSI")" \
+            --arg deb "$(url "$DEB")"         --arg debSha "$(sha "$DEB")" \
+            --arg rpm "$(url "$RPM")"         --arg rpmSha "$(sha "$RPM")" \
+            --arg appimage "$(url "$APPIMAGE")" --arg appimageSha "$(sha "$APPIMAGE")" \
+            '{
+              version: $v,
+              publishedAt: (now | todateiso8601),
+              platforms: {
+                "darwin-aarch64":     {url: $arm,      sha256: $armSha},
+                "darwin-x86_64":      {url: $x64,      sha256: $x64Sha},
+                "windows-x86_64":     {url: $nsis,     sha256: $nsisSha},
+                "windows-x86_64-msi": {url: $msi,      sha256: $msiSha},
+                "linux-x86_64-deb":   {url: $deb,      sha256: $debSha},
+                "linux-x86_64-rpm":   {url: $rpm,      sha256: $rpmSha},
+                "linux-x86_64-appimage": {url: $appimage, sha256: $appimageSha}
+              }
+            }' > latest.json
+          cat latest.json
+
+      - name: Upload installers to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          cd bundles
+          # 先把散在各 artifact 目录下的安装器集中到 bundles/ 根，再整体平铺上传。
+          # 不能直接 aws s3 cp --recursive + exclude/include：S3 的 cp 保留源相对
+          # 路径（aarch64-apple-darwin/release/bundle/dmg/x.dmg），include 只是
+          # 过滤不改 key 落点（v0.1.0 首发实锤——产物仍带目录前缀，清单 URL 404）
+          find . -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' \
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec mv {} . \;
+          ls -la
+          aws s3 cp . "s3://$BUCKET/v$VERSION/" \
+            --recursive --exclude "*" \
+            --include "*.dmg" --include "*.exe" --include "*.msi" \
+            --include "*.deb" --include "*.rpm" --include "*.AppImage" \
+            --endpoint-url "$ENDPOINT" --cache-control "public, max-age=31536000, immutable"
+
+      - name: Upload latest.json to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          aws s3api put-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
+            --key latest.json --body bundles/latest.json \
+            --content-type "application/json" --cache-control "no-cache"

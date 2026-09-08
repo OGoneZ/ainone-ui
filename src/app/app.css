@@ -25,36 +25,8 @@
   font-size: 0.9em;
 }
 
-/* —— 顶栏工具行 —— */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.toolbar label {
-  font-size: 0.9em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toolbar .theme-select {
-  font-size: 0.85em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* P22 右上角按钮组：打赏入口推到右侧（与设置并排，设置在其左） */
-.toolbar .donate-btn {
-  margin-left: auto;
-}
-
-.toolbar .settings-btn {
-  margin-left: 0;
-}
+/* P26 R1：顶栏工具行删除——主题样式随迁设置弹窗（.settings-theme-row），
+   打赏/设置样式见 .sidebar-footer-item；.hint 上方 margin 由工作区行距承担 */
 
 select {
   font-family: inherit;
@@ -77,11 +49,23 @@ select {
   width: 240px; /* F-21-6：运行时被 App.tsx inline width 覆盖（拖宽持久化值） */
   position: relative; /* 拖宽把手定位锚 */
   flex-shrink: 0;
-  overflow-y: auto;
+  /* P26 R4：改 flex 列容器——.sidebar-scroll 承担滚动（原整体 overflow-y:auto 上移），
+     footer 固定底部不随列表滚；aside 自身不再滚动（AC-R4-2） */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--bg-3);
   border-radius: var(--radius-sm);
   padding: 10px;
   background: var(--bg-1);
+}
+
+/* P26 R4：会话列表滚动区（高度让位给 footer，内容溢出时内部滚动） */
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .sidebar-head {
@@ -127,6 +111,9 @@ select {
   cursor: col-resize;
   z-index: 1;
   border-radius: 2px;
+  /* p22f：防浏览器手势判定分流（flexlayout splitter 同款，combined.css:682）——
+     touch-action:auto 时拖拽起步可能被原生平移/拖选手势接管吞掉后续事件流 */
+  touch-action: none;
 }
 .sidebar-resize-handle:hover,
 .sidebar-resize-handle:active {
@@ -147,6 +134,51 @@ select {
   align-items: center;
   gap: 8px;
   padding: 6px 0;
+}
+
+/* P26 R4 侧栏底部动作区：上打赏作者、下设置（展开态带文字，折叠态仅图标） */
+.sidebar-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* P26 微调：与列表区之间留 8px 空隙（两个区域的视觉隔断，分隔线不再贴身） */
+  margin: 8px -10px -10px;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--bg-3);
+}
+
+.sidebar-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  font-family: inherit;
+  text-align: left;
+}
+
+.sidebar-footer-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-collapsed .sidebar-footer {
+  margin: auto -6px -6px; /* 折叠态 padding 6px 0，抵消后通到边缘；auto 顶推贴底自带空隙 */
+  padding: 6px 0 4px;
+  border-top: 1px solid var(--bg-3);
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-collapsed .sidebar-footer-item {
+  padding: 4px;
+  justify-content: center;
 }
 
 /* —— 工作区分组 —— */
@@ -346,6 +378,237 @@ select {
   min-height: 0;
 }
 
+/* —— 欢迎页（空态）：无任何 tab 时铺满 layout-host ——
+ * 类名用 welcome-empty 而非 .welcome：chat/Welcome.tsx（会话内欢迎页）已占用
+ * .welcome，两处共名会互相污染样式（空态页的 pointer-events:none 曾压死
+ * 会话内建议 prompt 的点击）。 */
+.welcome-empty {
+  position: absolute;
+  inset: 0;
+  /* 必须显式提层：.flexlayout__layout 同为 absolute 且带不透明背景
+   * （--flexlayout-color-background=--bg-base），DOM 顺序又在 Welcome 之后，
+   * 默认绘制顺序会把 Welcome 整个盖住（实测「欢迎页不显示」根因）。
+   * z-index:1 低于聚焦光晕(11)/浮层(20+)，不干扰正常层级阶梯。
+   * pointer-events 放行：空态下侧栏拖 session 落入主区开第一个 tab
+   * （F-15-3）仍由底层 flexlayout 接收 drop。 */
+  z-index: 1;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: var(--bg-1);
+  user-select: none;
+}
+
+.welcome-headline {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.welcome-question {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+/* logo + 品牌字一行排布 */
+.welcome-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.welcome-brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.welcome-brand-name {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.welcome-brand-sub {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.welcome-hints {
+  align-items: flex-start;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.welcome-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.welcome-hint kbd {
+  padding: 2px 8px;
+  border: 1px solid var(--bg-3);
+  border-radius: 5px;
+  background: var(--bg-2);
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+/* —— P30 欢迎页动效：logo 悬浮呼吸 + 橙格扫视眨眼 + 气泡尾摆 + 宣传语打字机光标 ——
+ * 图形 path 不动，只挂 transform/opacity/fill 动画；节奏刻意错开（呼吸 4.4s /
+ * 扫视 8.6s / 尾摆 3.4s）避免整体机械感。
+ * 灵动感参照动画十二法则（社区通识）：
+ *  - 移动为主、压扁为辅：整体平移扛「看」的语义，斜眼 squash 只做次信号；
+ *  - 平移与压缩必须同向叠加（挤过去），不能反向补偿——反向补偿会吃掉
+ *    净位移，实测读作「原地哆嗦、两边收缩」（两轮翻车根因）；
+ *  - 眨眼与扫视相位锁定（8.6 = 2 × 4.3）：眨眼只落在注视停留段，
+ *    绝不砸在弹射/压扁半路上（实测随机相位会撞出双重形变的怪异感）；
+ *  - 换向弹射 + overshoot 回弹，注视期轻微游移；
+ *  - 身体跟随用呼吸（缩放）替代僵硬的左右倾。
+ * 打字机 JS 侧在 useHeadlineTypewriter（打完停住），光标闪烁交给 CSS。 */
+.welcome-logo {
+  /* 悬浮叠加缓慢呼吸（scale 1~1.012）：像在轻轻吐纳，替代原先机械的 ±2° 倾斜 */
+  animation: welcome-logo-float 4.4s ease-in-out infinite,
+    welcome-logo-breathe 4.4s ease-in-out infinite;
+}
+
+/* —— 深浅色自适应（社区通识：单色标志用 currentColor/令牌随主题换色，
+ * 而非两套图）——三个「墨色」窗口 fill 走 --text-primary：浅色 #0f0f0f、
+ * 深色 #f6f6f6，深色下与背景拉开对比；橙眼/双层投影是品牌色/中性米灰，
+ * 两种主题下都成立，保持不动。SVG fill 属性优先级低于 CSS 规则，
+ * 故 CSS 换色不需要动 JSX 里的 fallback fill（无 CSS 时仍回退 #141414）。 */
+.welcome-logo-ink {
+  fill: var(--text-primary);
+}
+
+@keyframes welcome-logo-breathe {
+  0%, 100% { scale: 1; }
+  50% { scale: 1.012; }
+}
+.welcome-logo-eye {
+  /* 扫视（平移 + 斜眼 squash）挂在包裹 <g> 上——path 自带 translate(256,112)
+   * transform，动画直接挂 path 会覆盖坐标平移（实测「橙格跑到左边」根因）。
+   * g 的坐标系即 viewBox 原坐标系，橙格几何范围 256~398 x 112~232 → 中心 327,172 */
+  transform-origin: 327px 172px;
+  transform-box: view-box;
+  animation: welcome-logo-look 8.6s ease-in-out infinite;
+}
+
+/* 眨眼（scaleY 压扁）挂内层 .welcome-logo-lid——与扫视分离成两条时间线。
+ * 周期 4.3s = 扫视 8.6s 的一半：眨眼相位与扫视**锁定**在注视段
+ * （扫视 37%~46% 回中停留 ↔ 眨眼 74%~92% 闭合弹回；扫视 87%~100% 尾段
+ * ↔ 眨眼 0%~22% 又一次），绝不砸在弹射/形变半路上——上一版互质随机
+ * 相位实测会撞出「形变进行到一半又叠一次闭合」的怪异双重形变。 */
+.welcome-logo-lid {
+  transform-origin: 327px 172px;
+  transform-box: view-box;
+  animation: welcome-logo-blink 4.3s ease-in-out infinite;
+}
+
+/* 扫视循环（8.6s）：大步幅平移（±26px）+ 斜眼 squash。
+ * 关键教训（两轮实测）：平移与压缩必须**同向叠加**——看左时 translate
+ * -26px、scaleX 0.76 挤过去，两侧收缩的同时整体确实「挪走」了；此前
+ * 两版把 translate 反向来补偿压缩（+5px/+7px），净位移被吃掉，观感是
+ * 「原地哆嗦、两边收缩、挪了一点点」。
+ * 现在看左：左缘 256-26-17≈213、右缘 398-26-17≈355（整体左探 ~43px，
+ * 同时变窄 34px）；斜眼感来自「朝向侧探出 + 收窄」，不再追求单侧钉住。
+ * 换向弹射 + overshoot（先冲 0.68 / ±30px 再回落），注视期游移 ±1px。 */
+@keyframes welcome-logo-look {
+  /* 看左：快速弹射（平移与压缩同向，整体挤过去） */
+  0% { transform: translate(0, 0) scale(1, 1); }
+  4% { transform: translate(-10px, 0) scale(0.94, 1); }
+  8% { transform: translate(-30px, 0) scale(0.68, 1.02); }
+  13% { transform: translate(-26px, 0) scale(0.76, 1.03); }
+  /* 注视左：斜眼保持 + 轻微游移 */
+  22% { transform: translate(-26px, 0) scale(0.76, 1.03); }
+  26% { transform: translate(-25px, 0.6px) scale(0.78, 1); }
+  /* 回中：恢复方眼 */
+  32% { transform: translate(2px, 0) scale(1.01, 1); }
+  37% { transform: translate(0, 0) scale(1, 1); }
+  46% { transform: translate(0, 0) scale(1, 1); }
+  /* 看右：平移与压缩同向（挤过去） */
+  50% { transform: translate(10px, 0) scale(0.94, 1); }
+  54% { transform: translate(30px, 0) scale(0.68, 1.02); }
+  58% { transform: translate(26px, 0) scale(0.76, 1.03); }
+  /* 注视右：斜眼保持 + 轻微游移 */
+  68% { transform: translate(26px, 0) scale(0.76, 1.03); }
+  72% { transform: translate(25px, -0.6px) scale(0.78, 1); }
+  /* 回中 + 余韵微晃 */
+  78% { transform: translate(-2px, 0) scale(1.01, 1); }
+  83% { transform: translate(-0.5px, 0) scale(1, 1); }
+  87% { transform: translate(0, 0) scale(1, 1); }
+  100% { transform: translate(0, 0) scale(1, 1); }
+}
+
+/* 眨眼循环（4.3s，= 扫视半周期）：微眯预告 → 闭合 → 快速弹回 → 过开回落。
+ * 横向 1.03 微鼓是 squash-and-stretch（体积守恒），比单段压扁更有弹性。 */
+@keyframes welcome-logo-blink {
+  0%, 74% { transform: scale(1, 1); }
+  80% { transform: scale(1.01, 0.85); }
+  86% { transform: scale(1.03, 0.08); }
+  92% { transform: scale(1.02, 1.07); }
+  97% { transform: scale(1, 1); }
+  100% { transform: scale(1, 1); }
+}
+
+.welcome-logo-tail {
+  transform-origin: 175px 355px;
+  animation: welcome-logo-tail 3.4s ease-in-out infinite;
+}
+
+@keyframes welcome-logo-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -4px; }
+}
+
+@keyframes welcome-logo-tail {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-4deg); }
+}
+
+.welcome-headline-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.12em;
+  background: var(--text-primary);
+  animation: welcome-cursor-blink 1s step-end infinite;
+}
+
+@keyframes welcome-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-logo,
+  .welcome-logo-eye,
+  .welcome-logo-lid,
+  .welcome-logo-tail,
+  .welcome-headline-cursor {
+    animation: none;
+  }
+  /* 光标静置时藏掉：宣传语经 hook 降级直接显全文，无打字过程 */
+  .welcome-headline-cursor {
+    display: none;
+  }
+}
+
 /* —— 终端面板（P23）：xterm 容器 + 退出状态条 ——
  * .terminal-host 填满 .panel 剩余高度；xterm 自带 viewport 滚动，
  * 容器不开 overflow 防滚动条双吃。padding 让终端内容与窗格边框留呼吸位。 */
@@ -420,38 +683,60 @@ textarea {
   background-color: var(--bg-1);
 }
 
+/* —— P30 滑动开关（[role=switch]，radix Switch）——
+ * 放在 unlayered 层全权定义外观：.adapter-row button 等容器重置规则同为
+ * unlayered，恒胜 Tailwind @layer utilities 的颜色类（data-[state]:bg-primary
+ * 等）——第一版只在 utilities 层上色，轨道被容器重置刷成白底、滑块白上白
+ * 不可见（实测缺陷）。外观（含 thumb 的 data-state）全部由本块驱动，彻底
+ * 免疫容器层叠；色值走语义变量（--primary 品牌蓝 / --bg-3 关态灰）。 */
+button[role="switch"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  background-color: var(--bg-3);
+  cursor: pointer;
+  transition: background-color var(--motion-default, 200ms) var(--ease-out-soft, ease-out);
+}
+
+button[role="switch"][data-state="checked"] {
+  background-color: var(--primary);
+}
+
+button[role="switch"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+button[role="switch"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button[role="switch"] > [data-slot="switch-thumb"] {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--bg-1);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  transform: translateX(2px);
+  transition: transform var(--motion-default, 200ms) var(--ease-out-soft, ease-out);
+}
+
+button[role="switch"][data-state="checked"] > [data-slot="switch-thumb"] {
+  transform: translateX(22px);
+}
+
 .modal-actions button:hover:not(:disabled),
 .adapter-row button:hover:not(:disabled),
 .ns-new-ws:hover:not(:disabled) {
   border-color: var(--primary);
-}
-
-/* P23 F-23-1：新建弹层顶部的「打开终端」快捷卡 */
-.ns-terminal-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0.6em 0.9em;
-  border: 1px solid var(--bg-3);
-  border-radius: var(--radius-sm);
-  background: var(--bg-1);
-  color: var(--text-primary);
-  text-align: left;
-}
-
-.ns-terminal-card:hover {
-  border-color: var(--primary);
-}
-
-.ns-terminal-card span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ns-terminal-card small {
-  color: var(--text-secondary);
-  font-weight: 400;
 }
 
 textarea {
@@ -477,7 +762,22 @@ button:disabled {
   font-size: 0.9em;
 }
 
-/* 新建会话弹层：选中未安装 harness 时的原因提示行 */
+/* 新建会话弹层：harness 状态提示行（P28：installable=中性提示 / absent=bad 红） */
+.ns-hint {
+  margin: 0;
+  font-size: 0.82em;
+  color: var(--text-secondary);
+}
+
+/* P28：懒装桥安装进度尾迹（安装器输出最后几行） */
+.ns-install-tail {
+  margin-top: 4px;
+  max-height: 6em;
+  overflow-y: auto;
+  font-size: 0.78em;
+  color: var(--text-secondary);
+}
+
 .ns-hint.bad {
   margin: 0;
   font-size: 0.82em;
@@ -509,6 +809,40 @@ button:disabled {
   align-self: flex-start;
 }
 
+/* —— P25 新建会话弹层 cmdk 列表 —— */
+.ns-command-list {
+  max-height: 300px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius-sm);
+}
+
+.ns-item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ns-item-note {
+  font-size: 0.78em;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.ns-item-note.bad {
+  color: var(--danger, #dc2626);
+}
+
+/* 选中项的 ✓ 标记（与 aria-selected/cmdk 高亮区分：前者=业务选中，后者=键盘焦点） */
+.ns-item-check {
+  margin-left: auto;
+  color: var(--primary);
+  font-size: 0.85em;
+}
+
 /* —— 设置弹层（外壳已迁 shadcn Dialog，此处仅表单布局）—— */
 .modal-error {
   color: var(--danger);
@@ -536,6 +870,12 @@ button:disabled {
   padding-right: 4px;
 }
 
+/* 设置弹窗加宽（tailwind v4 中 sm:max-w-lg 会覆盖无变体 arbitrary 类，
+   宽度上限走 CSS 专规则而非 max-w-[860px]） */
+.settings-modal {
+  max-width: min(860px, calc(100vw - 2rem)) !important;
+}
+
 .settings-section {
   display: flex;
   flex-direction: column;
@@ -548,6 +888,19 @@ button:disabled {
   color: var(--text-secondary);
   border-bottom: 1px solid var(--bg-3);
   padding-bottom: 6px;
+}
+
+/* P26 R3 外观分区：主题行（label + select 两端对齐） */
+.settings-theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9em;
+}
+
+.settings-theme-row select {
+  font-size: 0.9em;
 }
 
 /* 分区内的一张配置卡（快问 / 语音服务） */
@@ -647,6 +1000,105 @@ button:disabled {
   border: 1px solid var(--bg-3);
   border-radius: var(--radius-sm);
   padding: 10px;
+}
+
+/* P29 卡片头：logo 色点 + 名称 + 状态徽标 + 操作按钮（单行，两端对齐） */
+.adapter-card-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.adapter-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.92em;
+}
+
+.adapter-logo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  flex: none;
+}
+
+.adapter-card-status {
+  font-size: 0.78em;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.adapter-card-status.ok {
+  color: var(--success);
+}
+
+/* installable / cli_installable：警告色（可一键补齐，非错误） */
+.adapter-card-status.warn {
+  color: #b45309;
+}
+
+.adapter-card-status.bad {
+  color: var(--danger);
+}
+
+/* P29 配置模型表单（卡片内联展开区） */
+.adapter-cfg {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px dashed var(--bg-3);
+  padding-top: 8px;
+}
+
+.adapter-cfg-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 模型名探测入口：伪装成输入框的按钮，显示当前生效模型（回显），点击开探测面板 */
+.adapter-cfg-model {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: inherit;
+  border: 1px solid var(--bg-3);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.adapter-cfg-model:hover {
+  border-color: var(--accent, #7c9cff);
+}
+
+.adapter-cfg-model .cfg-model-empty {
+  color: var(--text-secondary);
+}
+
+/* P29 「更多服务」折叠开关行 */
+.settings-more-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.settings-more-toggle:hover {
+  color: var(--text-primary);
 }
 
 /* 卡片式适配器行的脚部：状态 + 操作按钮（两端对齐） */
@@ -805,4 +1257,117 @@ button:not(:disabled):active {
 
 .usage-bar [data-slot="progress-indicator"] {
   background: var(--usage-color, var(--primary));
+}
+
+/* —— P25 快捷键帮助弹窗 —— */
+/* 宽度上限写 CSS 专规则（tailwind v4 中 sm:max-w-lg 变体规则排在无变体 arbitrary 类之后，
+   max-w-[920px] 会被覆盖成 512px）；容器查询：弹窗宽度足够时按分组拆两列，窄视口回退单列 */
+.shortcuts-modal {
+  container: shortcuts-modal / inline-size;
+  max-width: min(920px, calc(100vw - 2rem)) !important;
+}
+
+.shortcuts-modal .shortcuts-list {
+  max-height: 66vh;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@container shortcuts-modal (min-width: 860px) {
+  .shortcuts-modal .shortcuts-list {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 28px;
+  }
+}
+
+/* 非 shortcuts 弹窗（若有复用）保持原 flex 单列语义 */
+.shortcuts-list {
+  max-height: 55vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.shortcut-group-title {
+  margin: 0 0 4px;
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--bg-3);
+}
+
+.shortcut-row[data-recording="true"] {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+}
+
+.shortcut-label {
+  flex: 1;
+  font-size: 0.9em;
+}
+
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcut-keys kbd {
+  font-family: inherit;
+  font-size: 0.78em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-primary);
+}
+
+.shortcut-custom {
+  font-size: 0.72em;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 2px;
+}
+
+.shortcut-recording {
+  font-size: 0.82em;
+  color: var(--primary);
+}
+
+.shortcut-rebind {
+  border: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: var(--text-secondary);
+  font-size: 0.78em;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+
+.shortcut-rebind:hover {
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.shortcuts-actions {
+  margin-top: 8px;
+}
+
+.shortcut-note {
+  margin: 0;
+  font-size: 0.78em;
+  color: var(--text-secondary);
 }

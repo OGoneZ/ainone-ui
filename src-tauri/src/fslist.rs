@@ -34,10 +34,8 @@ pub(crate) fn list_dir_sorted(path: &str) -> Result<Vec<DirEntry>, String> {
             }
         };
         let name = entry.file_name().to_string_lossy().into_owned();
-        // 跳过隐藏文件（.开头，如 .git/.DS_Store）；排除清单在更上层复用
-        if name.starts_with('.') {
-            continue;
-        }
+        // P29：点开头条目（.github/.env/.gitignore 等）照常返回——VS Code 式显示；
+        // 隐藏/排除权统一在前端排除清单（.git/node_modules/.DS_Store 等）
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         entries.push(DirEntry { name, is_dir });
     }
@@ -97,6 +95,27 @@ mod tests {
         let f = format!("{d}/f.txt");
         fs::write(&f, "x").unwrap();
         assert!(list_dir_sorted(&f).is_err());
+        fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn list_dir_keeps_dot_entries() {
+        // P29 AC-R1-1：点开头文件/文件夹不再被后端吞掉（VS Code 式显示）
+        let d = tmpdir("dot");
+        fs::create_dir(format!("{d}/.github")).unwrap();
+        fs::write(format!("{d}/.env"), "k=v").unwrap();
+        fs::write(format!("{d}/.gitignore"), "dist").unwrap();
+        fs::write(format!("{d}/.DS_Store"), "junk").unwrap();
+
+        let entries = list_dir_sorted(&d).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&".github"));
+        assert!(names.contains(&".env"));
+        assert!(names.contains(&".gitignore"));
+        assert!(names.contains(&".DS_Store"));
+        // .github 是目录且目录优先
+        let gh = entries.iter().find(|e| e.name == ".github").unwrap();
+        assert!(gh.is_dir);
         fs::remove_dir_all(d).ok();
     }
 }

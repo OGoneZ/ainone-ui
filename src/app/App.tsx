@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layout, Model, Actions, DockLocation, type TabNode, type Node } from "flexlayout-react";
 import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
-import { sessionsList, sessionsUpsert, sessionsRemove, type SessionEntry } from "@/ipc/sessions";
+import { sessionsList, sessionsDeletedList, sessionsUpsert, sessionsRemove, sessionsRestore, type SessionEntry } from "@/ipc/sessions";
 import { workspacesList, workspacesUpsert, workspacesRemove, type Workspace } from "@/ipc/workspaces";
 import { ChatPanel } from "@/chat/ChatPanel";
 import { TerminalPanel } from "@/terminal/TerminalPanel";
@@ -13,8 +13,10 @@ import { GlobalSearchDialog } from "@/app/GlobalSearchDialog";
 import { SettingsModal } from "@/app/modals/SettingsModal";
 import { NewSessionModal } from "@/app/modals/NewSessionModal";
 import { DonateModal } from "@/app/modals/DonateModal";
+import { ShortcutsModal } from "@/app/modals/ShortcutsModal";
 import { EmptyState } from "@/components/EmptyState";
-import { RightRail } from "@/sidebar/RightRail";
+import { Welcome } from "@/app/components/Welcome";
+import { RightRail, loadRailState, saveRailState, type RailTab } from "@/sidebar/RightRail";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
   WorkspaceIcon,
@@ -23,9 +25,13 @@ import {
   PlusIcon,
   SettingsIcon,
   DonateIcon,
+  HelpIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
   TerminalIcon,
+  NewTerminalIcon,
+  DeleteIcon,
+  RestoreIcon,
 } from "@/components/ui/icons";
 import {
   ContextMenu,
@@ -34,6 +40,9 @@ import {
   ContextMenuItem,
 } from "@/components/ui/context-menu";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { resolveHistoryOpen, TERMINAL_ADAPTER_ID, type Tab } from "@/app/logic/tabs";
 import {
   setExternalDragPayload,
@@ -45,7 +54,9 @@ import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
-import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, type TabsetRectLike } from "@/app/logic/layout";
+import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, tabCycleShortcut, nextTabIndex, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
+import { matchShortcut } from "@/app/logic/keymap";
+import { useKeymapStore } from "@/store/keymapStore";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { clampWidth, sidebarMaxWidth } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
@@ -101,6 +112,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // P22 打赏作者弹层
   const [donateOpen, setDonateOpen] = useState(false);
+  // P25 快捷键帮助弹层
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // 新建会话弹层：open + 预填工作区（右键新建时传入）
   const [newSession, setNewSession] = useState<{ open: boolean; workspaceId?: string | null }>({ open: false });
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -108,6 +121,13 @@ function App() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("ainone-theme") ?? "auto");
   // F-15-7 左侧栏开合（持久化 localStorage，RightRail 同款交互）
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem("ainone-sidebar-open") !== "0");
+  // P25 右栏开合 + tab：state 从 RightRail 提升到 App（Ctrl+K 可达），持久化 key 不变
+  const [railState, setRailState] = useState(() => loadRailState());
+  useEffect(() => {
+    saveRailState(railState);
+  }, [railState]);
+  // P29 R5：活跃会话句柄（ChatPanel 建链上抛 → RightRail → MetadataPanel 模型切换）
+  const [activeSession, setActiveSession] = useState<{ setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null>(null);
   // F-21-6 左侧栏宽度（拖宽把手，持久化；clamp 200~min(520,40vw)）
   const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-sidebar-width")) || 240, 200, sidebarMaxWidth()),
@@ -259,7 +279,10 @@ function App() {
    *  active prop（window 级事件按 active 实例路由），focus 落到该窗格 composer
    *  的 textarea（tab 面板 DOM id = `flexlayout-tab-<tabKey>`，flexlayout 约定）。
    *  focus 用重试式：首次激活长会话渲染可超过一帧，textarea 就绪即聚焦，
-   *  最多重试 ~0.5s。不用 rAF——窗口后台/完全遮挡时 WebKit 冻结 rAF（实测踩坑）。 */
+   *  最多重试 ~0.5s。不用 rAF——窗口后台/完全遮挡时 WebKit 冻结 rAF（实测踩坑）。
+   *  P30 R1：selectedIdx 三态语义——undefined/-1/越界 = 不改选中（保持目标窗格
+   *  屏幕显示的 tab，不调 selectTab）；有效 idx 才 selectTab。旧实现兜底 0，
+   *  导致切焦点/点 tab 条空白时目标窗格被强切到第一个 tab。 */
   function activateTabsetAndComposer(tabsetId: string, selectedIdx?: number) {
     const m = getModel();
     const target = m.getNodeById(tabsetId);
@@ -267,10 +290,11 @@ function App() {
     m.doAction(Actions.setActiveTabset(tabsetId));
     const sel = (target as unknown as { getChildren: () => { getId(): string }[] }).getChildren();
     let tabKey: string | undefined;
-    if (sel.length > 0) {
-      const idx = selectedIdx !== undefined && selectedIdx >= 0 && selectedIdx < sel.length ? selectedIdx : 0;
-      tabKey = sel[idx].getId();
+    if (selectedIdx !== undefined && selectedIdx >= 0 && selectedIdx < sel.length) {
+      tabKey = sel[selectedIdx].getId();
       m.doAction(Actions.selectTab(tabKey));
+    } else {
+      tabKey = (target as unknown as { getSelectedNode?: () => { getId(): string } | undefined }).getSelectedNode?.()?.getId();
     }
     syncFromModel();
     if (!tabKey) return;
@@ -289,8 +313,60 @@ function App() {
   }
 
   // 快捷键监听：仅在编辑器区（非输入框）响应分屏快捷键（AC-P10-8）
+  // P25：判定全部走键位表（keymapStore 覆盖 → 默认表），并新增 Ctrl+B/M/N/T 全局键。
+  const keymapOverrides = useKeymapStore((s) => s.overrides);
   useEffect(() => {
+    const kb = layoutBindings(keymapOverrides);
     function onKey(e: KeyboardEvent) {
+      // P25 全局四键：切左栏 / 切右栏 / 新建会话 / 新建终端。
+      // 组合键不产生字符输入，在可编辑控件内拦截无副作用（同分屏/关窗先例）。
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.toggle-sidebar", keymapOverrides)) {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+        return;
+      }
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.toggle-rightrail", keymapOverrides)) {
+        e.preventDefault();
+        setRailState((s) => ({ ...s, open: !s.open }));
+        return;
+      }
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.new-session", keymapOverrides)) {
+        e.preventDefault();
+        setNewSession({ open: true });
+        return;
+      }
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.new-terminal", keymapOverrides)) {
+        e.preventDefault();
+        newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd);
+        return;
+      }
+      // P26e：Ctrl+Shift+Space 临时全屏当前聚焦窗格（flexlayout maximizeToggle），
+      // 再按恢复原布局。模态浮层开着时事件 target 落在浮层内 → 不响应。
+      if (matchShortcut(e, useKeymapStore.getState().defs, "pane.temp-maximize", keymapOverrides)) {
+        const t = e.target as Element | null;
+        if (t?.closest?.("[role='dialog'], [cmdk-root]")) return;
+        const m = getModel();
+        const tabset = m.getActiveTabset();
+        if (!tabset) return;
+        e.preventDefault();
+        m.doAction(Actions.maximizeToggle(tabset.getId()));
+        return;
+      }
+      // P30 R2：Ctrl/Cmd+Tab 向后 / +Shift 向前，在当前聚焦窗格内循环切 tab。
+      // 纯函数判定 + 循环索引（layout.ts）；切到新 tab 后聚焦其输入框（activate
+      // 复用 selectedIdx>=0 通道显式 selectTab）。单 tab/空窗格直接不动作。
+      const cycle = tabCycleShortcut(e);
+      if (cycle) {
+        const m = getModel();
+        const tabset = m.getActiveTabset();
+        if (!tabset) return;
+        const children = (tabset as unknown as { getChildren?: () => { getId(): string }[] }).getChildren?.() ?? [];
+        const next = nextTabIndex(children.length, tabset.getSelected() ?? -1, cycle);
+        if (next === null) return;
+        e.preventDefault();
+        activateTabsetAndComposer(tabset.getId(), next);
+        return;
+      }
       // p20n：Ctrl/Cmd+D = 关闭当前窗格的当前 tab（原分屏快捷键让位，见 layout.ts）
       // p20p：不再 inEditable 拦截——终端窗格的 xterm helper textarea 恒占焦点，
       // 拦截导致终端窗格内分屏快捷键「永不生效」（上下分屏从未生效的根因）；
@@ -341,14 +417,14 @@ function App() {
         setTimeout(retarget, 80);
         return;
       }
-      const axis = splitShortcut(e);
+      const axis = splitShortcut(e, kb);
       if (!axis) return;
       e.preventDefault();
       splitCurrent(axis);
     }    // P20 窗格焦点切换：Cmd/Ctrl+方向键在分屏窗格间移动（WARP/VS Code 语义）。
     // 输入框内也响应——用户在输入框聊天时依然可以用方向键切窗格。
     function onFocusMove(e: KeyboardEvent) {
-      const dir = focusArrowShortcut(e);
+      const dir = focusArrowShortcut(e, kb);
       if (!dir) return;
       const m = getModel();
       const curTabset = m.getActiveTabset();
@@ -382,7 +458,9 @@ function App() {
       const targetId = pickFocusTarget(curR, rects, dir);
       if (!targetId) return;
       e.preventDefault();
-      activateTabsetAndComposer(targetId, curTabset.getSelected() ?? 0);
+      // P30 R1：不传 idx——目标窗格保持它当前显示的 tab（旧实现传源 tabset 的
+      // selected idx，selectTab 错位切走目标窗格显示中的 tab = 跳第一个 tab 的根因）
+      activateTabsetAndComposer(targetId);
     }
     // F-11-2 全局搜索：Ctrl/Cmd+F（DEC-26；会话内搜索已改绑 Ctrl+Shift+F）
     const onGlobalSearch = (e: KeyboardEvent) => {
@@ -447,7 +525,8 @@ function App() {
       // 的 tab），而不是该 tabset 的当前选中 tab——tabset 内叠多个 tab 时（如右侧
       // 窗格 = 终端 + chat 两个 tab，当前显示 chat），按旧逻辑 selectTab(选中项)
       // 会把 tabset 切回它的选中 tab（终端）= 用户看到的「点 session 自动跳到终端」。
-      // 通道 A（tab 条/空窗格）无面板概念，维持 selectedIdx 语义。
+      // 通道 A（tab 条/空窗格）无面板概念：不传 idx = 不改选中（P30 R1 三态语义），
+      // 屏幕显示什么就保持什么；通道 B 的 clickedIdx 命中才显式 selectTab。
       const clickedTabKey = tab?.id.startsWith("flexlayout-tab-") ? tab.id.slice("flexlayout-tab-".length) : undefined;
       let clickedIdx = -1;
       if (clickedTabKey) {
@@ -475,14 +554,58 @@ function App() {
       window.removeEventListener("keydown", onFocusMove);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKey, activeTab, activeAdapter]);
+  }, [activeKey, activeTab, activeAdapter, keymapOverrides]);
 
   // flexlayout tab 内容工厂：tab.id = tabKey，按 component 分派 ChatPanel / TerminalPanel（P23）
+  /** P26f：关掉指定 tab 并做焦点移交（p20r 逻辑抽出复用——Ctrl+D 关窗与
+   *  终端正常退出自动关窗共用一条链路，含「最近存活窗格」焦点移交） */
+  function closeTabAndRetarget(tabKeyToClose: string) {
+    const m = getModel();
+    const node = m.getNodeById(tabKeyToClose);
+    if (!node) return;
+    // 先记下被删 tab 所在 tabset 的屏幕位置，删掉后在该位置附近找最近的其他
+    // tabset（WARP/编辑器关闭后焦点移交的惯例）
+    const parent = node.getParent();
+    const closingTabset = parent && parent.getType() === "tabset" ? parent : null;
+    const closingNode = closingTabset as unknown as
+      | { getRect?: () => { x: number; y: number; width: number; height: number } }
+      | null;
+    const rect = closingNode?.getRect?.();
+    m.doAction(Actions.deleteTab(tabKeyToClose));
+    // doAction 同步更新 model；等 React 渲染出新布局后再 activate（textarea 才存在）
+    const retarget = () => {
+      // 删除后 activeTabset 仍在（同 tabset 还有别的 tab）→ 只需聚焦它；
+      // tabset 整个消失（删的是唯一 tab）→ 按屏幕距离找最近存活者
+      const m1 = getModel();
+      let nextId = m1.getActiveTabset()?.getId();
+      if (!nextId && rect && (rect.width > 0 || rect.height > 0)) {
+        let bestId: string | undefined;
+        let bestDist = Infinity;
+        m1.visitNodes((n: unknown) => {
+          const n2 = n as { getType(): string; getId(): string; getRect?: () => { x: number; y: number; width: number; height: number } };
+          if (n2.getType() !== "tabset") return;
+          const r = n2.getRect?.();
+          if (!r || r.width === 0) return;
+          const dx = Math.max(0, Math.max(rect.x - (r.x + r.width), r.x - (rect.x + rect.width)));
+          const dy = Math.max(0, Math.max(rect.y - (r.y + r.height), r.y - (rect.y + rect.height)));
+          const d = dx * dx + dy * dy;
+          if (d < bestDist) {
+            bestDist = d;
+            bestId = n2.getId();
+          }
+        });
+        nextId = bestId || undefined;
+      }
+      if (nextId) activateTabsetAndComposer(nextId);
+    };
+    setTimeout(retarget, 80);
+  }
+
   const factory = (node: TabNode) => {
     const t = tabs.find((x) => x.key === node.getId());
     if (!t) return null;
     if (t.kind === "terminal" || node.getComponent() === "terminal") {
-      return <TerminalPanel key={t.key} tabKey={t.key} cwd={t.cwd} active={t.key === activeKey} />;
+      return <TerminalPanel key={t.key} tabKey={t.key} cwd={t.cwd} active={t.key === activeKey} onNormalExit={() => closeTabAndRetarget(t.key)} />;
     }
     const ad = adapters.find((a) => a.id === t.adapterId);
     if (!ad) return null;
@@ -498,6 +621,7 @@ function App() {
         onFork={(fromId, toId) => handleFork(fromId, toId, t.adapterId, t.workspaceId, t.cwd)}
         onForkNavigate={(toId) => handleForkNavigate(toId, t.adapterId, t.workspaceId, t.cwd)}
         onRewind={() => {}}
+        onActiveSession={t.key === activeKey ? setActiveSession : undefined}
       />
     );
   };
@@ -577,8 +701,8 @@ function App() {
     }
   }, [theme]);
 
-  function reloadAdapters() {
-    listAdapters().then(setAdapters);
+  async function reloadAdapters() {
+    setAdapters(await listAdapters());
   }
   function reloadHistory() {
     sessionsList().then(setHistory);
@@ -730,8 +854,44 @@ function App() {
     };
   }, []);
 
-  function deleteHistory(id: string) {
+  // P30 回收站：删除确认弹窗（deleted_at_ms 软删除 + 可恢复；「不再提示」持久化）
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; title: string } | null>(null);
+  const [recycleOpen, setRecycleOpen] = useState(false);
+  const [recycleItems, setRecycleItems] = useState<SessionEntry[]>([]);
+  const DELETE_SKIP_KEY = "ainone-delete-confirm-skip";
+
+  function deleteHistory(id: string, title: string) {
+    if (localStorage.getItem(DELETE_SKIP_KEY) === "1") {
+      // 用户选过「以后不再提示」→ 直接软删除
+      sessionsRemove(id).then(reloadHistory);
+      return;
+    }
+    setDeleteConfirm({ id, title });
+  }
+
+  function confirmDelete() {
+    if (!deleteConfirm) return;
+    const { id } = deleteConfirm;
+    setDeleteConfirm(null);
     sessionsRemove(id).then(reloadHistory);
+  }
+
+  function openRecycle() {
+    sessionsDeletedList()
+      .then((items) => {
+        setRecycleItems(items);
+        setRecycleOpen(true);
+      })
+      .catch(() => toast.error("读取回收站失败"));
+  }
+
+  function restoreFromRecycle(id: string) {
+    sessionsRestore(id)
+      .then(() => sessionsDeletedList().then(setRecycleItems))
+      .then(reloadHistory)
+      // 恢复成功即关弹窗：用户直接看到条目回到侧栏（弹窗开着会 aria-hidden 主内容）
+      .then(() => setRecycleOpen(false))
+      .catch(() => toast.error("恢复失败"));
   }
 
   function newTab(adapterId: string, workspaceId?: string | null, cwd?: string) {
@@ -892,44 +1052,36 @@ function App() {
     // 复用 Tailwind 工具类（原手写 .container 与 Tailwind 内置 container 工具类同名冲突，
     // 被其 max-width/display 覆盖导致根布局塌陷、窗口放大内容不跟随——bug 根因）
     <main className="flex h-full min-h-0 flex-col box-border p-4">
-      <div className="toolbar">
-        <button className="inline-flex items-center gap-1.5" onClick={() => setNewSession({ open: true })}>
-          <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          新建会话
-        </button>
-        {/* P23 F-23-1：新建终端——直接开一个本地 shell 终端 tab */}
-        <button
-          className="inline-flex items-center gap-1.5"
-          onClick={() => newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd)}
-        >
-          <TerminalIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          新建终端
-        </button>
-        {/* P22 打赏入口（右上角，设置左侧） */}
-        <button className="donate-btn inline-flex items-center gap-1.5" onClick={() => setDonateOpen(true)}>
-          <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          打赏作者
-        </button>
-        <button className="settings-btn inline-flex items-center gap-1.5" onClick={() => setSettingsOpen(true)}>
-          <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
-          设置
-        </button>
-        <label className="theme-select">
-          主题：
-          <select value={theme} onChange={(e) => setTheme(e.target.value)}>
-            <option value="auto">跟随系统</option>
-            <option value="light">浅色</option>
-            <option value="dark">深色</option>
-          </select>
-        </label>
-      </div>
+      {/* P26 R1：toolbar 整行移除——新建会话/终端入口在侧栏头部（R2），
+          快捷键/打赏/设置移侧栏底部 footer（R4 + p25g 收纳），主题移设置弹窗「外观」分区（R3） */}
 
       <div className="workspace">
         {sidebarOpen ? (
           <aside className="sidebar" style={{ width: sidebarWidth }}>
+            <div className="sidebar-scroll">
             <div className="sidebar-head">
               <h3>工作区</h3>
               <div className="sidebar-head-actions">
+                {/* P26 R2：三按钮终态——终端（SquareTerminal 复杂图标）/ 新建会话 / 收起。
+                    原 P23 简单 TerminalIcon 重复「新建终端」入口删除（AC-R2-3） */}
+                {/* P30 回收站入口：软删除的会话在此列出、可恢复 */}
+                <button
+                  className="add-ws"
+                  title="回收站"
+                  aria-label="回收站"
+                  data-testid="recycle-bin"
+                  onClick={openRecycle}
+                >
+                  <DeleteIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                </button>
+                <button
+                  className="add-ws"
+                  title="新建终端"
+                  aria-label="新建终端"
+                  onClick={() => newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd)}
+                >
+                  <NewTerminalIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                </button>
                 <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
                   <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
                 </button>
@@ -1041,7 +1193,7 @@ function App() {
                           className="history-del"
                           draggable={false}
                           aria-label="删除会话"
-                          onClick={() => deleteHistory(h.session_id)}
+                          onClick={() => deleteHistory(h.session_id, h.title)}
                         >
                           <CloseIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
                         </button>
@@ -1062,6 +1214,24 @@ function App() {
                 onAction={() => setNewSession({ open: true })}
               />
             )}
+            </div>
+            {/* P26 R4 侧栏底部动作区：上打赏作者、下设置（footer 固定底部不随列表滚动，
+                会话列表在 .sidebar-scroll 内滚动让位）；折叠态图标竖排见 sidebar-collapsed 分支 */}
+            <div className="sidebar-footer">
+              <button className="sidebar-footer-item" onClick={() => setDonateOpen(true)}>
+                <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                <span>打赏作者</span>
+              </button>
+              {/* P26：快捷键入口自 toolbar 收纳进 footer（p25g ShortcutsModal 行为不变） */}
+              <button className="sidebar-footer-item" onClick={() => setShortcutsOpen(true)}>
+                <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                <span>快捷键</span>
+              </button>
+              <button className="sidebar-footer-item" onClick={() => setSettingsOpen(true)}>
+                <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+                <span>设置</span>
+              </button>
+            </div>
             <SidebarResizeHandle
               edge="right"
               min={200}
@@ -1073,7 +1243,7 @@ function App() {
             />
           </aside>
         ) : (
-          // F-15-7 折叠态：细栏杆（展开 + 新建两个图标位）
+          // F-15-7 折叠态：细栏杆（展开 + 新建 + 打赏 + 设置 四图标竖排，P26 R4）
           <aside className="sidebar sidebar-collapsed">
             <button className="add-ws" title="展开侧栏" aria-label="展开侧栏" onClick={() => setSidebarOpen(true)}>
               <SidebarExpandIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
@@ -1081,12 +1251,26 @@ function App() {
             <button className="add-ws" title="新建工作区" aria-label="新建工作区" onClick={() => setNewSession({ open: true })}>
               <PlusIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
             </button>
+            <div className="sidebar-footer sidebar-footer-collapsed">
+              <button className="sidebar-footer-item" title="打赏作者" aria-label="打赏作者" onClick={() => setDonateOpen(true)}>
+                <DonateIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+              </button>
+              <button className="sidebar-footer-item" title="快捷键" aria-label="快捷键" onClick={() => setShortcutsOpen(true)}>
+                <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+              </button>
+              <button className="sidebar-footer-item" title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}>
+                <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+              </button>
+            </div>
           </aside>
         )}
 
         <section className="tabs-area">
           {/* F-10-3 flexlayout 分屏窗格：替换原 tabs-bar + tab-content 区域 */}
           <div className="layout-host" ref={layoutHostRef} data-dragging={false}>
+            {/* 欢迎页：无任何 tab（无 session / 无终端）时的空态。flexlayout
+                model 空布局只渲染度量节点，铺 Welcome 占满 host。 */}
+            {tabs.length === 0 && <Welcome />}
             <Layout
               model={getModel()}
               factory={factory}
@@ -1096,14 +1280,22 @@ function App() {
               onExternalDrag={handleExternalDrag}
             />
           </div>
-          {/* F-11-7 右侧侧边栏：元数据 / 文件 双 tab（替换原独立 MetadataPanel） */}
-          {activeAdapter && activeTab && (
+          {/* F-11-7 右侧侧边栏：元数据 / 文件 双 tab（替换原独立 MetadataPanel）。
+              P30：终端 tab（adapterId=terminal，不在 adapters 注册表）过去整栏消失；
+              终端有 cwd，文件树可用——挂载 Rail 并传入 terminal-only 信号（只显示文件 tab） */}
+          {activeTab && (activeAdapter || activeTab.kind === "terminal") && (
             <RightRail
               tabKey={activeTab.key}
               adapter={activeAdapter}
               sessionId={activeTab.sessionId ?? null}
               cwd={activeTab.cwd}
+              session={activeSession}
               messages={activeMessages}
+              terminalOnly={activeTab.kind === "terminal"}
+              open={railState.open}
+              tab={railState.tab}
+              onSwitchTab={(t: RailTab) => setRailState((s) => ({ ...s, tab: t, open: true }))}
+              onToggle={() => setRailState((s) => ({ ...s, open: !s.open }))}
             />
           )}
         </section>
@@ -1113,9 +1305,13 @@ function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={reloadAdapters}
+        theme={theme}
+        onThemeChange={setTheme}
       />
 
       <DonateModal open={donateOpen} onClose={() => setDonateOpen(false)} />
+
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       <NewSessionModal
         open={newSession.open}
@@ -1124,8 +1320,8 @@ function App() {
         presetWorkspaceId={newSession.workspaceId}
         onClose={() => setNewSession({ open: false })}
         onConfirm={confirmNewSession}
-        onOpenTerminal={newTerminalTab}
         onWorkspaceCreated={reloadWorkspaces}
+        onAdaptersRefresh={reloadAdapters}
       />
 
       {/* F-11-2 全局 session 搜索（Ctrl+F，悬浮中上） */}
@@ -1134,6 +1330,63 @@ function App() {
         onOpenChange={setGlobalSearchOpen}
         onPick={openFromHistory}
       />
+
+      {/* P30 删除确认弹窗：软删除可从回收站恢复；「不再提示」持久化 localStorage */}
+      <Dialog open={deleteConfirm !== null} onOpenChange={(o) => { if (!o) setDeleteConfirm(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>删除会话「{deleteConfirm?.title}」？</DialogTitle>
+          </DialogHeader>
+          <p className="perm-code">
+            会话将从侧栏移除，但记录不会丢失——以后可以从侧栏顶部的回收站恢复。
+          </p>
+          <DialogFooter className="items-center gap-2">
+            <label className="flex items-center gap-1.5 text-sm mr-auto cursor-pointer select-none">
+              <input
+                type="checkbox"
+                data-testid="delete-confirm-skip"
+                onChange={(e) => localStorage.setItem(DELETE_SKIP_KEY, e.target.checked ? "1" : "0")}
+              />
+              以后不再提示
+            </label>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>取消</Button>
+            <Button variant="destructive" onClick={confirmDelete} data-testid="delete-confirm-ok">删除</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* P30 回收站弹窗：软删除条目列表 + 恢复 */}
+      <Dialog open={recycleOpen} onOpenChange={setRecycleOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>回收站</DialogTitle>
+          </DialogHeader>
+          {recycleItems.length === 0 ? (
+            <p className="hint">回收站是空的。</p>
+          ) : (
+            <div className="ws-sessions" data-testid="recycle-list">
+              {recycleItems.map((h) => (
+                <div key={h.session_id} className="history-item">
+                  <SessionRowLeading
+                    adapter={adapterById.get(h.adapter_id)}
+                    st={"idle" as SessionStatus}
+                    isTerminal={h.kind === "terminal"}
+                  />
+                  <span className="history-open" title={h.session_id}>{h.title}</span>
+                  <button
+                    className="history-del"
+                    aria-label={`恢复会话 ${h.title}`}
+                    data-testid={`recycle-restore-${h.session_id}`}
+                    onClick={() => restoreFromRecycle(h.session_id)}
+                  >
+                    <RestoreIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* 全局 toast（sonner，右下 3s）：错误 / 复制成功提示（F-7-8） */}
       <Toaster

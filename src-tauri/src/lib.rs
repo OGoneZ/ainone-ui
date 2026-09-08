@@ -11,10 +11,14 @@ mod adapters;
 mod agent;
 mod asr;
 mod connector;
+mod embedded_runtime;
 mod env_path;
 mod fs;
 mod fslist;
 mod gitmeta;
+mod harness_config;
+mod harness_keys;
+mod harness_meta;
 mod harness_probe;
 mod quickask;
 mod sessions;
@@ -28,10 +32,10 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
-        // 内嵌终端 PTY（P23）：spawn/read/write/resize/kill/exitstatus/get_all_pids
-        // 由插件注册（plugin:pty|*），capability 放行 pty:default
-        .plugin(tauri_plugin_pty::init());
+        .plugin(tauri_plugin_dialog::init());
+    // 内嵌终端 PTY（P23，p23g 重构）：portable-pty + 自管读线程 + Channel 推送，
+    // 命令 terminal_spawn/write/resize/kill 由 terminal.rs 注册（不再用
+    // tauri-plugin-pty 的命令层——read 轮询持锁会饿死 pty 命令，P23-D1）。
     // 前端调试桥（P19c，仅 dev 且带 webdriver feature）：W3C WebDriver 服务内嵌
     // 在应用里，AI agent 可经 HTTP 直接驱动 WebView（执行 JS / 截图 / 查元素）。
     // dev：tauri.conf.json build.features 含 "webdriver"；打包用 tauri.dist.conf.json
@@ -58,6 +62,8 @@ pub fn run() {
             terminal::init_state(app);
             // 启动即后台抓取 login shell PATH（8s 超时，永不阻塞 UI）
             env_path::fetch_login_shell_path_async();
+            // P29：全局 AppHandle 存档——spawn 注入 codex keys env 等非命令上下文用
+            agent::store_app_handle(app.handle().clone());
             log::info!("ainone-ui 启动完成");
             Ok(())
         })
@@ -70,8 +76,16 @@ pub fn run() {
             adapters::adapter_available,
             adapters::adapter_status,
             adapters::default_cwd,
-            connector::connector_status,
-            connector::connector_install,
+            connector::bridge_install,
+            connector::cli_install,
+            embedded_runtime::runtime_diagnostics_cmd,
+            harness_config::harness_config_read,
+            harness_config::harness_config_save,
+            harness_config::permission_mode_read,
+            harness_config::permission_mode_save,
+            harness_meta::harness_meta,
+            harness_meta::harness_settings_write,
+            harness_meta::models_probe,
             agent::agent_spawn,
             agent::agent_stdin_write,
             agent::agent_kill,
@@ -80,6 +94,9 @@ pub fn run() {
             sessions::sessions_list,
             sessions::sessions_upsert,
             sessions::sessions_remove,
+            sessions::sessions_deleted_list,
+            sessions::sessions_restore,
+            sessions::sessions_purge,
             sessions::log_read,
             sessions::log_append,
             sessions::log_truncate,
@@ -96,14 +113,20 @@ pub fn run() {
             asr::asr_config_get,
             asr::asr_config_save,
             terminal::terminal_default_shell_with_path,
-            terminal::terminal_track,
-            terminal::terminal_untrack,
+            terminal::terminal_spawn,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_kill,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // 应用退出时清理所有自管子进程（harness agent + 终端 PTY）
-            agent::handle_run_event(app, event);
-            terminal::on_exit_cleanup(app);
+            // 应用退出时清理所有自管子进程（harness agent + 终端 PTY）。
+            // RunEvent 非 Copy，先判 Exit 再分派给两个 handler。
+            let is_exit = matches!(event, tauri::RunEvent::Exit);
+            if is_exit {
+                agent::on_exit_cleanup(app);
+                terminal::on_exit_cleanup(app);
+            }
         });
 }

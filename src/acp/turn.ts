@@ -51,7 +51,12 @@ export function applyEvent(
     }
     case "agent_thought": {
       const start = withStart.thoughtStart === 0 ? now() : withStart.thoughtStart;
-      return { ...withStart, thoughtStart: start, blocks: appendThought(withStart.blocks, e.text) };
+      // p22e：新 thought 段落 startTs（与 tool 同款，供活动组卡实时总耗时用）
+      return {
+        ...withStart,
+        thoughtStart: start,
+        blocks: withStart.thoughtStart === 0 ? appendThought(withStart.blocks, e.text, start) : appendThought(withStart.blocks, e.text),
+      };
     }
     case "tool_call": {
       const s = seal(withStart, now);

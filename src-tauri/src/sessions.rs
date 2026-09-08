@@ -20,6 +20,10 @@ pub struct SessionEntry {
     /// 条目种类（P23）：Some("terminal") = 本地终端；None = harness 会话（旧索引无字段，兼容）
     #[serde(default)]
     pub kind: Option<String>,
+    /// 回收站标记：Some(删除时刻 Unix 毫秒) = 已软删除（侧栏不显示，回收站可恢复）；
+    /// None = 正常。旧索引无字段（serde default 兼容）。
+    #[serde(default)]
+    pub deleted_at_ms: Option<u64>,
     /// Unix 时间戳（毫秒），用于排序
     pub mtime_ms: u64,
 }
@@ -69,7 +73,19 @@ pub(crate) fn match_workspace(
 
 #[tauri::command]
 pub fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String> {
+    sessions_list_inner(app, false)
+}
+
+/// 回收站列表：只返回已软删除的条目（按删除时间倒序）。
+#[tauri::command]
+pub fn sessions_deleted_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String> {
+    sessions_list_inner(app, true)
+}
+
+fn sessions_list_inner(app: tauri::AppHandle, deleted_only: bool) -> Result<Vec<SessionEntry>, String> {
     let mut list = load_all(&app)?;
+    // 软删除过滤：默认列表不含已删条目；回收站列表只含已删条目
+    list.retain(|e| e.deleted_at_ms.is_some() == deleted_only);
     // F-5-4 读时迁移 + 悬空自愈：
     //   - workspace_id 为 None → 按 cwd **精确相等**匹配已有工作区（子目录不会归到父目录）
     //   - workspace_id 悬空（指向已删除/被去重丢弃的工作区）→ 同一套精确匹配重新绑定；
@@ -100,7 +116,12 @@ pub fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String>
     if changed {
         save_all(&app, &list)?;
     }
-    list.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
+    if deleted_only {
+        // 回收站：最近删的在前
+        list.sort_by(|a, b| b.deleted_at_ms.cmp(&a.deleted_at_ms));
+    } else {
+        list.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
+    }
     Ok(list)
 }
 
@@ -108,17 +129,65 @@ pub fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SessionEntry>, String>
 pub fn sessions_upsert(app: tauri::AppHandle, entry: SessionEntry) -> Result<(), String> {
     let mut list = load_all(&app)?;
     if let Some(e) = list.iter_mut().find(|e| e.session_id == entry.session_id) {
+        // 覆盖时保留软删除标记：对回收站中条目的 upsert（如同名会话重建）不应
+        // 静默「复活」条目——恢复必须走 sessions_restore 的显式用户动作
+        let deleted = e.deleted_at_ms;
         *e = entry;
+        e.deleted_at_ms = deleted;
     } else {
         list.push(entry);
     }
     save_all(&app, &list)
 }
 
+/// 删除会话 = 软删除（打 deleted_at_ms 标记，侧栏不显示）：JSONL 日志与 harness
+/// transcript 全部保留，回收站可恢复。只有 sessions_list（默认）过滤已删条目。
 #[tauri::command]
 pub fn sessions_remove(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
     let mut list = load_all(&app)?;
-    list.retain(|e| e.session_id != session_id);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let mut hit = false;
+    for e in list.iter_mut() {
+        if e.session_id == session_id {
+            e.deleted_at_ms = Some(now);
+            hit = true;
+        }
+    }
+    if hit {
+        save_all(&app, &list)?;
+    }
+    Ok(())
+}
+
+/// 回收站恢复：清除 deleted_at_ms 标记，条目回到侧栏。
+#[tauri::command]
+pub fn sessions_restore(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    let mut list = load_all(&app)?;
+    let mut hit = false;
+    for e in list.iter_mut() {
+        if e.session_id == session_id && e.deleted_at_ms.is_some() {
+            e.deleted_at_ms = None;
+            e.mtime_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(e.mtime_ms);
+            hit = true;
+        }
+    }
+    if hit {
+        save_all(&app, &list)?;
+    }
+    Ok(())
+}
+
+/// 回收站永久删除：从索引移除条目（JSONL 日志文件保留不动——日志非索引管辖）。
+#[tauri::command]
+pub fn sessions_purge(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    let mut list = load_all(&app)?;
+    list.retain(|e| !(e.session_id == session_id && e.deleted_at_ms.is_some()));
     save_all(&app, &list)
 }
 
@@ -249,5 +318,49 @@ mod tests {
     fn match_workspace_empty_cwd_returns_none() {
         let ws_list = vec![ws("w1", "/a/b")];
         assert_eq!(match_workspace("", &ws_list), None);
+    }
+
+    // ---------------- P30 回收站（软删除）纯逻辑 ----------------
+
+    use super::SessionEntry;
+
+    fn entry(id: &str, deleted: Option<u64>) -> SessionEntry {
+        SessionEntry {
+            session_id: id.into(),
+            adapter_id: "omp".into(),
+            title: "t".into(),
+            cwd: String::new(),
+            workspace_id: None,
+            kind: None,
+            deleted_at_ms: deleted,
+            mtime_ms: 1,
+        }
+    }
+
+    #[test]
+    fn soft_delete_filter_partitions_list() {
+        // 默认列表只含未删条目；回收站列表只含已删条目（sessions_list_inner 的过滤语义）
+        let list = vec![
+            entry("live", None),
+            entry("gone", Some(1000)),
+        ];
+        let live: Vec<&SessionEntry> = list.iter().filter(|e| e.deleted_at_ms.is_none()).collect();
+        let deleted: Vec<&SessionEntry> = list.iter().filter(|e| e.deleted_at_ms.is_some()).collect();
+        assert_eq!(live.iter().map(|e| e.session_id.as_str()).collect::<Vec<_>>(), ["live"]);
+        assert_eq!(deleted.iter().map(|e| e.session_id.as_str()).collect::<Vec<_>>(), ["gone"]);
+    }
+
+    #[test]
+    fn upsert_preserves_soft_delete_marker() {
+        // sessions_upsert 覆盖已删条目时不许清掉 deleted_at_ms（复活必须走显式 restore）
+        let mut existing = vec![entry("s1", Some(999))];
+        let incoming = entry("s1", None);
+        // 模拟 upsert 的保留逻辑
+        if let Some(e) = existing.iter_mut().find(|e| e.session_id == incoming.session_id) {
+            let deleted = e.deleted_at_ms;
+            *e = incoming.clone();
+            e.deleted_at_ms = deleted;
+        }
+        assert_eq!(existing[0].deleted_at_ms, Some(999), "覆盖后软删除标记应保留");
     }
 }

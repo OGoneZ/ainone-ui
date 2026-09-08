@@ -83,7 +83,7 @@ pub fn enhanced_dirs() -> Vec<PathBuf> {
     };
 
     if let Some(h) = home() {
-        for rel in ["bin", ".local/bin", ".bun/bin", ".cargo/bin"] {
+        for rel in ["bin", ".local/bin", ".bun/bin", ".cargo/bin", ".opencode/bin"] {
             push(&mut out, h.join(rel));
         }
         // nvm versions/*/bin

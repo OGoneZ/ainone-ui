@@ -16,6 +16,19 @@
 
 harness 未安装或未配置凭据时，对应下拉项会标记「未安装」，不影响其他 harness。
 
+## 环境要求（内嵌 bun 运行时，P31）
+
+安装包内嵌官方 **bun** 二进制（版本与 sha256 清单见
+`src-tauri/resources/runtime-versions.json`），裸机无需预装任何 JS 运行时即可
+完成「装桥 / 跑桥 / 装 codex·omp·pi CLI」全链路。运行时解析三级优先：
+
+1. **system**：用户自装的 bun（PATH 命中，尊重 nvm/fnm/bun upgrade 等版本管理）；
+2. **bundled**：包内 `resources/runtime/{target}/bun` 兜底（system 缺失时使用）；
+3. npm 不内嵌——system npm 缺失时由 bun 顶上（`bun add` 语义兼容）。
+
+设置页 harness 区块尾部展示当前解析结果（版本 + 来源），排障用。
+本地打包前先跑 `pnpm prepare:runtime` 下载对应平台 bun（CI 发版自动执行）。
+
 ## 开发
 
 ```bash

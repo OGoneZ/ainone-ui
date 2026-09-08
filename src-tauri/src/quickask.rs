@@ -10,6 +10,7 @@
 // 分四类结果（AC-P8-14 四级返回态）：成功 / 非 2xx / 超时 / 空响应。
 
 use serde::{Deserialize, Serialize};
+use futures_util::StreamExt;
 use std::path::PathBuf;
 use std::time::Duration;
 use tauri::Manager;
@@ -201,11 +202,19 @@ pub fn chat_completions_url(base_url: &str) -> String {
     }
 }
 
+/// 快问提示词（P27d）：选中文本多为术语/单句，参考社区划词解释扩展
+/// （text-explainer 等通用模式）——一句话定义 + 关键点 + 简短示例，
+/// 保持简短，用选中内容的语言回答。
+pub const QUICK_ASK_SYSTEM_PROMPT: &str = "你是一个简洁的解释助手。用户会选中一段术语、代码、报错或句子。请用与选中内容相同的语言，简短清晰地解释：先用一句话给出定义或结论，再用 markdown 列表给出 2-4 个要点，必要时给一个简短示例。使用 markdown 格式。不要开场白，不要复述问题。";
+
 /// 纯函数：拼 OpenAI 兼容请求体。
 pub fn build_chat_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
-        "messages": [{ "role": "user", "content": text }],
+        "messages": [
+            { "role": "system", "content": QUICK_ASK_SYSTEM_PROMPT },
+            { "role": "user", "content": text },
+        ],
     })
 }
 
@@ -225,10 +234,13 @@ pub fn classify_response(status: u16, body: &str) -> Result<String, String> {
 }
 
 /// 纯函数：拼 anthropic /v1/messages 请求体。
+/// max_tokens 16384：给思考块留足预算（实测 glm-5.3-flash 思考消耗可达数百块），
+/// 解释类回答本身很短，上限仅防极端跑飞；OpenAI 协议则不带该字段（服务端默认）。
 pub fn build_anthropic_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": 16384,
+        "system": QUICK_ASK_SYSTEM_PROMPT,
         "messages": [{ "role": "user", "content": text }],
     })
 }
@@ -247,8 +259,48 @@ pub fn classify_anthropic_response(status: u16, body: &str) -> Result<String, St
     }
 }
 
-/// 实际发起快问请求（Rust 侧 + 密钥不落 WebView）。按 protocol 分协议。
-pub async fn call_quick_ask(cfg: &QuickAskConfig, text: &str) -> Result<String, String> {
+/// SSE 流事件（serde tag="event"，对齐 terminal.rs TerminalEvent 形状）：
+/// Delta 推增量文本，Done 收尾（前端以 done 为终止信号）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", content = "payload", rename_all = "camelCase")]
+pub enum QuickAskEvent {
+    Delta(String),
+    Done,
+}
+
+/// 纯函数：从一条 SSE data 行提取增量文本（openai choices[0].delta.content）。
+/// 返回 None = 本行无增量（keep-alive/[DONE]/role-only 首块等）。
+pub fn sse_delta(line: &str) -> Option<String> {
+    let payload = line.strip_prefix("data: ")?;
+    let payload = payload.trim();
+    if payload == "[DONE]" {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    v["choices"][0]["delta"]["content"].as_str().map(String::from)
+}
+
+/// 纯函数：从一条 SSE data 行提取 anthropic 增量。
+/// 只取 content_block_delta 且 delta.type=="text_delta" 的 text —— 该网关模型
+/// （glm-5.3-flash）还会推 thinking_delta（思考块），必须跳过，否则正文被
+/// 思考文本污染；且 max_tokens 被思考耗尽时 text_delta 一个都没有 → 空响应。
+pub fn sse_delta_anthropic(line: &str) -> Option<String> {
+    let payload = line.strip_prefix("data: ")?;
+    let payload = payload.trim();
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    if v["type"].as_str() == Some("content_block_delta") && v["delta"]["type"].as_str() == Some("text_delta") {
+        return v["delta"]["text"].as_str().map(String::from);
+    }
+    None
+}
+
+/// 实际发起快问请求（Rust 侧 + 密钥不落 WebView）。流式：请求体 stream:true，
+/// SSE 逐块经 channel 推 Delta，全部收割后返回完整文本（错误仍整链返回 Err）。
+pub async fn call_quick_ask(
+    cfg: &QuickAskConfig,
+    text: &str,
+    channel: &tauri::ipc::Channel<QuickAskEvent>,
+) -> Result<String, String> {
     let (url, body) = match cfg.protocol {
         QaProtocol::Anthropic => (
             harness_probe::anthropic_messages_url(&cfg.base_url),
@@ -259,8 +311,10 @@ pub async fn call_quick_ask(cfg: &QuickAskConfig, text: &str) -> Result<String, 
             build_chat_body(&cfg.model, text),
         ),
     };
+    let mut body = body;
+    body["stream"] = serde_json::Value::Bool(true);
     log::info!(
-        "[quickask] 请求 {} 模型 {} 协议 {}（{} 字符）",
+        "[quickask] 流式请求 {} 模型 {} 协议 {}（{} 字符）",
         url,
         cfg.model,
         cfg.protocol.as_str(),
@@ -296,32 +350,66 @@ pub async fn call_quick_ask(cfg: &QuickAskConfig, text: &str) -> Result<String, 
         }
     };
     let status = resp.status().as_u16();
-    let text_resp = resp.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
-    let elapsed = start.elapsed().as_millis();
-    let result = match cfg.protocol {
-        QaProtocol::Anthropic => classify_anthropic_response(status, &text_resp),
-        QaProtocol::Openai => classify_response(status, &text_resp),
-    };
-    match result {
-        Ok(out) => {
-            log::info!("[quickask] 成功 {url} 耗时 {elapsed}ms");
-            Ok(out)
-        }
-        Err(msg) => {
-            log::warn!("[quickask] 失败 {url} {status} {msg}");
-            Err(msg)
+    if !(200..300).contains(&status) {
+        let msg = format!("非 2xx 状态码 {status}");
+        log::warn!("[quickask] 失败 {url} {status}");
+        return Err(msg);
+    }
+
+    // SSE 收割：bytes_stream 逐块 → 按 \n 切行 → data 行提取增量。
+    // buffer 处理 chunk 边界（一行 data 跨两个网络块的情形）。
+    let mut stream = resp.bytes_stream();
+    let mut buffer = String::new();
+    let mut full = String::new();
+    loop {
+        let chunk = match stream.next().await {
+            Some(Ok(c)) => c,
+            Some(Err(e)) => {
+                let msg = format!("读取响应失败: {e}");
+                log::warn!("[quickask] 失败 {url} {msg}");
+                return Err(msg);
+            }
+            None => break,
+        };
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(pos) = buffer.find('\n') {
+            let line: String = buffer.drain(..=pos).collect();
+            let line = line.trim_end();
+            let delta = match cfg.protocol {
+                QaProtocol::Anthropic => sse_delta_anthropic(line),
+                QaProtocol::Openai => sse_delta(line),
+            };
+            if let Some(d) = delta {
+                if !d.is_empty() {
+                    full.push_str(&d);
+                    let _ = channel.send(QuickAskEvent::Delta(d));
+                }
+            }
         }
     }
+    let elapsed = start.elapsed().as_millis();
+    if full.trim().is_empty() {
+        let msg = "空响应（流式无增量内容）".to_string();
+        log::warn!("[quickask] 失败 {url} {msg}");
+        return Err(msg);
+    }
+    log::info!("[quickask] 流式成功 {url} 耗时 {elapsed}ms（{} 字符）", full.len());
+    let _ = channel.send(QuickAskEvent::Done);
+    Ok(full)
 }
 
-/// Tauri command：快问入口（前端传选中文本，返回解释文本）。
+/// Tauri command：快问入口（前端传选中文本，返回解释文本；增量经 channel 推送）。
 #[tauri::command]
-pub async fn quick_ask(app: tauri::AppHandle, text: String) -> Result<String, String> {
+pub async fn quick_ask(
+    app: tauri::AppHandle,
+    text: String,
+    on_event: tauri::ipc::Channel<QuickAskEvent>,
+) -> Result<String, String> {
     let cfg = load_config(&app)?;
     if cfg.base_url.trim().is_empty() {
         return Err("未配置快问模型（base_url 为空）".to_string());
     }
-    call_quick_ask(&cfg, &text).await
+    call_quick_ask(&cfg, &text, &on_event).await
 }
 
 #[cfg(test)]
@@ -366,6 +454,12 @@ mod tests {
         assert_eq!(b["model"], "m1");
         assert_eq!(b["messages"][0]["content"], "hi");
         assert!(b["max_tokens"].as_u64().unwrap() > 0);
+        // P27d：system 提示词入请求体（两协议一致）
+        assert_eq!(b["system"], QUICK_ASK_SYSTEM_PROMPT);
+        let c = build_chat_body("m1", "hi");
+        assert_eq!(c["messages"][0]["role"], "system");
+        assert_eq!(c["messages"][0]["content"], QUICK_ASK_SYSTEM_PROMPT);
+        assert_eq!(c["messages"][1]["content"], "hi");
     }
 
     #[test]
@@ -397,7 +491,43 @@ mod tests {
             protocol: QaProtocol::default(),
             source: QaSource::default(),
         };
-        let err = call_quick_ask(&cfg, "hi").await.unwrap_err();
+        let channel = tauri::ipc::Channel::new(|_| Ok(()));
+        let err = call_quick_ask(&cfg, "hi", &channel).await.unwrap_err();
         assert!(err.contains("超时"), "期望超时错误，实际: {err}");
+    }
+
+    // —— P27 SSE 流式解析 ——
+    #[test]
+    fn sse_delta_openai() {
+        assert_eq!(
+            sse_delta(r#"data: {"choices":[{"delta":{"content":"你好"}}]}"#).unwrap(),
+            "你好"
+        );
+        // role-only 首块无增量
+        assert_eq!(sse_delta(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#), None);
+        assert_eq!(sse_delta("data: [DONE]"), None);
+        assert_eq!(sse_delta(": keep-alive"), None);
+        assert_eq!(sse_delta(""), None);
+    }
+
+    #[test]
+    fn sse_delta_anthropic_events() {
+        assert_eq!(
+            sse_delta_anthropic(r#"data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"解释"}}"#).unwrap(),
+            "解释"
+        );
+        // thinking_delta（思考块）必须跳过——实测网关模型会推思考流，
+        // 不滤会把思考文本当正文渲染
+        assert_eq!(
+            sse_delta_anthropic(
+                r#"data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Let me"}}"#
+            ),
+            None
+        );
+        // 其他事件（message_start 等）无增量
+        assert_eq!(
+            sse_delta_anthropic(r#"data: {"type":"message_start","message":{}}"#),
+            None
+        );
     }
 }

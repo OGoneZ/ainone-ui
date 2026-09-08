@@ -31,7 +31,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
   }),
 }));
 
-// F-8-7 快问：mock 配置与调用（组件内挂载即读配置）
+// F-8-7 快问：mock 配置与调用（组件内挂载即读配置）；quickAsk 模拟流式两段增量
 vi.mock("../ipc/quickask", () => ({
   quickAskConfigGet: vi.fn().mockResolvedValue({
     base_url: "https://qa.example.com/v1",
@@ -39,7 +39,11 @@ vi.mock("../ipc/quickask", () => ({
     timeout_ms: 30000,
     has_api_key: false,
   }),
-  quickAsk: vi.fn().mockResolvedValue("这是快问的解释"),
+  quickAsk: vi.fn(async (_text: string, onDelta?: (d: string) => void) => {
+    onDelta?.("这是快问的");
+    onDelta?.("解释");
+    return "这是快问的解释";
+  }),
 }));
 
 // logger 内部走 @tauri-apps/plugin-log（依赖 Tauri invoke），jsdom 无 Tauri 运行时 → mock 掉
@@ -77,7 +81,7 @@ const adapter: AdapterWithStatus = {
   args: [],
   cwd: ".",
   logo: "#7c3aed",
-  available: true, resolvedPath: null, source: null,};
+  available: true, state: "ready" as const, resolvedPath: null, source: null, bridge: null, cli: null, auth: { state: "none", detail: "" },};
 
 const input = () => screen.getByLabelText("消息输入");
 
@@ -88,6 +92,8 @@ function fakeSession(events: Array<{ type: string; [k: string]: any }>): AcpSess
     capabilities: null,
     agentInfo: null,
     sessionOrigin: "new",
+    configOptions: null,
+    setConfigOption: async () => null,
     prompt: async (_text: string, onOutgoing: (e: any) => void) => {
       for (const e of events) onOutgoing(e);
     },
@@ -220,7 +226,7 @@ describe("ChatPanel 交互行为", () => {
     ).toBeInTheDocument();
   });
 
-  it("F-8-7 快问：选中 → 悬浮窗「快速解释」→ 解释结果不进入会话（AC-P8-10）", async () => {
+  it("F-8-7 快问：选中 → 悬浮窗「快速解释」→ 流式渲染且不进入会话（AC-P8-10）", async () => {
     mockOpen.mockResolvedValue(
       fakeSession([
         { type: "agent_text", text: "某个需要解释的疑难名词" },
@@ -242,7 +248,7 @@ describe("ChatPanel 交互行为", () => {
     // 悬浮窗出现，点「快速解释」
     await user.click(await screen.findByRole("button", { name: "快速解释" }));
 
-    // 悬浮窗显示解释内容
+    // 流式增量逐块渲染（mock 两段 delta），最终全文可见
     expect(await screen.findByText("这是快问的解释")).toBeInTheDocument();
 
     // 解释内容不进入会话消息列表（程序化检查 store：无 user 气泡包含解释）
@@ -384,5 +390,60 @@ describe("ChatPanel 交互行为", () => {
 
     await user.keyboard("{Meta>}{Shift>}f{/Shift}{/Meta}");
     expect(screen.queryByLabelText("搜索会话")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P31 流式提交节流（2026-09-08 事故）：旧实现每条 onOutgoing 事件都
+// updateLastAssistant 一次（新数组引用 → 全列表重渲染）。事故实测 48s 内
+// 396 条 update × 每条全量重渲染 → WebKit 主线程持续满载。现在内容事件
+// 走 streamCommitThrottle（rAF 帧内合并），turn 结束 flush 收口。
+// 本组用受控 fakeSession 突发多条 agent_text，断言：
+//   a) 事件不丢（最终内容完整）
+//   b) busy 复位后无 pending 帧回调泄漏（turn 正常收口）
+describe("P31 流式提交节流（渲染次数与事件到达率解耦）", () => {
+  it("单帧内多条 agent_text 突发 → 终态内容完整不丢事件", async () => {
+    // 同步连发 50 条（jsdom 下 rAF 由测试环境回退为 microtask 级合并——
+    // 无论合并成几次提交，最终 transcript 必须包含全部文本）
+    const events: Array<{ type: string; text?: string; stopReason?: string }> = [];
+    for (let i = 0; i < 50; i++) events.push({ type: "agent_text", text: `片段${i} ` });
+    events.push({ type: "turn_stop", stopReason: "end_turn" });
+    mockOpen.mockResolvedValue(fakeSession(events));
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+
+    const user = userEvent.setup();
+    await user.type(input(), "突发");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    // 终态：全部 50 个片段都渲染出来（顺序保持）
+    expect(await screen.findByText(new RegExp("片段49"))).toBeInTheDocument();
+    // 完整性：最后片段与前段拼接同框（无事件被节流丢弃）
+    const assistant = screen.getByText((_, el) => el?.classList.contains("md") === true);
+    expect(assistant.textContent).toContain("片段0 ");
+    expect(assistant.textContent).toContain("片段49");
+      });
+
+  it("turn 结束后 busy 复位（flush 收口不悬挂 UI 状态）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "一段" },
+        { type: "agent_text", text: "两段" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/一段/)).toBeInTheDocument();
+    // busy=false 已复位（输入框恢复可用）
+    await vi.waitFor(() => {
+      expect(useSessionStore.getState().runtime["k1"]?.busy).toBe(false);
+    });
+    // 终态内容包含所有片段
+    const assistant = screen.getByText((_, el) => el?.classList.contains("md") === true);
+    expect(assistant.textContent).toContain("一段");
+    expect(assistant.textContent).toContain("两段");
   });
 });

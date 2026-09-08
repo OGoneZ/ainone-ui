@@ -12,11 +12,13 @@ import { toast } from "sonner";
 interface Props {
   /** 转写文本回填（不自动发送，可编辑确认） */
   onTranscribed: (text: string) => void;
+  /** P25：注册「开关录音」回调（Alt+\ 全局快捷键触发；toggle=idle 时 start、recording 时 stop） */
+  registerToggle?: (fn: () => void) => void;
 }
 
 type VoiceState = "idle" | "recording" | "transcribing";
 
-export function VoiceInput({ onTranscribed }: Props) {
+export function VoiceInput({ onTranscribed, registerToggle }: Props) {
   const [state, setState] = useState<VoiceState>("idle");
   const [seconds, setSeconds] = useState(0);
   const mediaRef = useRef<MediaRecorder | null>(null);
@@ -29,6 +31,16 @@ export function VoiceInput({ onTranscribed }: Props) {
       mediaRef.current?.stream.getTracks().forEach((t) => t.stop());
     };
   }, []);
+
+  // P25：向父级注册开关回调（toggle = 快捷键入口；录音态天然留在本组件）
+  useEffect(() => {
+    if (!registerToggle) return;
+    registerToggle(() => {
+      if (state === "recording") stop();
+      else if (state === "idle") void start();
+    });
+    // state 变化时重注册（闭包捕获最新 state）；转写中不响应快捷键
+  }, [registerToggle, state]);
 
   async function start() {
     if (state !== "idle") return;

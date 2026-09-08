@@ -21,9 +21,7 @@ const adapter: AdapterWithStatus = {
   args: [],
   cwd: ".",
   logo: "#7c3aed",
-  available: true,
-  resolvedPath: null,
-  source: null,
+  available: true, state: "ready" as const, resolvedPath: null, source: null, bridge: null, cli: null, auth: { state: "none", detail: "" },
 };
 
 const toolBlock = (over: Partial<Extract<BlockMsg, { kind: "tool" }>>): BlockMsg => ({
@@ -127,6 +125,7 @@ describe("静默感知（P30 AC-3.4）", () => {
           branch: null,
           capabilities: null,
           degraded: null,
+          configOptions: null,
           turnStartedAt: now - 40_000,
           lastEventAt: now - 35_000,
         },
@@ -134,7 +133,7 @@ describe("静默感知（P30 AC-3.4）", () => {
       commands: {},
     });
     const view = render(
-      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} turnStartedAt={now - 40_000} lastEventAt={now - 35_000} />,
+      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} lastEventAt={now - 35_000} />,
     );
     // useElapsedTicker 用 Date.now 取差值：35s ≥ 30s → 提示可见
     expect(screen.getByTestId("silent-hint")).toBeTruthy();
@@ -143,17 +142,16 @@ describe("静默感知（P30 AC-3.4）", () => {
     // lastEventAt 距今 5s → 不显示
     cleanup();
     const view2 = render(
-      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} turnStartedAt={now - 10_000} lastEventAt={now - 5_000} />,
+      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} lastEventAt={now - 5_000} />,
     );
     expect(screen.queryByTestId("silent-hint")).toBeNull();
     view2.unmount();
   });
 
   it("lastEventAt 缺省（旧数据/兼容）→ 不显示提示也不报错", () => {
-    const now = Date.now();
     const msg: ChatMsg = { role: "assistant", blocks: [{ kind: "text", text: "hi" }] };
     const view = render(
-      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} turnStartedAt={now - 60_000} />,
+      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} />,
     );
     expect(screen.queryByTestId("silent-hint")).toBeNull();
     view.unmount();

@@ -10,6 +10,8 @@ const adapter = (name: string): AdapterWithStatus => ({
   cwd: ".",
   logo: null,
   available: true,
+  state: "ready",
+  bridge: null, cli: null, auth: { state: "none", detail: "" },
   resolvedPath: null,
   source: null,
 });

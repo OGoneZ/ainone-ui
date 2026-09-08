@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- K1 = H2 原样微调：除右上格外所有 path 与 h2-stack-ghosts.svg 逐字一致（含左下气泡尾）。
+       右上格仅一条 path 改动：右缘(398)/上缘(112)锚定不动，向十字缝内扩 132x110 -> 142x120，改为 H3 陶土橙 -->
+  <rect width="512" height="512" rx="115" fill="#F5F2EA"/>
+  <rect x="166" y="178" width="284" height="240" rx="56" fill="#E0DBCE"/>
+  <rect x="140" y="146" width="284" height="240" rx="56" fill="#CBC5B7"/>
+  <g fill="#141414">
+    <path transform="translate(114,112)" d="M44 0 H122 A10 10 0 0 1 132 10 V100 A10 10 0 0 1 122 110 H10 A10 10 0 0 1 0 100 V44 A44 44 0 0 1 44 0 Z"/>
+    <path transform="translate(256,112)" fill="#D97757" d="M10 0 H98 A44 44 0 0 1 142 44 V110 A10 10 0 0 1 132 120 H10 A10 10 0 0 1 0 110 V10 A10 10 0 0 1 10 0 Z"/>
+    <path transform="translate(114,242)" d="M10 0 H122 A10 10 0 0 1 132 10 V100 A10 10 0 0 1 122 110 H44 A44 44 0 0 1 0 66 V10 A10 10 0 0 1 10 0 Z"/>
+    <path transform="translate(266,242)" d="M10 0 H122 A10 10 0 0 1 132 10 V66 A44 44 0 0 1 88 110 H10 A10 10 0 0 1 0 100 V10 A10 10 0 0 1 10 0 Z"/>
+    <path d="M170 352 Q136 398 128 428 Q176 412 222 352 Z"/>
+  </g>
+</svg>

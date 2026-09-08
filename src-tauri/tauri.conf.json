@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ainone-ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.zhubaoduo.ainone-ui",
   "build": {
-    "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev:port",
+    "devUrl": "http://localhost:1430",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
@@ -25,13 +25,19 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "resources/runtime-versions.json",
+      "resources/runtime/**/*"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -21,9 +21,7 @@ const adapter: AdapterWithStatus = {
   args: [],
   cwd: ".",
   logo: "#7c3aed",
-  available: true,
-  resolvedPath: null,
-  source: null,
+  available: true, state: "ready" as const, resolvedPath: null, source: null, bridge: null, cli: null, auth: { state: "none", detail: "" },
 };
 
 /** 渲染消息，可选先展开活动组卡（已完成 tool 块默认入组折叠） */
