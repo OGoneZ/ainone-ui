@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath, URL } from "node:url";
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -7,9 +8,17 @@ import tailwindcss from "@tailwindcss/vite";
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+// P32：应用版本号从 package.json 注入（设置页「版本与更新」显示），
+// 单一事实源 = package.json（发布时与 tauri.conf.json 一并由门禁核对）。
+const pkg = JSON.parse(readFileSync("./package.json", "utf-8")) as { version: string };
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
 
   // shadcn 组件用 `@/` 路径别名（见 components.json）
   resolve: {

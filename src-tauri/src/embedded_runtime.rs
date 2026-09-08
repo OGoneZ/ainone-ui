@@ -348,9 +348,23 @@ pub fn runtime_diagnostics(app: &tauri::AppHandle) -> RuntimeDiagnostics {
 }
 
 /// 诊断命令（前端 ipc/runtime.ts 消费）。
+/// async + spawn_blocking：实现含 2 个 --version 子进程 + 61MB 内嵌 bun 的 sha256
+/// 全量读，冷缓存实测 2.3s——同步命令会在 Tauri 命令队列串行占位，把同时到达的
+/// adapter_status 等轻命令全部堵住（设置面板「点开慢几秒」的实测根因，perf 打点实锤
+/// runtime_diagnostics 2335ms / 被堵的 adapter_status 首轮 2324ms、二轮 8ms）。
 #[tauri::command]
-pub fn runtime_diagnostics_cmd(app: tauri::AppHandle) -> RuntimeDiagnostics {
-    runtime_diagnostics(&app)
+pub async fn runtime_diagnostics_cmd(app: tauri::AppHandle) -> RuntimeDiagnostics {
+    tauri::async_runtime::spawn_blocking(move || runtime_diagnostics(&app))
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("[embedded_runtime] runtime_diagnostics 任务中断: {e}");
+            RuntimeDiagnostics {
+                bun: None,
+                npm: None,
+                bundled_dir_exists: false,
+                bundled_sha_verified: None,
+            }
+        })
 }
 
 #[cfg(test)]

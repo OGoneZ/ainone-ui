@@ -161,9 +161,9 @@ describe("SettingsModal 外观分区（P26 R3 主题自工具栏迁入）", () =
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={onThemeChange} />);
 
     expect(await screen.findByText("外观")).toBeInTheDocument();
-    const select = screen.getByDisplayValue("跟随系统") as HTMLSelectElement;
-    expect(select).toBeInTheDocument();
-    await userEvent.setup().selectOptions(select, "dark");
+    // 现代化下拉（radix DropdownMenu）：点开触发钮 → 选「深色模式」→ 回调 dark
+    await userEvent.setup().click(screen.getByTestId("theme-select"));
+    await userEvent.setup().click(await screen.findByTestId("theme-option-dark"));
     expect(onThemeChange).toHaveBeenCalledWith("dark");
   });
 });

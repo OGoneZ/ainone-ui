@@ -18,8 +18,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
+# P32 F-32-1 系统通知（turn 完成/权限等待提醒）+ F-32-3 自动更新
+tauri-plugin-notification = "2.4.0"
+tauri-plugin-updater = "2.11.0"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # P29 任务三配置合并写：serde_json preserve_order 保键序（只改指定键不重排用户配置）；
