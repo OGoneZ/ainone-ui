@@ -2,7 +2,8 @@
 // 每个 Tab = 一个 adapter + 一个独立会话（独立子进程），Tab 关闭时清理子进程。
 // 侧栏按工作区归集会话；工作区右键：新建会话 / 重命名 / 移除。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Layout, Model, Actions, DockLocation, type TabNode, type Node } from "flexlayout-react";
 import { listAdapters, type AdapterWithStatus } from "@/ipc/adapters";
 import { sessionsList, sessionsDeletedList, sessionsUpsert, sessionsRemove, sessionsRestore, type SessionEntry } from "@/ipc/sessions";
@@ -26,6 +27,8 @@ import {
   SettingsIcon,
   DonateIcon,
   HelpIcon,
+  ThemeLightIcon,
+  ThemeDarkIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
   TerminalIcon,
@@ -103,6 +106,23 @@ function tailPath(cwd: string): string {
   return parts[parts.length - 1] ?? cwd;
 }
 
+/** 侧栏主题快捷钮：两态循环浅色 ⇄ 深色（theme=auto 时按当前视觉态取对侧），
+ *  设置页下拉仍提供「跟随系统」三选。图标随当前视觉态切换（sun/moon）。 */
+const THEME_TOGGLE_META: Record<"light" | "dark", { Icon: typeof ThemeLightIcon; label: string; next: "dark" | "light" }> = {
+  light: { Icon: ThemeLightIcon, label: "当前浅色，点击切换深色", next: "dark" },
+  dark: { Icon: ThemeDarkIcon, label: "当前深色，点击切换浅色", next: "light" },
+};
+
+/** 主题切换动画：切换前后给 html 挂临时过渡类（全局 background/color/border 渐变），
+ *  350ms 后摘除。不设永久 transition——WKWebView 冻结 transition 时会永停中间态
+ *  （P26c 同坑），超时摘类是兜底。 */
+function applyThemeFade(): void {
+  const root = document.documentElement;
+  if (root.classList.contains("theme-fading")) return;
+  root.classList.add("theme-fading");
+  window.setTimeout(() => root.classList.remove("theme-fading"), 350);
+}
+
 function App() {
   const [adapters, setAdapters] = useState<AdapterWithStatus[]>([]);
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -146,6 +166,13 @@ function App() {
     const on = (e: MediaQueryListEvent) => setSystemDark(e.matches);
     mq.addEventListener("change", on);
     return () => mq.removeEventListener("change", on);
+  }, []);
+  // 当前视觉主题（auto 按 systemDark 解析出 light/dark，侧栏快捷钮用）
+  const visualTheme: "light" | "dark" = theme === "auto" ? (systemDark ? "dark" : "light") : theme === "dark" ? "dark" : "light";
+  /** 主题变更统一入口（侧栏钮 + 设置页下拉）：带全局 fade 过渡 */
+  const changeTheme = useCallback((t: string) => {
+    applyThemeFade();
+    setTheme(t);
   }, []);
   // P4：聊天面板「打开设置」动作 → 打开设置弹层（自定义事件，避免 props 层层下钻）
   useEffect(() => {
@@ -1019,6 +1046,21 @@ function App() {
     return out;
   }, [tabs, runtime]);
 
+  // P32 F-32-2：运行中会话数推送托盘（busy 集 + 权限等待均计——托盘要回答
+  // 「有活干/等我确认」。变化才 invoke，防抖由 zustand 渲染合并天然保证）
+  const busyCount = useMemo(() => {
+    const seen = new Set<string>();
+    for (const t of tabs) {
+      const rt = t.sessionId && runtime[t.key];
+      if (rt && (rt.busy || rt.perm) && t.sessionId) seen.add(t.sessionId);
+    }
+    return seen.size;
+  }, [tabs, runtime]);
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void invoke("tray_set_busy_count", { count: busyCount }).catch(() => {});
+  }, [busyCount]);
+
   function statusOf(sessionId: string): SessionStatus {
     return statusBySession.get(sessionId) ?? "done";
   }
@@ -1227,6 +1269,20 @@ function App() {
                 <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
                 <span>快捷键</span>
               </button>
+              {/* 主题快捷切换：浅色 ⇄ 深色两态（auto 走视觉态），图标随态旋转进入 */}
+              <button
+                className="sidebar-footer-item"
+                title={THEME_TOGGLE_META[visualTheme].label}
+                aria-label="切换主题"
+                data-testid="theme-toggle"
+                onClick={() => changeTheme(THEME_TOGGLE_META[visualTheme].next)}
+              >
+                {(() => {
+                  const m = THEME_TOGGLE_META[visualTheme];
+                  return <m.Icon key={visualTheme} className="theme-icon-pop" style={{ width: 16, height: 16, strokeWidth: 1.75 }} />;
+                })()}
+                <span>主题（{THEME_TOGGLE_META[visualTheme].next === "dark" ? "切深色" : "切浅色"}）</span>
+              </button>
               <button className="sidebar-footer-item" onClick={() => setSettingsOpen(true)}>
                 <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
                 <span>设置</span>
@@ -1257,6 +1313,19 @@ function App() {
               </button>
               <button className="sidebar-footer-item" title="快捷键" aria-label="快捷键" onClick={() => setShortcutsOpen(true)}>
                 <HelpIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+              </button>
+              {/* 主题快捷切换（折叠态：图标竖排，title 提示当前态与下一步） */}
+              <button
+                className="sidebar-footer-item"
+                title={THEME_TOGGLE_META[visualTheme].label}
+                aria-label="切换主题"
+                data-testid="theme-toggle-collapsed"
+                onClick={() => changeTheme(THEME_TOGGLE_META[visualTheme].next)}
+              >
+                {(() => {
+                  const m = THEME_TOGGLE_META[visualTheme];
+                  return <m.Icon key={visualTheme} className="theme-icon-pop" style={{ width: 16, height: 16, strokeWidth: 1.75 }} />;
+                })()}
               </button>
               <button className="sidebar-footer-item" title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}>
                 <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
@@ -1306,7 +1375,7 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         onSaved={reloadAdapters}
         theme={theme}
-        onThemeChange={setTheme}
+        onThemeChange={changeTheme}
       />
 
       <DonateModal open={donateOpen} onClose={() => setDonateOpen(false)} />

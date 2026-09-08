@@ -24,6 +24,7 @@ mod notify;
 mod quickask;
 mod sessions;
 mod terminal;
+mod tray;
 mod workspaces;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -65,6 +66,11 @@ pub fn run() {
         .setup(|app| {
             agent::init_state(app);
             terminal::init_state(app);
+            // P32 F-32-2 系统托盘：图标常驻 + 会话数 + 菜单退出（app.exit 走清理链）
+            if let Err(e) = tray::setup_tray(app.handle()) {
+                // 托盘创建失败不阻塞应用（R-32-4：无 appindicator 的 Linux 桌面）
+                log::warn!("[tray] 托盘初始化失败（功能降级为无托盘）: {e}");
+            }
             // 启动即后台抓取 login shell PATH（8s 超时，永不阻塞 UI）
             env_path::fetch_login_shell_path_async();
             // P29：全局 AppHandle 存档——spawn 注入 codex keys env 等非命令上下文用
@@ -123,6 +129,7 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_kill,
             notify::notify_send,
+            tray::tray_set_busy_count,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
