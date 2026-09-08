@@ -102,6 +102,7 @@ impl Runtime {
 
 impl CliCandidateKind {
     /// 测试与文案用：Package 的包名（Script 无包名，返回 url）。
+    #[allow(dead_code)] // P31 后 CLI pin 路线放弃，保留供未来诊断文案用
     pub fn pkg_name(&self) -> &'static str {
         match self {
             CliCandidateKind::Script { url } => url,
@@ -932,5 +933,51 @@ mod tests {
         assert_eq!(sanitize_progress_line("10%\r\n25%\r50%"), "50%");
         // OSC 标题序列
         assert_eq!(sanitize_progress_line("\x1b]0;title\x07done"), "done");
+    }
+
+    // ---------------- P31 任务三：安装候选 × registry 矩阵 ----------------
+
+    #[test]
+    fn install_candidates_official_then_mirror_per_runtime() {
+        // 单 bun：官方源 → npmmirror（同运行时先官方后镜像）
+        let buns = vec![PathBuf::from("/x/bun")];
+        let c = build_install_candidates(&buns, &[], &["add", "--omit=optional"], &[]);
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0].label, "bun (官方源)");
+        assert_eq!(c[0].args, vec!["add", "--omit=optional"]);
+        assert_eq!(c[1].label, "bun (npmmirror)");
+        assert_eq!(
+            c[1].args,
+            vec!["add", "--omit=optional", "--registry", "https://registry.npmmirror.com"]
+        );
+    }
+
+    #[test]
+    fn install_candidates_runtime_priority_before_mirror() {
+        // bun+npm 双在：bun 官方 → bun 镜像 → npm 官方 → npm 镜像
+        // （运行时优先级优先于镜像回退，不跳级）
+        let buns = vec![PathBuf::from("/x/bun")];
+        let npms = vec![PathBuf::from("/y/npm")];
+        let c = build_install_candidates(
+            &buns,
+            &npms,
+            &["add"],
+            &["install", "--no-audit"],
+        );
+        assert_eq!(c.len(), 4);
+        assert_eq!(c[0].label, "bun (官方源)");
+        assert_eq!(c[1].label, "bun (npmmirror)");
+        assert_eq!(c[2].label, "npm (官方源)");
+        assert_eq!(c[3].label, "npm (npmmirror)");
+        // npm 官方参数不被镜像候选污染
+        assert_eq!(c[2].args, vec!["install", "--no-audit"]);
+        assert_eq!(c[0].program, PathBuf::from("/x/bun"));
+        assert_eq!(c[3].program, PathBuf::from("/y/npm"));
+    }
+
+    #[test]
+    fn install_candidates_empty_when_no_runtime() {
+        let c = build_install_candidates(&[], &[], &["add"], &["install"]);
+        assert!(c.is_empty());
     }
 }
