@@ -51,11 +51,13 @@ pub struct ShellSpec {
 }
 
 /// 推给前端的事件（channel onmessage 收 {event, payload}）。
+/// P32 R8：Data payload 改 base64 字符串（Tauri Channel 无二进制支持，
+/// Vec<u8> → number[] 体积 ~4x；base64 ~1.33x，前端 atob 还原）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "payload", rename_all = "camelCase")]
 pub enum TerminalEvent {
-    /// PTY 输出字节块（UTF-8 由前端解码，支持跨 chunk 多字节）
-    Data(Vec<u8>),
+    /// PTY 输出字节块（base64 编码；UTF-8 由前端解码，支持跨 chunk 多字节）
+    Data(String),
     /// shell 已退出
     Exited { code: u32 },
 }
@@ -134,7 +136,7 @@ pub fn terminal_spawn(
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break, // EOF / 读错误 → 进程退出
                 Ok(n) => {
-                    if on_event.send(TerminalEvent::Data(buf[..n].to_vec())).is_err() {
+                    if on_event.send(TerminalEvent::Data(crate::agent::b64(&buf[..n]))).is_err() {
                         // channel 断开但进程还活着：继续排空 reader 直到 EOF，
                         // 保证 wait() 可回收，只丢弃数据
                         continue;
@@ -297,9 +299,10 @@ mod tests {
 
     #[test]
     fn terminal_event_shape() {
-        // serde tag 形状稳定（前端 pty.ts 按此分发）
-        let data = serde_json::to_value(TerminalEvent::Data(vec![1, 2])).unwrap();
+        // serde tag 形状稳定（前端 pty.ts 按此分发）；P32 R8：payload 为 base64 字符串
+        let data = serde_json::to_value(TerminalEvent::Data(crate::agent::b64(&[1, 2]))).unwrap();
         assert_eq!(data["event"], "data");
+        assert_eq!(data["payload"], "AQI="); // [1,2] 的标准 base64
         let exit = serde_json::to_value(TerminalEvent::Exited { code: 3 }).unwrap();
         assert_eq!(exit["event"], "exited");
         assert_eq!(exit["payload"]["code"], 3);

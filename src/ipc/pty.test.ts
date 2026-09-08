@@ -58,14 +58,14 @@ describe("createTerminal", () => {
     });
   });
 
-  it("Channel data 事件以 UTF-8 流式解码（多字节跨 chunk 不断裂）", async () => {
+  it("Channel data 事件以 UTF-8 流式解码（多字节跨 chunk 不断裂；P32 R8 payload 为 base64）", async () => {
     const t = await createTerminal();
     const ch = channelInstances[0];
     const got: string[] = [];
     t.onData((s) => got.push(s));
-    // 「中」的 UTF-8 = E4 B8 AD，拆两个事件
-    ch.onmessage!({ event: "data", payload: [0xe4, 0xb8] });
-    ch.onmessage!({ event: "data", payload: [0xad] });
+    // 「中」的 UTF-8 = E4 B8 AD，按 base64 劈成两个事件（Rust b64(&[0xe4, 0xb8]) / b64(&[0xad])）
+    ch.onmessage!({ event: "data", payload: "5Lg=" }); // [0xe4, 0xb8]
+    ch.onmessage!({ event: "data", payload: "rQ==" }); // [0xad]
     expect(got.join("")).toBe("中");
   });
 

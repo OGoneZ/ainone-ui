@@ -40,6 +40,10 @@ dirs = "5"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # P31 内嵌 bun 清单 sha256 校验（诊断路径）
 sha2 = "0.10"
+# P32 R8：子进程输出 IPC base64 编码——Tauri v2 事件通道（Channel）无二进制支持，
+# Vec<u8> 默认 serde_json 序列化为 number[]（每字节 ~4 字符），base64 字符串
+# ~1.33 字符/字节，终端/harness 大输出场景序列化体积与前端解析开销降 ~3 倍
+base64 = "0.22"
 
 # 前端调试桥（P19c）：W3C WebDriver 内嵌服务，AI agent 经 HTTP 直驱 WebView
 # （execute JS / 截图 / 元素查询）。optional + feature 控制：
