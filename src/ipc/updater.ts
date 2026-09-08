@@ -1,4 +1,4 @@
-// P32 F-32-3 自动更新前端封装：检查更新 + 下载安装 + macOS 降级判定。
+// P33 F-32-3 自动更新前端封装：检查更新 + 下载安装 + macOS 降级判定。
 // tauri-plugin-updater JS API。版本比较/验签/下载全在插件（Rust 侧），不自研。
 
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -52,7 +52,7 @@ export function isMacOS(): boolean {
   return navigator.userAgent.includes("Macintosh");
 }
 
-/** 打开下载页（macOS 降级路径 + 「前往 Release」入口） */
+/** 打开下载页（macOS 降级路径 + 「前往 Release」入口）；官网门户站 */
 export async function openDownloadPage(): Promise<void> {
-  await openUrl("https://zhubaoduo.com/ainone-ui");
+  await openUrl("https://agent.zhubaoduo.com/");
 }
