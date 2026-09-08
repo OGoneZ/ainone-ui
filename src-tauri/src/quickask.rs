@@ -132,6 +132,32 @@ fn load_config(app: &tauri::AppHandle) -> Result<QuickAskConfig, String> {
     })
 }
 
+/// P32f：探测链路读取快问落盘配置（home 注入便于测试；生产由 harness_meta
+/// 传 None → 用 app config dir）。返回 (base_url, api_key, protocol 字符串)。
+/// 文件缺失/损坏 → None（探测回落表单值）。key 明文仅在 Rust 侧流转。
+pub(crate) fn load_config_for_probe(
+    _home: Option<&std::path::Path>,
+) -> Option<QuickAskProbeConfig> {
+    // harness_meta 无 AppHandle；直接读默认 config dir（与 config_path 同一目录）
+    let dir = dirs::config_dir()?.join("com.zhubaoduo.ainone-ui");
+    let path = dir.join("quickask.json");
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let c: QuickAskConfig = serde_json::from_str(&raw).ok()?;
+    Some(QuickAskProbeConfig {
+        base_url: c.base_url,
+        api_key: c.api_key,
+        protocol: c.protocol.as_str().to_string(),
+    })
+}
+
+/// 探测链路用的快问配置切片（key 明文只到请求头，不回传 WebView）
+#[derive(Debug, Clone)]
+pub struct QuickAskProbeConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub protocol: String,
+}
+
 fn save_config(app: &tauri::AppHandle, cfg: &QuickAskConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(cfg).map_err(|e| format!("序列化失败: {e}"))?;
     std::fs::write(config_path(app)?, json).map_err(|e| format!("写入快问配置失败: {e}"))

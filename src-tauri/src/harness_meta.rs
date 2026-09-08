@@ -595,11 +595,21 @@ pub async fn probe_models_with_key(
     // openai 兼容 Bearer 探测（key 用表单值，不自取）——用户自填 endpoint/key
     // 的快问探测用例因此可用。
     let kind = config_kind(adapter_id);
+    // P32f 补丁：quickask 的探测基准与 key 来自 quickask.json（表单值优先，空则自取
+    // 落盘配置——「自动采用 harness 配置」或用户上一次保存的 endpoint/key 即配套）。
+    // 协议按 quickask.json 的 protocol 字段（anthropic → x-api-key 双头）。
+    let qa = if adapter_id == "quickask" {
+        crate::quickask::load_config_for_probe(home)
+    } else {
+        None
+    };
     // Claude：表单 baseUrl 为空 → 本机配置的 BASE_URL 优先（中转场景官方地址必挂），再回落传入值
-    let url_base = if kind == Some(HarnessConfigKind::Claude)
-        && base_url.trim().is_empty()
-    {
-        claude_base_url(home).unwrap_or_else(|| base_url.to_string())
+    let url_base = if base_url.trim().is_empty() {
+        if kind == Some(HarnessConfigKind::Claude) {
+            claude_base_url(home).unwrap_or_default()
+        } else {
+            qa.as_ref().map(|q| q.base_url.clone()).unwrap_or_default()
+        }
     } else {
         base_url.to_string()
     };
@@ -610,6 +620,9 @@ pub async fn probe_models_with_key(
     // 鉴权头按协议分叉：anthropic → x-api-key；openai → Bearer。
     // key 来源：表单显式值 > 本机静态配置；均无 → 部分网关允许匿名列模型，不拦截直接发。
     let key = api_key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+    // quickask：表单 key 为空时回落 quickask.json 的既有 key（与 endpoint 配套）
+    let key = key.or_else(|| qa.as_ref().map(|q| q.api_key.clone()).filter(|k| !k.trim().is_empty()));
+    let qa_anthropic = qa.as_ref().is_some_and(|q| q.protocol == "anthropic");
     let mut req = reqwest::Client::new()
         .get(&url)
         .timeout(std::time::Duration::from_secs(10))
@@ -625,17 +638,26 @@ pub async fn probe_models_with_key(
             }
         }
         kind => {
-            // 含 codex/omp/pi/opencode（本机 key 自取）与 None（quickask/自定义，
-            // 仅表单 key，不自取——用户自填场景 key 已在表单）
-            let key = match (kind, key) {
-                (Some(HarnessConfigKind::Codex), None) => codex_api_key(home),
-                (Some(HarnessConfigKind::Omp), None) => omp_api_key(home),
-                (Some(HarnessConfigKind::Pi), None) => pi_api_key(home),
-                (Some(HarnessConfigKind::OpenCode), None) => opencode_api_key(home),
-                (_, k) => k,
-            };
-            if let Some(k) = key {
-                req = req.header("Authorization", format!("Bearer {k}"));
+            // 含 codex/omp/pi/opencode（本机 key 自取）、quickask（key 来自
+            // quickask.json/表单；anthropic 协议走 x-api-key 双头）与 None（自定义）。
+            if kind.is_none() && qa_anthropic {
+                if let Some(k) = key {
+                    req = req
+                        .header("x-api-key", &k)
+                        .header("anthropic-version", "2023-06-01")
+                        .header("Authorization", format!("Bearer {k}"));
+                }
+            } else {
+                let key = match (kind, key) {
+                    (Some(HarnessConfigKind::Codex), None) => codex_api_key(home),
+                    (Some(HarnessConfigKind::Omp), None) => omp_api_key(home),
+                    (Some(HarnessConfigKind::Pi), None) => pi_api_key(home),
+                    (Some(HarnessConfigKind::OpenCode), None) => opencode_api_key(home),
+                    (_, k) => k,
+                };
+                if let Some(k) = key {
+                    req = req.header("Authorization", format!("Bearer {k}"));
+                }
             }
         }
     }
@@ -1184,6 +1206,18 @@ wire_api = "responses"
         assert_ne!(e.kind, "bad_url", "有 baseUrl 的未知 id 不应被协议闸拦截: {e:?}");
         let e = probe_models_with_key("custom-xyz", "https://x.example.com", None, None).await.unwrap_err();
         assert_ne!(e.kind, "bad_url");
+    }
+
+    #[tokio::test]
+    async fn probe_models_quickask_falls_back_to_saved_config() {
+        // P32f：adapterId=quickask 且表单 baseUrl/key 空 → 回落 quickask.json 的
+        // base_url/api_key/protocol（auto:claude-code 场景 = anthropic 头）。
+        // 真机验证：本机 quickask.json 指向 aiapi.lejurobot.com（含 key）→
+        // 探测应成功返回模型列表（401 回归即此断言失败）。
+        match probe_models_with_key("quickask", "", None, None).await {
+            Ok(ids) => assert!(!ids.is_empty(), "真机 quickask.json 配置探测应返回模型列表"),
+            Err(e) => panic!("quickask 空 baseUrl 应回落落盘配置成功探测: {e:?}"),
+        }
     }
 
     #[tokio::test]
