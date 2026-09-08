@@ -190,6 +190,8 @@ function ThemeSelect({ theme, onChange }: { theme: string; onChange: (t: string)
           data-testid="theme-select"
           aria-label="选择主题"
           onMouseDown={(e) => {
+            // WKWebView 无 pointerdown → 手动合成（radix trigger 依赖它开菜单）；
+            // 真实 pointerdown 刚发过（≤250ms）则跳过，防双触发 toggle 立刻关闭
             if (performance.now() - lastRealPointerDown.current > 250) {
               e.currentTarget.dispatchEvent(
                 new PointerEvent("pointerdown", {

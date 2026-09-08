@@ -590,12 +590,13 @@ pub async fn probe_models_with_key(
     api_key: Option<&str>,
     home: Option<&Path>,
 ) -> Result<Vec<String>, ProbeError> {
-    let kind = config_kind(adapter_id).ok_or_else(|| ProbeError {
-        kind: "bad_url".into(),
-        message: format!("{adapter_id} 未配置协议，无法探测"),
-    })?;
+    // P32f：协议判定不再以 adapterId 是否登记为闸——有 endpoint 就该发探测。
+    // 登记的五家保持既有协议分叉与 key 自取；未登记的（quickask/自定义）按
+    // openai 兼容 Bearer 探测（key 用表单值，不自取）——用户自填 endpoint/key
+    // 的快问探测用例因此可用。
+    let kind = config_kind(adapter_id);
     // Claude：表单 baseUrl 为空 → 本机配置的 BASE_URL 优先（中转场景官方地址必挂），再回落传入值
-    let url_base = if kind == HarnessConfigKind::Claude
+    let url_base = if kind == Some(HarnessConfigKind::Claude)
         && base_url.trim().is_empty()
     {
         claude_base_url(home).unwrap_or_else(|| base_url.to_string())
@@ -614,7 +615,7 @@ pub async fn probe_models_with_key(
         .timeout(std::time::Duration::from_secs(10))
         .header("Accept", "application/json");
     match kind {
-        HarnessConfigKind::Claude => {
+        Some(HarnessConfigKind::Claude) => {
             let key = key.or_else(|| claude_api_key(home));
             if let Some(k) = key {
                 req = req
@@ -623,17 +624,15 @@ pub async fn probe_models_with_key(
                     .header("Authorization", format!("Bearer {k}"));
             }
         }
-        HarnessConfigKind::Codex | HarnessConfigKind::Omp | HarnessConfigKind::Pi
-        | HarnessConfigKind::OpenCode => {
-            let key = match key {
-                Some(k) => Some(k),
-                None => match kind {
-                    HarnessConfigKind::Codex => codex_api_key(home),
-                    HarnessConfigKind::Omp => omp_api_key(home),
-                    HarnessConfigKind::Pi => pi_api_key(home),
-                    HarnessConfigKind::OpenCode => opencode_api_key(home),
-                    _ => None,
-                },
+        kind => {
+            // 含 codex/omp/pi/opencode（本机 key 自取）与 None（quickask/自定义，
+            // 仅表单 key，不自取——用户自填场景 key 已在表单）
+            let key = match (kind, key) {
+                (Some(HarnessConfigKind::Codex), None) => codex_api_key(home),
+                (Some(HarnessConfigKind::Omp), None) => omp_api_key(home),
+                (Some(HarnessConfigKind::Pi), None) => pi_api_key(home),
+                (Some(HarnessConfigKind::OpenCode), None) => opencode_api_key(home),
+                (_, k) => k,
             };
             if let Some(k) = key {
                 req = req.header("Authorization", format!("Bearer {k}"));
@@ -1178,11 +1177,13 @@ wire_api = "responses"
     }
 
     #[tokio::test]
-    async fn probe_models_unknown_adapter_errors() {
-        // 未登记的 adapter id → bad_url 拦截（opencode 已登记协议，改用未知 id 验证）
+    async fn probe_models_custom_id_still_attempts() {
+        // P32f：未登记 id 不再被 bad_url 拦截——有 baseUrl 即按 openai 兼容（quickask/自定义）
+        // 发探测。该测试不发真请求：断言错误是网络/HTTP 类而非「未配置协议」。
+        let e = probe_models_with_key("quickask", "https://x.example.com/v1", Some("k"), None).await.unwrap_err();
+        assert_ne!(e.kind, "bad_url", "有 baseUrl 的未知 id 不应被协议闸拦截: {e:?}");
         let e = probe_models_with_key("custom-xyz", "https://x.example.com", None, None).await.unwrap_err();
-        assert_eq!(e.kind, "bad_url");
-        assert_eq!(e.message, "custom-xyz 未配置协议，无法探测");
+        assert_ne!(e.kind, "bad_url");
     }
 
     #[tokio::test]
