@@ -210,6 +210,20 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // M5：active prop 镜像——window 级监听闭包来自挂载帧，读 ref 取最新活跃态
   const activeRef = useRef(active);
   activeRef.current = active ?? true;
+  // P31 多 tab 模型独立切换：active 变为 true 时重抛当前会话句柄。
+  // App 只给 activeKey 的 ChatPanel 传 setter，但句柄仅在会话绑定时上抛——
+  // 切 tab 后 App.activeSession 可能仍持旧 tab 的句柄，侧栏切模型会打到
+  // 旧 tab 的会话（set_config_option 发错 sessionId）。重抛修正归属。
+  useEffect(() => {
+    if (active) {
+      onActiveSession?.(
+        sessionRef.current
+          ? { setConfigOption: sessionRef.current.setConfigOption ?? undefined }
+          : null,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
   // F-12-1 编辑重试：null = 非编辑态；否则为 {index, original}（index 处消息被替换）
   const [editTarget, setEditTarget] = useState<{ index: number; original: string } | null>(null);
   // F-12-5 diff 行内评论：待发评论集（随 tabKey 独立，按组件实例隔离）
