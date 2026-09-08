@@ -35,6 +35,18 @@ function ActivityToggleHint() {
   return <span className="activity-kbd-hint">（{formatBinding(bindings[0])} 展开全部）</span>;
 }
 
+/** P32 R5：渲染项稳定 key——tool 块用 toolCallId、其余按「类型:块序号」。
+ *  旧实现 key={i}：流式新增块时后续全部块 key 漂移 → 整段重挂载（Streamdown
+ *  对已渲染块重新解析）。稳定 key 保证既有块不因尾部追加而重建。导出供测试。 */
+export function renderItemKey(item: RenderItem, i: number): string {
+  if (item.type === "block") {
+    const b = item.block;
+    if (b.kind === "tool") return `tool:${b.toolCallId}`;
+    return `${b.kind}:${i}`;
+  }
+  return `group:${i}`;
+}
+
 export const MessageLine = memo(function MessageLine({
   msg,
   adapter,
@@ -117,7 +129,7 @@ export const MessageLine = memo(function MessageLine({
         {renderItems.map((item, i) =>
           item.type === "block" ? (
             <BlockView
-              key={i}
+              key={renderItemKey(item, i)}
               block={item.block}
               live={busy && isLast && i === renderItems.length - 1 && (item.block.kind === "thought" ? item.block.ms === undefined : item.block.kind === "text")}
               onSelect={onSelect}
@@ -127,7 +139,7 @@ export const MessageLine = memo(function MessageLine({
               onActivityOverrideClear={onActivityOverrideClear}
             />
           ) : (
-            <ActivityGroupCard key={i} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
+            <ActivityGroupCard key={renderItemKey(item, i)} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
           ),
         )}
         {/* p22e：turn 总耗时并入活动组卡实时走秒；纯 text 轮次不显示计时。
@@ -280,7 +292,7 @@ function ActivityGroupCard({
             </div>
           )}
           {item.blocks.map((b, i) => (
-            <BlockView key={i} block={b} live={false} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
+            <BlockView key={b.kind === "tool" ? `tool:${b.toolCallId}` : `${b.kind}:${i}`} block={b} live={false} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
           ))}
         </div>
       )}

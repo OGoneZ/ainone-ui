@@ -1,6 +1,7 @@
 // Markdown 渲染（P11）：Streamdown + 图片 lightbox + 选区批注监听。
 // 自 ChatPanel 拆出（P13 C3）。导出供测试与复用。
 
+import { memo } from "react";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { mermaid } from "@streamdown/mermaid";
@@ -30,8 +31,11 @@ const STREAMDOWN_COMPONENTS = {
   ),
 };
 
-/** P11：assistant 正文 markdown 渲染（导出供测试与复用；批注选区监听在容器上） */
-export function MarkdownView({
+/** P11：assistant 正文 markdown 渲染（导出供测试与复用；批注选区监听在容器上）。
+ *  P32 R5：memo 化——MessageLine 重渲染（如 diffComments/activityOverride 变化）
+ *  时，text/live/onSelect 引用未变的块跳过整棵 Streamdown 子树 reconcile。
+ *  onSelect 来自 ChatPanel useCallback（P11 F-R7 已稳定）。 */
+export const MarkdownView = memo(function MarkdownView({
   text,
   live,
   onSelect,
@@ -72,4 +76,4 @@ export function MarkdownView({
       </PhotoProvider>
     </div>
   );
-}
+});

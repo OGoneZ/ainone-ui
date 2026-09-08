@@ -1,6 +1,8 @@
 // 块渲染：text / thought / tool 三分支（P4 F-4-1/F-4-2）。自 ChatPanel 拆出（P13 C3）。
+// P32 R5：memo 化——MessageLine 重渲染时 props 引用未变的块跳过 reconcile；
+// 配合 MessageLine 的稳定 key（tool:toolCallId 等），流式新增块不拖动既有块。
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
@@ -260,7 +262,7 @@ function ToolContentView({
   }
 }
 
-export function BlockView({
+export const BlockView = memo(function BlockView({
   block,
   live,
   onSelect,
@@ -308,4 +310,4 @@ export function BlockView({
         />
       );
   }
-}
+});
