@@ -239,6 +239,22 @@ export function activeKeyOf(model: ModelLike): string {
   return sel?.getId() ?? "";
 }
 
+/** P34 R1：屏幕可见 tabKey 集合——每个 tabset 的选中 tab 都在屏幕上显示（分屏时
+ *  多个 tabset 各有一个可见 tab），与「全局焦点」（activeKeyOf，单值）是正交语义。
+ *  flexlayout positionTabPanels 的可见性判定即 `node.isSelected()`（per-tabset），
+ *  本函数与它同源。消费方：ChatPanel 的虚拟列表 enabled（可见才计算虚拟区；
+ *  display:none 的非选中 tab 冻结——P32 R7 的性能收益保留，绑定对象修正）。
+ *  空布局/无 tabset → 空集。 */
+export function visibleKeysOf(model: ModelLike): Set<string> {
+  const out = new Set<string>();
+  model.visitNodes((n) => {
+    if (n.getType() !== "tabset") return;
+    const sel = (n as { getSelectedNode?: () => { getId(): string } | undefined }).getSelectedNode?.();
+    if (sel) out.add(sel.getId());
+  });
+  return out;
+}
+
 // —— P30 R2：窗格内 Ctrl+Tab / Ctrl+Shift+Tab 循环切 tab ——
 
 /** 解析键盘事件是否为「窗格内切 tab」快捷键；不是则返回 null。
