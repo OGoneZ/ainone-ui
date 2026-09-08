@@ -18,7 +18,7 @@ export interface WriteOutcome {
 
 export type HarnessWriteTarget = "claude-code" | "codex" | "omp";
 
-/** 读静态配置元数据；pi/opencode 或文件缺失 → null（UI 降级） */
+/** 读静态配置元数据；文件缺失 → null（UI 降级） */
 export async function fetchHarnessMeta(adapterId: string): Promise<HarnessMeta | null> {
   return invoke<HarnessMeta | null>("harness_meta", { adapterId });
 }
@@ -46,7 +46,8 @@ export async function probeModels(
   return invoke<string[]>("models_probe", { adapterId, baseUrl, apiKey: apiKey ?? null });
 }
 
-/** 该 harness 是否支持配置写回（决定元数据面板模型/URL 行是否可点编辑） */
+/** 该 harness 是否支持配置写回（决定元数据面板模型/URL 行是否可点编辑）。
+ *  pi/opencode 不做定点替换（配置代写链路负责），仅这三家可编辑。 */
 export function supportsWrite(adapterId: string): boolean {
   return ["claude-code", "codex", "omp"].includes(adapterId);
 }

@@ -4,7 +4,9 @@
 //   claude-code → ~/.claude/settings.json：env.ANTHROPIC_BASE_URL + 顶层 model（[1m] 后缀去除）
 //   codex       → ~/.codex/config.toml：model_providers.<active>.base_url + 顶层 model
 //   omp         → ~/.omp/agent/models.yml：providers.<first>.baseUrl（key 判存在）；模型走 adapters.json args --model
-//   pi/opencode → 无验证过的单文件配置：返回 None（UI 只读，不写回）
+//   pi          → ~/.pi/agent/models.json：providers.<ainone|首个含 baseUrl>.baseUrl + apiKey
+//   opencode    → ~/.config/opencode/opencode.json：provider.ainone.options.baseURL/apiKey + 顶层 model
+//                 （与 harness_config.rs 配置代写同构；定点写回仅 baseUrl）
 //
 // 密钥纪律（与 quickask.rs 一致）：apiKey 只判存在性（api_key_present），明文不回传 WebView。
 // 写回：文本锚定定点替换（JSON 走 serde_json 定点字段、TOML/YML 走行级替换），
@@ -22,13 +24,15 @@ pub struct HarnessMeta {
 }
 
 /// 适配器 id → 支持读取/写回的配置种类。
-/// 返回 None = 该 harness 无验证过的配置文件（pi/opencode），读与写都不可用。
+/// 返回 None = 该 harness 无已知配置文件，读与写都不可用。
+/// pi/opencode 无验证过的定点替换语义（写回落到配置代写链路），读照常。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HarnessConfigKind {
     Claude,
     Codex,
     Omp,
     Pi,
+    OpenCode,
 }
 
 pub fn config_kind(adapter_id: &str) -> Option<HarnessConfigKind> {
@@ -37,6 +41,7 @@ pub fn config_kind(adapter_id: &str) -> Option<HarnessConfigKind> {
         "codex" => Some(HarnessConfigKind::Codex),
         "omp" => Some(HarnessConfigKind::Omp),
         "pi" => Some(HarnessConfigKind::Pi),
+        "opencode" => Some(HarnessConfigKind::OpenCode),
         _ => None,
     }
 }
@@ -47,6 +52,7 @@ fn settings_path(kind: HarnessConfigKind, home: &Path) -> PathBuf {
         HarnessConfigKind::Codex => home.join(".codex/config.toml"),
         HarnessConfigKind::Omp => home.join(".omp/agent/models.yml"),
         HarnessConfigKind::Pi => home.join(".pi/agent/models.json"),
+        HarnessConfigKind::OpenCode => home.join(".config/opencode/opencode.json"),
     }
 }
 
@@ -86,6 +92,7 @@ pub(crate) fn harness_meta_inner(adapter_id: &str, home: Option<&Path>) -> Optio
         HarnessConfigKind::Codex => meta_codex(&raw),
         HarnessConfigKind::Omp => meta_omp(&raw),
         HarnessConfigKind::Pi => meta_pi(&raw),
+        HarnessConfigKind::OpenCode => meta_opencode(&raw),
     }
 }
 
@@ -216,6 +223,48 @@ pub(crate) fn meta_pi(raw: &str) -> Option<HarnessMeta> {
     None
 }
 
+/// OpenCode opencode.json：provider.<ainone|首个含 baseURL>.options.baseURL + 顶层 model。
+/// 与 harness_config::read_view_text 同构（ainone 优先；model 带 "ainone/" 前缀时剥掉）。
+pub(crate) fn meta_opencode(raw: &str) -> Option<HarnessMeta> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let providers = v.get("provider")?.as_object()?;
+    let mut names: Vec<&String> = Vec::new();
+    if let Some(k) = providers.keys().find(|k| k.as_str() == "ainone") {
+        names.push(k);
+    }
+    for k in providers.keys() {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        let p = &providers[name];
+        let base_url = p
+            .get("options")
+            .and_then(|o| o.get("baseURL"))
+            .and_then(|b| b.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if base_url.is_none() {
+            continue;
+        }
+        // 配置代写落的是 "ainone/<model>"，剥掉 provider 前缀与 UI 口径一致
+        let model = v
+            .get("model")
+            .and_then(|m| m.as_str())
+            .map(|s| s.strip_prefix("ainone/").unwrap_or(s).to_string())
+            .filter(|m| !m.is_empty());
+        let key_present = p
+            .get("options")
+            .and_then(|o| o.get("apiKey"))
+            .and_then(|k| k.as_str())
+            .map(|k| !k.trim().is_empty())
+            .unwrap_or(false);
+        return Some(HarnessMeta { base_url, model, api_key_present: key_present });
+    }
+    None
+}
+
 // ---------- 写回 ----------
 
 pub(crate) const BAK_SUFFIX: &str = ".ainone-bak";
@@ -264,8 +313,8 @@ pub(crate) fn harness_settings_write_inner(
         HarnessConfigKind::Codex => write_codex(&raw, model, base_url)?,
         HarnessConfigKind::Omp => write_omp(&raw, base_url)?,
         // pi 无验证过的定点替换语义 → 引导走配置代写（三格齐落盘）
-        HarnessConfigKind::Pi => {
-            return Err("pi 不支持定点替换，请走设置页配置保存".into())
+        HarnessConfigKind::Pi | HarnessConfigKind::OpenCode => {
+            return Err("{adapter_id} 不支持定点替换，请走设置页配置保存".replace("{adapter_id}", adapter_id))
         }
     };
     backup(&path)?;
@@ -517,13 +566,15 @@ pub async fn probe_models_with_key(
                     .header("Authorization", format!("Bearer {k}"));
             }
         }
-        HarnessConfigKind::Codex | HarnessConfigKind::Omp | HarnessConfigKind::Pi => {
+        HarnessConfigKind::Codex | HarnessConfigKind::Omp | HarnessConfigKind::Pi
+        | HarnessConfigKind::OpenCode => {
             let key = match key {
                 Some(k) => Some(k),
                 None => match kind {
                     HarnessConfigKind::Codex => codex_api_key(home),
                     HarnessConfigKind::Omp => omp_api_key(home),
                     HarnessConfigKind::Pi => pi_api_key(home),
+                    HarnessConfigKind::OpenCode => opencode_api_key(home),
                     _ => None,
                 },
             };
@@ -632,6 +683,41 @@ fn omp_api_key(home: Option<&Path>) -> Option<String> {
     None
 }
 
+/// OpenCode opencode.json 的 provider.<ainone|首个含 baseURL>.options.apiKey
+/// （与 meta_opencode 同一 provider 优先级）。
+fn opencode_api_key(home: Option<&Path>) -> Option<String> {
+    let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
+    let raw = std::fs::read_to_string(home.join(".config/opencode/opencode.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let providers = v.get("provider")?.as_object()?;
+    let mut names: Vec<&String> = Vec::new();
+    if let Some(k) = providers.keys().find(|k| k.as_str() == "ainone") {
+        names.push(k);
+    }
+    for k in providers.keys() {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        let p = &providers[name];
+        if p.get("options")
+            .and_then(|o| o.get("baseURL"))
+            .and_then(|b| b.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return p
+                .get("options")
+                .and_then(|o| o.get("apiKey"))
+                .and_then(|k| k.as_str())
+                .map(String::from)
+                .filter(|k| !k.trim().is_empty());
+        }
+    }
+    None
+}
+
 /// 探测网关模型列表（命令入口；key 全程 Rust 侧流转）。
 /// api_key：设置页表单显式直传（非空优先），空/None 回落本机配置自取。
 #[tauri::command]
@@ -718,7 +804,7 @@ wire_api = "responses"
         assert_eq!(config_kind("codex"), Some(HarnessConfigKind::Codex));
         assert_eq!(config_kind("omp"), Some(HarnessConfigKind::Omp));
         assert_eq!(config_kind("pi"), Some(HarnessConfigKind::Pi));
-        assert_eq!(config_kind("opencode"), None);
+        assert_eq!(config_kind("opencode"), Some(HarnessConfigKind::OpenCode));
     }
 
     const PI: &str = r#"{"providers":{"ainone":{"baseUrl":"https://pi.example.com/v1","apiKey":"sk-pi","models":[{"id":"pi-model-1"}]}}}"#;
@@ -745,6 +831,32 @@ wire_api = "responses"
         assert!(meta_pi("not json").is_none());
         assert!(meta_pi("{}").is_none());
         assert!(meta_pi(r#"{"providers":{}}"#).is_none());
+    }
+
+    const OPENCODE: &str = r#"{"$schema":"https://opencode.ai/config.json","theme":"dark","provider":{"ainone":{"npm":"@ai-sdk/openai-compatible","name":"ainone","options":{"baseURL":"https://oc.example.com/v1","apiKey":"sk-oc"},"models":{"oc-model-1":{"name":"oc-model-1"}}}},"model":"ainone/oc-model-1"}"#;
+
+    #[test]
+    fn opencode_meta_reads_provider_base_and_model() {
+        let m = meta_opencode(OPENCODE).unwrap();
+        assert_eq!(m.base_url.as_deref(), Some("https://oc.example.com/v1"));
+        assert_eq!(m.model.as_deref(), Some("oc-model-1"), "代写的 ainone/ 前缀应剥掉");
+        assert!(m.api_key_present);
+    }
+
+    #[test]
+    fn opencode_meta_falls_back_to_user_provider() {
+        // ainone 缺失 → 回落首个含 baseURL 的 provider（与配置代写读回显同构）
+        let raw = r#"{"provider":{"my-gw":{"options":{"baseURL":"https://mygw/v1","apiKey":"sk"}}},"model":"plain-model"}"#;
+        let m = meta_opencode(raw).unwrap();
+        assert_eq!(m.base_url.as_deref(), Some("https://mygw/v1"));
+        assert_eq!(m.model.as_deref(), Some("plain-model"), "无 ainone/ 前缀的原样保留");
+    }
+
+    #[test]
+    fn opencode_meta_broken_or_empty_providers_is_none() {
+        assert!(meta_opencode("not json").is_none());
+        assert!(meta_opencode("{}").is_none());
+        assert!(meta_opencode(r#"{"provider":{}}"#).is_none());
     }
 
     #[test]
@@ -845,6 +957,9 @@ wire_api = "responses"
     fn write_requires_target_and_kind() {
         assert!(harness_settings_write_inner("omp", None, None, None).is_err());
         assert!(harness_settings_write_inner("pi", Some("m"), None, None).is_err());
+        // pi/opencode 无定点替换语义（写回落到配置代写链路），报错文案引导走设置页
+        assert!(harness_settings_write_inner("opencode", Some("m"), None, None).is_err());
+        assert!(harness_settings_write_inner("custom-x", Some("m"), None, None).is_err());
     }
 
     #[test]
@@ -921,9 +1036,11 @@ wire_api = "responses"
     }
 
     #[tokio::test]
-    async fn probe_models_unsupported_adapter_errors() {
-        let e = probe_models_with_key("opencode", "https://x.example.com", None, None).await.unwrap_err();
+    async fn probe_models_unknown_adapter_errors() {
+        // 未登记的 adapter id → bad_url 拦截（opencode 已登记协议，改用未知 id 验证）
+        let e = probe_models_with_key("custom-xyz", "https://x.example.com", None, None).await.unwrap_err();
         assert_eq!(e.kind, "bad_url");
+        assert_eq!(e.message, "custom-xyz 未配置协议，无法探测");
     }
 
     #[tokio::test]
@@ -938,6 +1055,13 @@ wire_api = "responses"
         assert_ne!(e.message, "无接口地址，无法探测");
         assert_ne!(e.message, "claude-code 未配置协议，无法探测");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn probe_models_opencode_without_config_still_attempts() {
+        // opencode 现已登记协议（OpenAI 兼容 Bearer）；无本地 key 也允许探测（部分网关可匿名列模型）
+        let e = probe_models_with_key("opencode", "https://x.example.com/v1", None, None).await.unwrap_err();
+        assert_ne!(e.kind, "bad_url", "无 key 不应被 bad_url 拦截: {e:?}");
     }
 
     #[tokio::test]
