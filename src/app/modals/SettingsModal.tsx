@@ -9,12 +9,20 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Adapter, AdapterState, BridgeInfo, CliInstallInfo, AuthInfo } from "@/ipc/adapters";
 import { installBridge, installCli, refreshAdapterStatus, harnessConfigRead, harnessConfigSave, permissionModeRead, permissionModeSave } from "@/ipc/adapters";
 import { runtimeDiagnostics, runtimeSummaryLine } from "@/ipc/runtime";
+import { checkForUpdate, downloadAndInstall, isMacOS, openDownloadPage } from "@/ipc/updater";
 import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
 import { asrConfigGet, asrConfigSave, type AsrConfigView } from "@/ipc/asr";
 import { ModelSwitchPanel } from "@/sidebar/ModelSwitchPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { ThemeAutoIcon, ThemeLightIcon, ThemeDarkIcon, ChevronDownIcon, CheckIcon } from "@/components/ui/icons";
 import { Switch } from "@/components/ui/switch";
 
 interface Props {
@@ -149,12 +157,63 @@ function statusLine(a: EditableAdapter): { text: string; cls: string } {
   }
 }
 
+/** P26：主题选择下拉（替换原生 select）——三选带图标与说明两行，当前项高亮。
+ *  触发钮伪装输入框样式（同 ModelSwitchPanel 的 adapter-cfg-model 手法）。 */
+const THEME_OPTIONS: Array<{ value: string; Icon: typeof ThemeLightIcon; title: string; desc: string }> = [
+  { value: "light", Icon: ThemeLightIcon, title: "浅色模式", desc: "始终使用浅色主题" },
+  { value: "dark", Icon: ThemeDarkIcon, title: "深色模式", desc: "始终使用深色主题" },
+  { value: "auto", Icon: ThemeAutoIcon, title: "自动模式", desc: "跟随系统主题设置" },
+];
+
+function ThemeSelect({ theme, onChange }: { theme: string; onChange: (t: string) => void }) {
+  const current = THEME_OPTIONS.find((o) => o.value === theme) ?? THEME_OPTIONS[2];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="theme-select-trigger" data-testid="theme-select" aria-label="选择主题">
+          <span className="theme-select-value">
+            <current.Icon style={{ width: 15, height: 15, strokeWidth: 1.75 }} />
+            {current.title}
+          </span>
+          <ChevronDownIcon style={{ width: 14, height: 14, strokeWidth: 1.75, opacity: 0.6 }} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="theme-select-menu">
+        {THEME_OPTIONS.map((o) => (
+          <DropdownMenuItem
+            key={o.value}
+            className={o.value === theme ? "theme-select-item active" : "theme-select-item"}
+            data-testid={`theme-option-${o.value}`}
+            onSelect={() => onChange(o.value)}
+          >
+            <o.Icon style={{ width: 15, height: 15, strokeWidth: 1.75, flexShrink: 0 }} />
+            <span className="theme-select-item-text">
+              <span className="theme-select-item-title">{o.title}</span>
+              <span className="theme-select-item-desc">{o.desc}</span>
+            </span>
+            {o.value === theme && <CheckIcon className="theme-select-check" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: Props) {
   const [items, setItems] = useState<EditableAdapter[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // P29：「更多服务」折叠区（快问 + 语音）展开态
   const [moreOpen, setMoreOpen] = useState(false);
+  // P32 F-32-3：检查更新（设置页手动触发，不自动查）
+  const [updateState, setUpdateState] = useState<
+    | { kind: "idle" }
+    | { kind: "checking" }
+    | { kind: "up-to-date" }
+    | { kind: "available"; version: string; notes: string; downloading: boolean; received: number; total: number | null }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const macOs = isMacOS();
   /** P31：运行时状态一行文案（harness 区块尾部小字，诊断排障用） */
   const [runtimeLine, setRuntimeLine] = useState("运行时：探测中…");
   // F-8-7 快问模型配置（P22：protocol/source 由 Rust 回传，视图展示来源徽标）
@@ -695,14 +754,78 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
           {/* ============ 分区一：外观（P26 R3） ============ */}
           <section className="settings-section">
             <h3 className="settings-section-title">外观</h3>
-            <label className="settings-theme-row">
+            <div className="settings-theme-row">
               主题
-              <select value={theme} onChange={(e) => onThemeChange(e.target.value)}>
-                <option value="auto">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </select>
-            </label>
+              <ThemeSelect theme={theme} onChange={onThemeChange} />
+            </div>
+          </section>
+
+          {/* ============ 分区：版本与更新（P32 F-32-3，手动检查） ============ */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">版本与更新</h3>
+            <div className="settings-card">
+              <div className="settings-card-head">
+                <h4>当前版本 {__APP_VERSION__}</h4>
+                {updateState.kind === "idle" && (
+                  <button
+                    data-testid="check-update"
+                    onClick={() => {
+                      setUpdateState({ kind: "checking" });
+                      void checkForUpdate().then((r) => {
+                        if (r.kind === "up-to-date") setUpdateState({ kind: "up-to-date" });
+                        else if (r.kind === "available")
+                          setUpdateState({ kind: "available", version: r.version ?? "", notes: r.notes ?? "", downloading: false, received: 0, total: null });
+                        else setUpdateState({ kind: "error", message: r.message ?? "未知错误" });
+                      });
+                    }}
+                  >
+                    检查更新
+                  </button>
+                )}
+              </div>
+              {updateState.kind === "checking" && <p className="settings-hint">正在检查…</p>}
+              {updateState.kind === "up-to-date" && <p className="settings-hint">已是最新版本 ✓</p>}
+              {updateState.kind === "error" && (
+                <p className="settings-hint" style={{ color: "var(--danger)" }}>检查失败：{updateState.message}</p>
+              )}
+              {updateState.kind === "available" && (
+                <>
+                  <p className="settings-hint">
+                    发现新版本 <strong>{updateState.version}</strong>
+                    {updateState.notes && <span style={{ opacity: 0.75 }}> · {updateState.notes.slice(0, 80)}</span>}
+                  </p>
+                  {macOs ? (
+                    /* macOS：未签名（用户不购买开发者账号）→ updater 安装路径不可用，
+                       降级为前往下载页手动安装（规格 F-32-3 第 4 条 / R-32-3） */
+                    <button data-testid="goto-download" onClick={() => void openDownloadPage()}>
+                      前往下载页
+                    </button>
+                  ) : (
+                    <button
+                      data-testid="install-update"
+                      disabled={updateState.downloading}
+                      onClick={() => {
+                        if (updateState.kind !== "available") return;
+                        setUpdateState({ ...updateState, downloading: true });
+                        checkForUpdate()
+                          .then((r) => (r.kind === "available" && r.update ? r.update : Promise.reject(new Error("更新已失效，请重新检查"))))
+                          .then((u) =>
+                            downloadAndInstall(u, (received, total) => {
+                              setUpdateState((s) =>
+                                s.kind === "available" ? { ...s, received, total: total ?? s.total } : s,
+                              );
+                            }),
+                          );
+                      }}
+                    >
+                      {updateState.downloading
+                        ? `下载中… ${Math.round(updateState.received / 1024)}KB${updateState.total ? ` / ${Math.round(updateState.total / 1024)}KB` : ""}`
+                        : "下载并安装"}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </section>
 
           {/* ============ 分区二：harness（P29 卡片化） ============ */}
