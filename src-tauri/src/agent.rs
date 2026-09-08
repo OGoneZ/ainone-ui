@@ -102,16 +102,24 @@ fn now_ms() -> f64 {
 }
 
 /// 流到前端的事件（channel 的 onmessage 会收到 { event, payload }）
+/// P32 R8：Stdout/Stderr payload 改 base64 字符串——Tauri v2 Channel 无二进制
+/// 支持，Vec<u8> 会被 serde_json 序列化成 number[]（体积 ~4x），base64 ~1.33x。
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "payload", rename_all = "camelCase")]
 pub enum AgentEvent {
-    Stdout(Vec<u8>),
-    Stderr(Vec<u8>),
+    Stdout(String),
+    Stderr(String),
     Error(String),
     Terminated {
         code: Option<i32>,
         signal: Option<i32>,
     },
+}
+
+/// P32 R8：字节块 → base64 字符串（事件通道编码，前端 atob 还原）。
+pub fn b64(data: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 pub struct AgentStore(pub Mutex<HashMap<u64, CommandChild>>);
@@ -305,8 +313,8 @@ pub fn pump_events(
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             let js = match event {
-                CommandEvent::Stdout(b) => AgentEvent::Stdout(b),
-                CommandEvent::Stderr(b) => AgentEvent::Stderr(b),
+                CommandEvent::Stdout(b) => AgentEvent::Stdout(b64(&b)),
+                CommandEvent::Stderr(b) => AgentEvent::Stderr(b64(&b)),
                 CommandEvent::Error(e) => {
                     log::warn!("[agent] 进程错误: {e}");
                     AgentEvent::Error(e)

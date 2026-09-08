@@ -43,7 +43,6 @@ function renderRail(props: Partial<Parameters<typeof RightRail>[0]> = {}) {
       sessionId={null}
       cwd="/Users/me/dev"
       session={null}
-      messages={[]}
       open={true}
       tab="meta"
       onSwitchTab={() => {}}

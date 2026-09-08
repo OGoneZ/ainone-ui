@@ -9,6 +9,7 @@
 // 数据形状：Channel 推 UTF-8 字节块，这里流式解码为 string（多字节跨 chunk 不断裂）。
 
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { base64ToBytes } from "@/ipc/base64";
 
 export interface TerminalSession {
   /** Rust 侧会话句柄（write/resize/kill 均以此为键） */
@@ -36,10 +37,13 @@ interface ShellSpec {
   path: string;
 }
 
-/** Rust TerminalEvent 序列化后的形状（serde tag="event"） */
+/** Rust TerminalEvent 序列化后的形状（serde tag="event"）。
+ *  P32 R8：data payload 为 base64 字符串（Rust 侧编码，通道体积 ~1.33x）。 */
 type TerminalEvent =
-  | { event: "data"; payload: number[] }
+  | { event: "data"; payload: string }
   | { event: "exited"; payload: { code: number } };
+
+/** P32 R8：解码走 @/ipc/base64 共享实现（与 bridge.ts 同源） */
 
 async function defaultShellSpec(): Promise<ShellSpec> {
   try {
@@ -67,8 +71,8 @@ export async function createTerminal(opts: CreateTerminalOptions = {}): Promise<
   channel.onmessage = (msg) => {
     switch (msg.event) {
       case "data":
-        // payload 经 serde 是 number[]，流式解码保证多字节跨 chunk 不断裂
-        for (const cb of dataCbs) cb(decoder.decode(Uint8Array.from(msg.payload), { stream: true }));
+        // base64 还原为字节后流式解码，多字节跨 chunk 不断裂（语义与原 number[] 路径一致）
+        for (const cb of dataCbs) cb(decoder.decode(base64ToBytes(msg.payload), { stream: true }));
         break;
       case "exited":
         for (const cb of exitCbs) cb(msg.payload.code);

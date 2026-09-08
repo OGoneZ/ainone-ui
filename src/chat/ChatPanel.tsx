@@ -135,8 +135,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const workspaceCwd = cwd && cwd.length > 0 ? cwd : adapter.cwd;
 
-  // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文
-  const typeText = useTypewriter(typewriterHint(adapter));
+  // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文。
+  // P32 R3：非激活窗格（display:none 渲染照跑）或用户已输入时暂停——
+  // 旧实现无条件 12.5 渲染/s × 每 tab，后台窗格纯浪费。
+  const typeText = useTypewriter(typewriterHint(adapter), active && input.length === 0);
 
   // @ 候选（F-11-3）：菜单展开才计算（扁平化 + fuzzy 过滤）
   const atMatches = useMemo(() => {
@@ -884,17 +886,27 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const text = quickSel;
     logger.info("chat", "quick-ask", { textLen: text.length });
     setQuickPop({ state: "streaming", text: "" });
+    // P32 R6：delta 按帧合并提交——复用 streamCommitThrottle（与主聊天流式
+    // 同一节流语义）。SSE 每条 delta 一次 setState → 悬浮窗所在 ChatPanel
+    // 全量重渲染；rAF 合帧后 setState 频率与显示帧率对齐。完成/异常时 flush。
+    let pendingText = "";
+    const throttle = createStreamCommitThrottle(() => {
+      setQuickPop((prev) =>
+        prev && (prev.state === "streaming" || prev.state === "ok")
+          ? { state: "streaming", text: pendingText }
+          : prev,
+      );
+    });
     try {
       // P27 流式：Rust 侧 SSE 逐块推增量，悬浮窗实时渲染（不再整段等完）
       const out = await quickAsk(text, (delta) => {
-        setQuickPop((prev) =>
-          prev && (prev.state === "streaming" || prev.state === "ok")
-            ? { state: "streaming", text: prev.text + delta }
-            : prev,
-        );
+        pendingText += delta;
+        throttle.schedule();
       });
+      throttle.dispose();
       setQuickPop({ state: "ok", text: out });
     } catch (e) {
+      throttle.dispose();
       setQuickPop({ state: "error", text: String(e) });
     }
   }
@@ -949,8 +961,17 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     // 「累积结果 → store」按渲染帧合并提交。实测 8 条/s 的 update 频率 ×
     // 每条全量重渲染是 WebView 满载主因（2026-09-08 事故），节流后每帧
     // 最多一次提交，流式期间的渲染次数与帧率对齐而非与事件到达率对齐。
+    // P32 R1：lastEventAt 并入节流提交——旧实现每条内容事件都 patch 一次
+    // lastEventAt（事件率 8-10/s），store 写频率未被 P31 节流覆盖，且 prop
+    // 下传所有 MessageLine 击穿 memo。改为 commit 时一并写入（帧级），事件
+    // 循环内只记到局部变量。
+    let lastEventAtPending: number | undefined;
     const throttle = createStreamCommitThrottle(() => {
       useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
+      if (lastEventAtPending !== undefined) {
+        useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
+        lastEventAtPending = undefined;
+      }
     });
     const p = (async () => {
       try {
@@ -1006,14 +1027,20 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           }
           const next = applyEvent(turnRef.current, e, Date.now);
           turnRef.current = next;
-          // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）；
-          // lastEventAt 是标量 patch，跟随节流提交（不额外触发整列表重渲染）
-          useSessionStore.getState().patch(tabKey, { lastEventAt: Date.now() });
+          // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）。
+          // P32 R1：不再逐事件 patch store（事件率写库击穿 memo），记到局部变量
+          // 随节流提交（帧级），flush 时一并落定终态
+          lastEventAtPending = Date.now();
           throttle.schedule();
         });
         // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）；
         // 空 turn（无事件）不新起 assistant 气泡（编辑重试后的静默重开场景）
         throttle.flush(); // 强制提交帧内未落的累积快照（终态必须可见）
+        if (lastEventAtPending !== undefined) {
+          // P32 R1：帧内事件无 pending 提交时（如 flush 前 schedule 未触发），终态 lastEventAt 仍落定
+          useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
+          lastEventAtPending = undefined;
+        }
         if (turnRef.current.blocks.length > 0) {
           useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
         }
@@ -1041,6 +1068,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
         };
         useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
+        if (lastEventAtPending !== undefined) {
+          // P32 R1：异常收口同样落定 lastEventAt（finally 会清空，此写只为语义完整：
+          // 静默计时基准在错误块渲染期间仍可用）
+          useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
+          lastEventAtPending = undefined;
+        }
         // 队列条目执行失败 → 回插队首（条目不丢）。重试语义：isRetry 防死循环
         //（retried 条目失败不再回插）；不撤 user 气泡——已发生的尝试是事实。
         if (opts?.queueItemId && !opts?.isRetry) {
@@ -1203,13 +1236,19 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // 而不是点了报错）。回溯不 gate——软回溯是纯本地能力，与 harness 无关。
   const forkEnabled = canFork(rt?.capabilities ?? null);
 
-  // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息
+  // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息。
+  // P32 R7：enabled: active——flexlayout 非激活窗格 display:none，滚动容器
+  // rect=0 会让 calculateRange 短路（outerSize=0 → range=null）→ 全部虚拟项
+  // 卸载，切回时整列表重挂载 + measureElement 全量重测 + Streamdown 重解析。
+  // enabled=false 时 virtualizer 冻结（源码核实：scrollRect/scrollOffset 置
+  // null、不挂 ResizeObserver、不消费 scrollElement），切回自动恢复观察。
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => chatScrollRef.current,
     estimateSize: () => 120,
     overscan: 8,
+    enabled: active,
   });
 
   // F-11-9 上一条指令回跳气泡
@@ -1518,7 +1557,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   adapter={adapter}
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
-                  lastEventAt={rt?.lastEventAt}
+                  // P32 R1：lastEventAt 只传末条——消费点（TurnElapsed）仅
+                  // busy && isLast 需要；传所有行会让每次提交击穿全部 MessageLine 的 memo
+                  lastEventAt={vi.index === messages.length - 1 ? rt?.lastEventAt : undefined}
                   onSelect={onSelectText}
                   onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}

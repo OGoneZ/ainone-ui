@@ -8,6 +8,7 @@
 //   - 不做 JSONL 行切分——交给 SDK 内置 LineBuffer（只按 LF 切行，正是 DEC-5 语义）
 
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { base64ToBytes } from "@/ipc/base64";
 import { logger } from "@/lib/logger";
 
 export interface HarnessProcess {
@@ -21,17 +22,16 @@ export interface HarnessProcess {
   stderrTail: () => string;
 }
 
-/** Rust 侧 AgentEvent 序列化后的形状（serde tag="event"） */
+/** Rust 侧 AgentEvent 序列化后的形状（serde tag="event"）。
+ *  P32 R8：stdout/stderr payload 为 base64 字符串（Rust 侧 b64() 编码，
+ *  通道体积从 number[] 的 ~4x 降到 ~1.33x）。 */
 type AgentEvent =
-  | { event: "stdout"; payload: number[] }
-  | { event: "stderr"; payload: number[] }
+  | { event: "stdout"; payload: string }
+  | { event: "stderr"; payload: string }
   | { event: "error"; payload: string }
   | { event: "terminated"; payload: { code: number | null; signal: number | null } };
 
-function bytes(payload: number[] | string): Uint8Array {
-  if (typeof payload === "string") return new TextEncoder().encode(payload);
-  return Uint8Array.from(payload);
-}
+/** P32 R8：解码走 @/ipc/base64 共享实现（与 pty.ts 同源） */
 
 /**
  * spawn 一个 harness 子进程，并把它暴露成 SDK 可用的双向字节流。
@@ -68,11 +68,11 @@ export async function spawnHarness(
   channel.onmessage = (msg) => {
     switch (msg.event) {
       case "stdout":
-        stdoutCtrl.enqueue(bytes(msg.payload));
+        stdoutCtrl.enqueue(base64ToBytes(msg.payload));
         break;
       case "stderr":
-        stderrTailStr = (stderrTailStr + new TextDecoder().decode(Uint8Array.from(msg.payload))).slice(-2048);
-        stderrCtrl.enqueue(bytes(msg.payload));
+        stderrTailStr = (stderrTailStr + new TextDecoder().decode(base64ToBytes(msg.payload))).slice(-2048);
+        stderrCtrl.enqueue(base64ToBytes(msg.payload));
         break;
       case "error":
         // 进程级错误：中断 stdout 流并标记结束

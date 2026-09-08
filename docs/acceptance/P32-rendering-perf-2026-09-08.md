@@ -1,0 +1,57 @@
+# P32 渲染性能优化验收纪要（2026-09-08；与并行期 p32_stream_ux 撞号，本文件是其性能系列验收）
+
+> 分支：`zhubaoduo/perf/p32_rendering_perf`（worktree `.claude/worktrees/p32-perf-rendering`）
+> 规格：`docs/plan-p32-rendering-perf.md`（R1–R8 全部落地，R9/原#10 经复核取消）
+
+## 1. 逐项验收
+
+| 项 | 内容 | 验收证据 | 状态 |
+|---|---|---|---|
+| R1 | lastEventAt 并入流式节流提交 + 只传末条 MessageLine | streamCommitThrottle.test 新增 3 例（帧内合并取最后时间戳、跨帧写次数=帧数、无事件零开销）；ChatPanel 3 个测试文件 29 例全绿。事件率 396 条回放下 store 写次数 ≤ 帧数（测试锁定） | ✅ |
+| R2 | App 级 store 订阅拆分（runtime 整订阅 → useShallow 编码投影 + messages 下沉 RightRail） | App.test 15 例全绿（含「历史去重」「Ctrl+K」「终端 tab 右栏」3 个原失败用例）；sessionStatus.test 适配新签名；RightRail.test 3 例全绿 | ✅ |
+| R3 | useTypewriter 暂停语义（active && input 空才打字） | useTypewriter.test 4 例（fake timers）：enabled=false 零 tick、翻转启停、循环/重置语义保持 | ✅ |
+| R4 | harness stderr 批量转发（500ms 窗口 + EOF 清尾 + 降 debug 级） | session-core.stderr.test 6 例：1000 chunk → 1 次回调、多窗口稳态、UTF-8 字节劈开不断裂、EOF 清尾不丢、decoder 状态归位、空窗口 no-op | ✅ |
+| R5 | BlockView/MarkdownView memo + 块渲染稳定 key（tool→toolCallId） | MessageLine.keys.test 5 例：尾部追加不动既有 key、中部插入不漂移；chat 全量 216 例回归全绿 | ✅ |
+| R6 | quickAsk delta 按帧合并提交 | 复用 streamCommitThrottle（同一套 10 例测试覆盖语义）；ChatPanel 29 例回归全绿；终态以 invoke resolve 完整文本为准不丢字 | ✅ |
+| R7 | 虚拟列表 enabled: active（隐藏窗格冻结） | virtual-core 3.17.8 源码核实 enabled 语义；app/chat 全量回归全绿；jumpToIndex 语义不变 | ✅ |
+| R8 | 子进程输出 IPC base64 编码（agent + terminal 双链路） | cargo test 133 passed（含 terminal_event_shape 断言 serde 形状 + b64 值「AQI=」）；base64.test 4 例（STANDARD padding 往返/空串/4KB 全值域/UTF-8 还原）；pty.test 多字节用例改 base64 形状通过 | ✅ |
+
+**经复核取消**：
+- 原#8「mermaid 流式期激活」——mermaid 仅在围栏闭合后渲染，未闭合零开销，与 code 高亮的每帧重高亮不同质。
+- 原#10「useElapsedTicker 每秒重渲染」——interval 在叶子组件（TurnElapsed/ThoughtView）内部，只重渲染自身，不打穿 memo。
+
+## 2. 关键实现决策
+
+1. **R2 投影用编码字符串而非嵌套对象**：首版投影 `Record<string, {busy, perm, hasMessages}>` 会被 useShallow 逐 key `Object.is` 打穿（每帧新对象引用）→ App 无限渲染（App.test Maximum update depth 实锤，stash 对照确认非存量问题）。改为 `tabKey → "busy|permTitle|hasMessages"` 编码字符串，原始值浅比较稳定。
+2. **R4 批量器独立纯函数**（createStderrBatcher）：原计划直接在 session-core 内改循环，但单测需要完整 NDJSON 握手 mock，成本高且脆。抽为零依赖纯函数（DEC-10 惯例），EOF 清尾/decoder 状态全部可测。
+3. **R8 不做小包 coalesce**：harness stdout 是 NDJSON 行粒度，行级事件已够稀疏；强行合并引入可感延迟，收益不成比例。终端 4KB chunk 保持（PTY 粒度即此）。
+4. **R8 语义保真**：TextDecoder 仍用 stream 模式（base64 还原字节后解码），多字节跨 chunk 不断裂语义与旧 number[] 路径逐位一致（pty.test 用例改写后通过）。
+
+## 3. 总验证
+
+- `pnpm test`：**78 文件 / 609 用例全绿**
+- `cd src-tauri && cargo test`：**133 passed / 0 failed**
+- `pnpm build`（tsc + vite build）：通过（chunk 大小警告为存量项，与本轮无关）
+- 行为不变性红线：P31 的 50 条突发 agent_text 终态完整性测试保持通过；权限/提问卡/队列/回溯/分叉链路测试全绿。
+
+## 4. 提交清单（worktree 内逐项提交）
+
+| commit | 内容 |
+|---|---|
+| (docs) | P32 规格书（复核结论 + 参照实现 + R1-R8） |
+| perf(chat) R1 | lastEventAt 并入节流 + 只传末条 |
+| perf(app) R2 | App 订阅拆分（编码投影） |
+| perf(chat) R3 | typewriter 暂停语义 |
+| perf(acp) R4 | stderr 批量转发 |
+| perf(chat) R5 | Block memo + 稳定 key |
+| perf(chat) R6 | quickAsk delta 节流 |
+| perf(chat) R7 | 虚拟列表 enabled |
+| perf(ipc) R8 | IPC base64 编码 |
+
+## 5. 预期效果（对照 2026-09-08 事故场景）
+
+- 流式 turn 期间 store 写频率：事件率（8-10/s×每事件多路写）→ 帧率（≤60/s 单写合并）
+- 非末条 MessageLine：流式期间 memo 全程生效，零 reconcile
+- 后台 tab（N 个）：打字机 12.5 渲染/s×N → 0；虚拟计算 → 冻结；App/侧栏/RightRail 零重渲染
+- 终端/大工具输出：通道 JSON 体积 ~4x → ~1.33x；number[] 逐字节构造 → atob 直还原
+- 啰嗦 harness stderr：每 chunk 一次 IPC → ≤2 次/s

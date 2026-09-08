@@ -132,6 +132,39 @@ export interface OpenOptions {
   initTimeoutMs?: number;
 }
 
+/** P32 R4：stderr 批量转发器——字节块累积进 500ms 窗口，窗口到期或 EOF 清尾时
+ *  以拼接后的完整文本回调一次。TextDecoder stream 模式保证多字节跨 chunk 不断裂。
+ *  独立导出：零依赖可单测（DEC-10）。windowMs 注入便于测试。
+ *  返回的 flush 兼作 push（传 undefined = 仅清尾）。 */
+export function createStderrBatcher(
+  onFlush: (text: string) => void,
+  windowMs = 500,
+): (chunk?: Uint8Array) => void {
+  const dec = new TextDecoder();
+  let buf = "";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const emit = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (buf) {
+      onFlush(buf);
+      buf = "";
+    }
+  };
+  return (chunk) => {
+    if (chunk === undefined) {
+      // EOF/异常清尾：补齐 decoder 尾部状态 + 落剩余文本
+      buf += dec.decode();
+      emit();
+      return;
+    }
+    buf += dec.decode(chunk, { stream: true });
+    if (!timer) timer = setTimeout(emit, windowMs);
+  };
+}
+
 /** 启动期错误文案：附退出码与 stderr 尾部，替代模糊的静默失败 */
 function startupFailMessage(what: string, code: number | null | undefined, stderrTail?: () => string): string {
   const tail = stderrTail?.().trim();
@@ -254,14 +287,22 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
   const stream = acp.ndJsonStream(streams.stdin, streams.stdout);
   const connection = app.connect(stream);
 
-  // stderr 仅日志
+  // stderr 仅日志。P32 R4：批量转发——啰嗦的 harness（debug 输出）逐块
+  // console.warn 会经 installConsoleForward 每块走一次 plugin-log IPC + 落盘
+  // （IPC 风暴），批量窗口合并后调用次数与 chunk 数解耦；stderrTail 环形
+  // 缓冲（P4）不受影响。实现抽为 createStderrBatcher（可单测，DEC-10）。
   void (async () => {
     const reader = streams.stderr.getReader();
-    const dec = new TextDecoder();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) console.warn("[harness stderr]", dec.decode(value));
+    const flush = createStderrBatcher((text) => console.debug("[harness stderr]", text));
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) flush(value);
+      }
+      flush(); // EOF 清尾
+    } catch {
+      flush(); // stderr 读失败不影响会话主链路
     }
   })();
 
