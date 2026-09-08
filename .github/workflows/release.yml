@@ -112,6 +112,10 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         # 版本一致性由 preflight 门禁保证（tag == conf 才放行），产物文件名内嵌
         # 的就是 conf 版本 = tag 版本，无需 --config 注入、无需改文件名补丁。
+        # P32 F-32-3：updater 签名密钥经 secrets 注入（TAURI_SIGNING_PRIVATE_KEY
+        # = ~/.tauri/ainone-ui.key 内容）。conf 已开 createUpdaterArtifacts=true，
+        # 密钥存在 → tauri build 产出更新产物 + .sig；缺密钥则该步骤失败
+        # （fail loud：发版必须带签名，否则 updater 链路断）。
         # 注意：签名/公证 env 只在 Apple secrets 实际配置后才注入。secrets 引用会把
         # 空字符串设进环境，tauri bundler 判 APPLE_CERTIFICATE 非空即走 keychain
         # setup——空串触发 security import 必炸 SecKeychainItemImport（首发实锤）。
@@ -123,6 +127,9 @@ jobs:
         #   APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         #   APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         #   APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.args }}
 
@@ -203,6 +210,96 @@ jobs:
             }' > latest.json
           cat latest.json
 
+      - name: Generate latest-updater.json (updater manifest)
+        # P32 F-32-3：updater 消费清单（与上面人工下载清单 latest.json 解耦）。
+        # tauri-action 已按 createUpdaterArtifacts=true 产出各平台更新产物及
+        # 对应 .sig 签名文件（TAURI_SIGNING_PRIVATE_KEY 注入 build 作业后生成）。
+        # 产物命名（官方文档 v2.tauri.app/plugin/updater 实证）：
+        #   macOS: {app}.app.tar.gz(+.sig) —— 注意 tauri 打包时产物名即
+        #          "ainone-ui.app.tar.gz"，无平台前缀，双架构靠【所在目录】区分
+        #   Windows: {app}-setup.exe.nsis.zip(+.sig)
+        #   Linux: {app}.AppImage.tar.gz(+.sig)
+        # 平台键 = 插件运行期 target 判定（darwin-aarch64/darwin-x86_64/
+        # windows-x86_64/linux-x86_64，插件源码 updater.rs::target()）。
+        # macOS 双架构同名问题：artifact 展平前按各自 matrix 目录分桶取件。
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BASE_URL: https://pkg.zhubaoduo.com/v${{ needs.preflight.outputs.version }}
+        run: |
+          set -e
+          cd bundles
+          # macOS 双架构：tauri-action artifact 仍保留 target 三元组目录前缀
+          #（展平发生在 installers 上传步骤），此处按目录特征分桶
+          UPD_ARM=$(find . -name '*.app.tar.gz' | grep -i aarch64 | head -1)
+          UPD_X64=$(find . -name '*.app.tar.gz' | grep -vi aarch64 | head -1)
+          UPD_NSIS=$(find . -name '*.nsis.zip' | head -1)
+          UPD_APPIMAGE=$(find . -name '*.AppImage.tar.gz' | head -1)
+
+          for f in "$UPD_ARM" "$UPD_X64" "$UPD_NSIS" "$UPD_APPIMAGE"; do
+            [ -z "$f" ] && { echo "ERROR: updater bundle missing ($f)"; exit 1; }
+          done
+          # .sig 必须与产物同在（tauri build 相邻生成），缺失即失败（不许错位签名上架）
+          for f in "$UPD_ARM" "$UPD_X64" "$UPD_NSIS" "$UPD_APPIMAGE"; do
+            [ -f "$f.sig" ] || { echo "ERROR: signature missing for $f"; exit 1; }
+          done
+
+          # 双架构 macOS 同名（ainone-ui.app.tar.gz）→ 重命名区分后平铺
+          mv "$UPD_ARM" "ainone-ui-aarch64.app.tar.gz"
+          mv "$UPD_ARM.sig" "ainone-ui-aarch64.app.tar.gz.sig"
+          mv "$UPD_X64" "ainone-ui-x64.app.tar.gz"
+          mv "$UPD_X64.sig" "ainone-ui-x64.app.tar.gz.sig"
+          UPD_ARM="ainone-ui-aarch64.app.tar.gz"
+          UPD_X64="ainone-ui-x64.app.tar.gz"
+
+          sig() { cat "$1.sig"; }
+          url() { echo "$BASE_URL/$(basename "$1")"; }
+
+          jq -n --arg v "$VERSION" \
+            --arg arm "$(url "$UPD_ARM")"       --arg armSig "$(sig "$UPD_ARM")" \
+            --arg x64 "$(url "$UPD_X64")"       --arg x64Sig "$(sig "$UPD_X64")" \
+            --arg nsis "$(url "$UPD_NSIS")"     --arg nsisSig "$(sig "$UPD_NSIS")" \
+            --arg appimage "$(url "$UPD_APPIMAGE")" --arg appimageSig "$(sig "$UPD_APPIMAGE")" \
+            '{
+              version: $v,
+              notes: ("ainone-ui v" + $v),
+              pub_date: (now | todateiso8601),
+              platforms: {
+                "darwin-aarch64": {signature: $armSig,      url: $arm},
+                "darwin-x86_64":  {signature: $x64Sig,      url: $x64},
+                "windows-x86_64": {signature: $nsisSig,     url: $nsis},
+                "linux-x86_64":   {signature: $appimageSig, url: $appimage}
+              }
+            }' > latest-updater.json
+          cat latest-updater.json
+
+      - name: Verify version strictly increases (downgrade guard)
+        # R-32 门禁：updater 语义要求版本严格递增（客户端插件拒绝降级/同版重复发布
+        # 会让「已是最新」判定错乱）。R2 上已有 latest-updater.json 且版本 >= 本次
+        # → 直接失败，打回重新 bump（tag == conf 门禁保证 conf 已改，故必是漏 bump）。
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -e
+          # 首发容忍 404（aws s3api 对不存在 key 返回 255/404 错误）
+          if aws s3api get-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
+              --key latest-updater.json prev-latest.json 2>/dev/null; then
+            PREV=$(jq -r .version prev-latest.json)
+            echo "previous: $PREV / this: $VERSION"
+            HIGHER=$(printf '%s\n%s\n' "$PREV" "$VERSION" | sort -V | tail -1)
+            # 严格大于（同版重发也拒绝——updater 客户端对同版本号判定混乱）
+            if [ "$HIGHER" != "$VERSION" ] || [ "$PREV" = "$VERSION" ]; then
+              echo "::error::版本号未严格递增（R2 现存 $PREV，本次 $VERSION）——updater 要求严格递增，先 bump package.json + tauri.conf.json"
+              exit 1
+            fi
+          else
+            echo "R2 无现存清单（首次发布 updater），跳过降级校验"
+          fi
+
       - name: Upload installers to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -217,14 +314,19 @@ jobs:
           # 不能直接 aws s3 cp --recursive + exclude/include：S3 的 cp 保留源相对
           # 路径（aarch64-apple-darwin/release/bundle/dmg/x.dmg），include 只是
           # 过滤不改 key 落点（v0.1.0 首发实锤——产物仍带目录前缀，清单 URL 404）
+          # P32：更新产物（app.tar.gz / nsis.zip / AppImage.tar.gz）+ .sig 一并展平。
+          # macOS 双架构产物已重命名为 aarch64/x64 前缀（清单生成步骤），不冲突
           find . -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' \
-            -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+            -o -name '*.app.tar.gz' -o -name '*.nsis.zip' -o -name '*.AppImage.tar.gz' \
+            -o -name '*.sig' \) \
             -exec mv {} . \;
           ls -la
           aws s3 cp . "s3://$BUCKET/v$VERSION/" \
             --recursive --exclude "*" \
             --include "*.dmg" --include "*.exe" --include "*.msi" \
             --include "*.deb" --include "*.rpm" --include "*.AppImage" \
+            --include "*.tar.gz" --include "*.nsis.zip" --include "*.sig" \
             --endpoint-url "$ENDPOINT" --cache-control "public, max-age=31536000, immutable"
 
       - name: Upload latest.json to R2
@@ -237,4 +339,18 @@ jobs:
         run: |
           aws s3api put-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
             --key latest.json --body bundles/latest.json \
+            --content-type "application/json" --cache-control "no-cache"
+
+      - name: Upload latest-updater.json to R2
+        # P32：updater 清单（客户端 updater 插件轮询此 key）。no-cache——
+        # 必须每次发布立即可见（与产物 immutable 策略相反）。
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          aws s3api put-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
+            --key latest-updater.json --body bundles/latest-updater.json \
             --content-type "application/json" --cache-control "no-cache"
