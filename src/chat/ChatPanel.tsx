@@ -131,8 +131,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const workspaceCwd = cwd && cwd.length > 0 ? cwd : adapter.cwd;
 
-  // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文
-  const typeText = useTypewriter(typewriterHint(adapter));
+  // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文。
+  // P32 R3：非激活窗格（display:none 渲染照跑）或用户已输入时暂停——
+  // 旧实现无条件 12.5 渲染/s × 每 tab，后台窗格纯浪费。
+  const typeText = useTypewriter(typewriterHint(adapter), active && input.length === 0);
 
   // @ 候选（F-11-3）：菜单展开才计算（扁平化 + fuzzy 过滤）
   const atMatches = useMemo(() => {
