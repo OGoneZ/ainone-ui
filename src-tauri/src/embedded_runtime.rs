@@ -163,6 +163,11 @@ pub fn resolve_npm(app: &tauri::AppHandle) -> Option<(PathBuf, NpmSource)> {
 
 /// resource 根目录：环境变量覆盖（e2e/手动验证内嵌链路用）优先，
 /// 否则用应用 resource_dir。
+/// 注意 tauri v2 的 resources 落位语义：tauri.conf.json 里相对 src-tauri 的
+/// `resources/runtime/**` 在 bundle 内映射为 `Contents/Resources/resources/runtime/…`
+/// （保留相对目录结构，macOS 实测），故 resource_dir() 之下还要再进一层
+/// `resources/`。dev 下 resource_dir()= target/debug（build script 直接平铺
+/// resources/ 到 exe 旁，其下也有 resources/ 同构目录——两级目录布局一致）。
 fn resource_root(app: &tauri::AppHandle) -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("AINONE_BUNDLED_BUN_DIR") {
         if !dir.trim().is_empty() {
@@ -170,7 +175,7 @@ fn resource_root(app: &tauri::AppHandle) -> Option<PathBuf> {
         }
     }
     use tauri::Manager;
-    app.path().resource_dir().ok()
+    app.path().resource_dir().ok().map(|d| d.join("resources"))
 }
 
 /// 跑 `<path> --version` 取版本号（5s 超时；失败 None 不阻塞调用方）。
