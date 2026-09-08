@@ -118,10 +118,19 @@ function fromEditable(a: EditableAdapter): Adapter {
   };
 }
 
-/** 快问来源徽标文案（P22） */
+/** 快问来源徽标文案（P22；P32c 扩五家 fallback 链） */
 function sourceBadge(source: string): { text: string; auto: boolean } | null {
-  if (source === "auto:claude-code") return { text: "自动：Claude Code", auto: true };
-  if (source === "auto:codex") return { text: "自动：Codex", auto: true };
+  const NAMES: Record<string, string> = {
+    "claude-code": "Claude Code",
+    codex: "Codex",
+    omp: "Omp",
+    pi: "Pi",
+    opencode: "OpenCode",
+  };
+  if (source.startsWith("auto:")) {
+    const name = NAMES[source.slice("auto:".length)];
+    if (name) return { text: `自动：${name}`, auto: true };
+  }
   return null; // manual / 空 = 自定义
 }
 
@@ -472,6 +481,8 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     baseUrl: string;
     formContext: { endpoint: string; apiKey: string; present: boolean };
   } | null>(null);
+  // P32c：快问模型面板展开态（探测基准 = 快问表单 endpoint）
+  const [qaModelPanelOpen, setQaModelPanelOpen] = useState(false);
 
   function openModelPanel(id: string) {
     const item = items.find((a) => a.id === id);
@@ -867,13 +878,21 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                         onChange={(e) => setQa((q) => ({ ...q, base_url: e.target.value }))}
                       />
                     </label>
+                    {/* P32c：与 harness 卡片同构——平时显示当前生效模型，点击弹 ModelSwitchPanel
+                        探测（endpoint/key 用快问表单值），点选只回填表单（保存时写 quickask.json） */}
                     <label className="ns-label">
                       模型名
-                      <input
-                        placeholder="gpt-4o-mini"
-                        value={qa.model}
-                        onChange={(e) => setQa((q) => ({ ...q, model: e.target.value }))}
-                      />
+                      <button
+                        type="button"
+                        className="adapter-cfg-model"
+                        onClick={() => setQaModelPanelOpen(true)}
+                        data-testid="qa-model-pick"
+                        title="点击探测网关可用模型并选择"
+                      >
+                        <span className={qa.model ? "meta-mono" : "cfg-model-empty"}>
+                          {qa.model || "点击探测选择模型…"}
+                        </span>
+                      </button>
                     </label>
                   </div>
                   <label className="ns-label">
@@ -932,6 +951,24 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
           <button onClick={save}>保存</button>
           <button onClick={onClose}>关闭</button>
         </div>
+
+        {/* P32c：快问模型面板——qaMode 点选只回填 qa.model，保存时随 quickAskConfigSave
+            写 quickask.json，不触发任何 harness 配置写回 */}
+        {qaModelPanelOpen && (
+          <ModelSwitchPanel
+            open={true}
+            onClose={() => setQaModelPanelOpen(false)}
+            adapterId="quickask"
+            adapterName="快问"
+            baseUrl={qa.base_url}
+            currentModel={qa.model || null}
+            configOptions={null}
+            onSessionModelChange={null}
+            onWritten={() => {}}
+            qaMode={true}
+            onQaModelPick={(model) => setQa((q) => ({ ...q, model }))}
+          />
+        )}
 
         {/* P29 S6：模型切换面板（复用元数据面板的 ModelSwitchPanel）——
             从卡片「配置模型 → 模型名点击探测」进入；写回成功后同步表单回显 */}

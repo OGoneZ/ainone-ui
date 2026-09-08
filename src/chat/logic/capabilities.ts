@@ -28,3 +28,28 @@ export function canResume(cap: AgentCapabilities | null | undefined): boolean {
 export function canClose(cap: AgentCapabilities | null | undefined): boolean {
   return cap?.sessionCapabilities?.close != null;
 }
+
+/** session/list：key presence 规则（P32d 会话列表入口 gate） */
+export function canList(cap: AgentCapabilities | null | undefined): boolean {
+  return cap?.sessionCapabilities?.list != null;
+}
+
+/** P32d：capability snapshot——五布尔单一事实源（对标 DeepChat buildCapabilitySnapshot）。
+ *  握手后由 store 存档，UI 与恢复链只消费布尔，不再各自解释对象型能力。 */
+export interface CapabilitySnapshot {
+  fork: boolean;
+  load: boolean;
+  resume: boolean;
+  close: boolean;
+  list: boolean;
+}
+
+export function capabilitySnapshot(cap: AgentCapabilities | null | undefined): CapabilitySnapshot {
+  return {
+    fork: canFork(cap),
+    load: canLoad(cap),
+    resume: canResume(cap),
+    close: canClose(cap),
+    list: canList(cap),
+  };
+}

@@ -16,7 +16,7 @@ export interface WriteOutcome {
   backup: string;
 }
 
-export type HarnessWriteTarget = "claude-code" | "codex" | "omp";
+export type HarnessWriteTarget = "claude-code" | "codex" | "omp" | "opencode";
 
 /** 读静态配置元数据；文件缺失 → null（UI 降级） */
 export async function fetchHarnessMeta(adapterId: string): Promise<HarnessMeta | null> {
@@ -47,7 +47,8 @@ export async function probeModels(
 }
 
 /** 该 harness 是否支持配置写回（决定元数据面板模型/URL 行是否可点编辑）。
- *  pi/opencode 不做定点替换（配置代写链路负责），仅这三家可编辑。 */
+ *  P32b：opencode 加入（Rust 侧 JSON 定点改写 provider.ainone 结构）。
+ *  pi 仍不做定点替换（真实无验证过的写回语义，配置代写链路负责）。 */
 export function supportsWrite(adapterId: string): boolean {
-  return ["claude-code", "codex", "omp"].includes(adapterId);
+  return ["claude-code", "codex", "omp", "opencode"].includes(adapterId);
 }

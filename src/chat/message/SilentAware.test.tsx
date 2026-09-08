@@ -124,6 +124,8 @@ describe("静默感知（P30 AC-3.4）", () => {
           ask: null,
           branch: null,
           capabilities: null,
+          caps: null,
+          sessionInfo: null,
           degraded: null,
           configOptions: null,
           turnStartedAt: now - 40_000,

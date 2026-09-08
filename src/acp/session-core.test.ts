@@ -139,6 +139,16 @@ describe("session-core · dispatchUpdate", () => {
     ).toEqual([{ type: "plan", entries: [{ content: "a", status: "pending", priority: "high" }] }]);
   });
 
+  // P32d：session_info_update（agent 生成会话标题/更新时间）
+  it("session_info_update → session_info（title/updatedAt 透传，null → undefined）", () => {
+    expect(
+      collect(notif({ sessionUpdate: "session_info_update", title: "修复登录 bug", updatedAt: "2026-09-08T12:00:00Z" })),
+    ).toEqual([{ type: "session_info", title: "修复登录 bug", updatedAt: "2026-09-08T12:00:00Z" }]);
+    expect(
+      collect(notif({ sessionUpdate: "session_info_update", title: null, updatedAt: null })),
+    ).toEqual([{ type: "session_info" }]);
+  });
+
   it("未知 update 类型被忽略", () => {
     expect(collect(notif({ sessionUpdate: "current_mode_update", currentModeId: "ask" }))).toEqual([]);
   });

@@ -32,11 +32,15 @@ interface Props {
   embedded?: boolean;
   /** P29 R5：活跃会话句柄（set_config_option 即时切模型用；无会话 = null） */
   session: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null;
+  /** P32d：session/list 句柄（null = 未声明 list 能力 → 会话列表入口隐藏） */
+  listSessions?: (() => Promise<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>>) | null;
+  /** P32d：选中历史会话恢复（App 提供——开 Tab 走既有恢复链） */
+  onResumeSession?: (sessionId: string) => void;
 }
 
 const STORAGE_KEY = "ainone-metadata-open";
 
-export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, embedded = false, session: liveSession = null }: Props) {
+export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, embedded = false, session: liveSession = null, listSessions = null, onResumeSession }: Props) {
   const usage = useSessionStore((s) => s.runtime[tabKey]?.usage ?? null);
   const meta = useSessionStore((s) => s.runtime[tabKey]?.meta ?? null);
   const branch = useSessionStore((s) => s.runtime[tabKey]?.branch ?? null);
@@ -84,6 +88,25 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
   // P29 R5：模型/URL 切换面板开合
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [urlPanelOpen, setUrlPanelOpen] = useState(false);
+  // P32d：会话列表（null = 未拉取；[] = 拉取过但为空；能力未声明 = 无入口）
+  const [sessions, setSessions] = useState<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }> | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  async function loadSessions() {
+    if (!listSessions) return;
+    setSessionsLoading(true);
+    try {
+      const list = await listSessions();
+      logger.info("meta", "sessions-listed", { adapterId: adapter.id, count: list.length });
+      setSessions(list);
+    } catch (e) {
+      logger.warn("meta", "sessions-list-fail", { adapterId: adapter.id, error: String(e) });
+      setSessions([]);
+      toast.error(`会话列表获取失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
 
   /** 会话级切模型：session/set_config_option（configId=model；omp/pi 即时生效）。
    *  返回 boolean 告知调用方是否真实生效——连接器拒绝（如 claude-code 的选择器外
@@ -105,8 +128,19 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
     return (
       <div className="meta-embedded">
         <dl className="meta-list">
-          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} onOpenUrlPanel={supportsWrite(adapter.id) ? () => setUrlPanelOpen(true) : undefined} />
+          <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} onOpenUrlPanel={supportsWrite(adapter.id) ? () => setUrlPanelOpen(true) : undefined} listSessions={listSessions ? () => void loadSessions() : undefined} />
         </dl>
+        <SessionListPanel
+          open={sessions !== null}
+          onClose={() => setSessions(null)}
+          loading={sessionsLoading}
+          sessions={sessions ?? []}
+          currentSessionId={sessionId}
+          onResume={(sid) => {
+            setSessions(null);
+            onResumeSession?.(sid);
+          }}
+        />
         <ModelSwitchPanel
           open={modelPanelOpen}
           onClose={() => setModelPanelOpen(false)}
@@ -161,8 +195,19 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
       </div>
 
       <dl className="meta-list">
-        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} onOpenUrlPanel={supportsWrite(adapter.id) ? () => setUrlPanelOpen(true) : undefined} />
+        <MetaItems usage={usage} meta={meta} pct={pct} model={model} sessionId={sessionId} cwd={cwd} adapterName={adapter.name} branch={branch} baseUrl={baseUrl} baseUrlSource={baseUrlSource} onOpenModelPanel={() => setModelPanelOpen(true)} onOpenUrlPanel={supportsWrite(adapter.id) ? () => setUrlPanelOpen(true) : undefined} listSessions={listSessions ? () => void loadSessions() : undefined} />
       </dl>
+      <SessionListPanel
+        open={sessions !== null}
+        onClose={() => setSessions(null)}
+        loading={sessionsLoading}
+        sessions={sessions ?? []}
+        currentSessionId={sessionId}
+        onResume={(sid) => {
+          setSessions(null);
+          onResumeSession?.(sid);
+        }}
+      />
       <ModelSwitchPanel
         open={modelPanelOpen}
         onClose={() => setModelPanelOpen(false)}
@@ -244,6 +289,7 @@ function MetaItems({
   baseUrlSource,
   onOpenModelPanel,
   onOpenUrlPanel,
+  listSessions,
 }: {
   usage: { used: number; size: number; cost: number | null } | null;
   meta: { apiType?: string; baseUrl?: string } | null;
@@ -260,6 +306,8 @@ function MetaItems({
   onOpenModelPanel: () => void;
   /** P29 R6：点击 baseUrl 行打开编辑面板；undefined = 该 harness 不支持写回（只读） */
   onOpenUrlPanel?: () => void;
+  /** P32d：点击「历史会话」行拉取 session/list；undefined = 未声明 list 能力（不渲染入口） */
+  listSessions?: () => void;
 }) {
   return (
     <>
@@ -349,6 +397,63 @@ function MetaItems({
             </button>
           </dd>
         </div>
+        {listSessions && (
+          <div className="meta-item">
+            <dt>历史会话</dt>
+            <dd>
+              <button
+                type="button"
+                className="meta-copy-btn"
+                title="点击浏览 harness 侧历史会话并恢复"
+                aria-label="浏览历史会话"
+                onClick={() => listSessions()}
+              >
+                <span className="meta-mono">浏览…</span>
+              </button>
+            </dd>
+          </div>
+        )}
     </>
+  );
+}
+
+/** P32d：harness 侧历史会话列表（session/list 结果；仅声明 list 能力的 harness 渲染） */
+function SessionListPanel({
+  open,
+  onClose,
+  loading,
+  sessions,
+  currentSessionId,
+  onResume,
+}: {
+  open: boolean;
+  onClose: () => void;
+  loading: boolean;
+  sessions: Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>;
+  currentSessionId: string | null;
+  onResume: (sessionId: string) => void;
+}) {
+  if (!open) return null;
+  const items = [...sessions].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  return (
+    <div className="msm-list session-list" role="listbox" aria-label="历史会话列表">
+      {loading && <div className="msm-state">获取会话列表中…</div>}
+      {!loading && items.length === 0 && <div className="msm-state">harness 未返回任何会话</div>}
+      {items.map((s) => (
+        <button
+          key={s.sessionId}
+          type="button"
+          role="option"
+          aria-selected={s.sessionId === currentSessionId}
+          className="msm-row"
+          title={`${s.sessionId}\ncwd: ${s.cwd}${s.updatedAt ? `\n更新: ${s.updatedAt}` : ""}`}
+          onClick={() => onResume(s.sessionId)}
+        >
+          <span className="meta-mono">{s.title || s.sessionId}</span>
+          {s.sessionId === currentSessionId && <span className="meta-tag">当前</span>}
+        </button>
+      ))}
+      <button type="button" className="msm-retry" onClick={onClose}>关闭</button>
+    </div>
   );
 }

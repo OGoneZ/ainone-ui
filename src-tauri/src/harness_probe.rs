@@ -1,15 +1,20 @@
 // P22 快问模型自动探测：读本机 harness settings，哪份能取到用哪份。
 //
-// 探测顺序（plan-p22.md 任务三）：
+// 探测顺序（plan-p22.md 任务三；P32c 扩为五家 fallback 链）：
 //   1. ~/.claude/settings.json → env.ANTHROPIC_BASE_URL + env.ANTHROPIC_AUTH_TOKEN
 //      + 模型（ANTHROPIC_DEFAULT_HAIKU_MODEL → SONNET → OPUS → model 字段去 [1m] 后缀）
 //      → protocol = anthropic，来源 claude-code
 //   2. ~/.codex/config.toml → model_providers.*.base_url + model；
 //      ~/.codex/auth.json → OPENAI_API_KEY → protocol = openai，来源 codex
-//   两份都在 → Claude Code 优先（快问走轻量模型语义）。
-//   都取不到 → None（保持手动配置）。
+//   3. ~/.omp/agent/models.yml → baseUrl + apiKey（protocol = openai，来源 omp；model 留空由调用方定）
+//   4. ~/.pi/agent/models.json → providers.<ainone|首个含 baseUrl>.{baseUrl, apiKey, models[0].id}
+//   5. ~/.config/opencode/opencode.json → provider.<ainone|首个含 baseURL>.options + 顶层 model（剥 ainone/ 前缀）
+//   有哪个用哪个；全都没有 → None（保持手动配置）。
+//   omp 无 model 字段 → 由 meta_omp 的 model=None 语义自然落选（有 model 的家优先），
+//   若 omp 是唯一可用配置则接受空 model（quickask 允许后续手填）。
 //
 // 密钥只在 Rust 侧流转，不回传 WebView（与 quickask.rs 密钥纪律一致）。
+// 解析复用 harness_meta 的 meta_*（单一实现防分叉），key 明文平行获取。
 
 use serde::Deserialize;
 
@@ -21,7 +26,7 @@ pub struct HarnessProbe {
     pub model: String,
     /// "anthropic" | "openai"
     pub protocol: String,
-    /// "claude-code" | "codex"
+    /// "claude-code" | "codex" | "omp" | "pi" | "opencode"
     pub source: String,
 }
 
@@ -145,7 +150,8 @@ pub fn probe_codex_text(config_toml: &str, auth_json: &str) -> Option<HarnessPro
     })
 }
 
-/// 按优先级读本机文件探测（claude-code 优先于 codex）。
+/// 按优先级读本机文件探测（P32c 五家 fallback 链：claude-code → codex → omp → pi → opencode）。
+/// 有哪个用哪个；omp 无 model 字段时若前面各家都探测不到，仍接受（model 留空）。
 /// home 参数注入便于测试；生产传 None 用 dirs::home_dir()。
 pub fn probe_harness(home: Option<&std::path::Path>) -> Option<HarnessProbe> {
     let home = match home {
@@ -160,10 +166,123 @@ pub fn probe_harness(home: Option<&std::path::Path>) -> Option<HarnessProbe> {
     }
     let codex_cfg = std::fs::read_to_string(home.join(".codex/config.toml")).ok();
     let codex_auth = std::fs::read_to_string(home.join(".codex/auth.json")).ok();
-    match (codex_cfg, codex_auth) {
+    if let Some(p) = match (codex_cfg, codex_auth) {
         (Some(c), Some(a)) => probe_codex_text(&c, &a),
         _ => None,
+    } {
+        return Some(p);
     }
+    // omp：meta_omp 解析（baseUrl/key 判存在）；model 恒 None（models.yml 无模型字段）
+    if let Some(meta) = std::fs::read_to_string(home.join(".omp/agent/models.yml"))
+        .ok()
+        .and_then(|raw| crate::harness_meta::meta_omp(&raw))
+    {
+        if let Some(base) = meta.base_url.filter(|b| !b.trim().is_empty()) {
+            if let Some(key) = std::fs::read_to_string(home.join(".omp/agent/models.yml"))
+                .ok()
+                .and_then(|raw| crate::harness_meta::omp_key_from_text(&raw))
+            {
+                return Some(HarnessProbe {
+                    base_url: base,
+                    api_key: key,
+                    model: String::new(),
+                    protocol: "openai".into(),
+                    source: "omp".into(),
+                });
+            }
+        }
+    }
+    // pi：meta_pi 解析（providers.<ainone|首个含 baseUrl>）；key 明文平行读
+    let pi_raw = std::fs::read_to_string(home.join(".pi/agent/models.json")).ok();
+    if let Some(meta) = pi_raw.as_deref().and_then(crate::harness_meta::meta_pi) {
+        if let (Some(base), Some(model)) = (meta.base_url, meta.model) {
+            if !base.trim().is_empty() && !model.trim().is_empty() {
+                if let Some(key) = pi_key_from_text(pi_raw.as_deref().unwrap_or("")) {
+                    return Some(HarnessProbe {
+                        base_url: base,
+                        api_key: key,
+                        model,
+                        protocol: "openai".into(),
+                        source: "pi".into(),
+                    });
+                }
+            }
+        }
+    }
+    // opencode：meta_opencode 解析（provider.<ainone|首个含 baseURL>）；key 明文平行读
+    let oc_raw = std::fs::read_to_string(home.join(".config/opencode/opencode.json")).ok();
+    if let Some(meta) = oc_raw.as_deref().and_then(crate::harness_meta::meta_opencode) {
+        if let Some(base) = meta.base_url.filter(|b| !b.trim().is_empty()) {
+            if let Some(key) = opencode_key_from_text(oc_raw.as_deref().unwrap_or("")) {
+                return Some(HarnessProbe {
+                    base_url: base,
+                    api_key: key,
+                    model: meta.model.unwrap_or_default(),
+                    protocol: "openai".into(),
+                    source: "opencode".into(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// pi models.json 文本 → 活跃 provider 的 apiKey 明文（与 meta_pi 同一 provider 优先级）。
+pub(crate) fn pi_key_from_text(raw: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let providers = v.get("providers")?.as_object()?;
+    let mut names: Vec<&String> = Vec::new();
+    if let Some(k) = providers.keys().find(|k| k.as_str() == "ainone") {
+        names.push(k);
+    }
+    for k in providers.keys() {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        let p = &providers[name];
+        if p.get("baseUrl").and_then(|b| b.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false) {
+            return p
+                .get("apiKey")
+                .and_then(|k| k.as_str())
+                .map(String::from)
+                .filter(|k| !k.trim().is_empty());
+        }
+    }
+    None
+}
+
+/// opencode.json 文本 → 活跃 provider 的 options.apiKey 明文（与 meta_opencode 同一优先级）。
+pub(crate) fn opencode_key_from_text(raw: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let providers = v.get("provider")?.as_object()?;
+    let mut names: Vec<&String> = Vec::new();
+    if let Some(k) = providers.keys().find(|k| k.as_str() == "ainone") {
+        names.push(k);
+    }
+    for k in providers.keys() {
+        if k.as_str() != "ainone" {
+            names.push(k);
+        }
+    }
+    for name in names {
+        let p = &providers[name];
+        if p.get("options")
+            .and_then(|o| o.get("baseURL"))
+            .and_then(|b| b.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return p
+                .get("options")
+                .and_then(|o| o.get("apiKey"))
+                .and_then(|k| k.as_str())
+                .map(String::from)
+                .filter(|k| !k.trim().is_empty());
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -261,6 +380,99 @@ base_url = "https://x/v1"
 
         // 都没有 → None
         std::fs::remove_dir_all(dir.join(".codex")).unwrap();
+        assert!(probe_harness(Some(&dir)).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // —— P32c：五家 fallback 链（omp → pi → opencode） ——
+
+    const OMP_YML: &str = "providers:\n  gw:\n    baseUrl: https://omp.example.com/v1\n    apiKey: sk-omp\n    models:\n      - id: duo-king-6.6\n";
+
+    #[test]
+    fn omp_probe_reads_yml() {
+        let dir = std::env::temp_dir().join(format!("ainone-probe-omp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".omp/agent")).unwrap();
+        std::fs::write(dir.join(".omp/agent/models.yml"), OMP_YML).unwrap();
+        let p = probe_harness(Some(&dir)).unwrap();
+        assert_eq!(p.source, "omp");
+        assert_eq!(p.base_url, "https://omp.example.com/v1");
+        assert_eq!(p.api_key, "sk-omp");
+        assert_eq!(p.protocol, "openai");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pi_probe_reads_models_json() {
+        let dir = std::env::temp_dir().join(format!("ainone-probe-pi-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".pi/agent")).unwrap();
+        std::fs::write(
+            dir.join(".pi/agent/models.json"),
+            r#"{"providers":{"ainone":{"baseUrl":"https://pi.example.com/v1","apiKey":"sk-pi","models":[{"id":"pi-model-1"}]}}}"#,
+        )
+        .unwrap();
+        let p = probe_harness(Some(&dir)).unwrap();
+        assert_eq!(p.source, "pi");
+        assert_eq!(p.base_url, "https://pi.example.com/v1");
+        assert_eq!(p.model, "pi-model-1");
+        assert_eq!(p.api_key, "sk-pi");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opencode_probe_reads_config_json() {
+        let dir = std::env::temp_dir().join(format!("ainone-probe-oc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".config/opencode")).unwrap();
+        std::fs::write(
+            dir.join(".config/opencode/opencode.json"),
+            r#"{"provider":{"ainone":{"options":{"baseURL":"https://oc.example.com/v1","apiKey":"sk-oc"},"models":{"oc-m1":{"name":"oc-m1"}}}},"model":"ainone/oc-m1"}"#,
+        )
+        .unwrap();
+        let p = probe_harness(Some(&dir)).unwrap();
+        assert_eq!(p.source, "opencode");
+        assert_eq!(p.base_url, "https://oc.example.com/v1");
+        assert_eq!(p.model, "oc-m1", "ainone/ 前缀应剥掉");
+        assert_eq!(p.api_key, "sk-oc");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fallback_order_omp_before_pi_before_opencode() {
+        // 三家同在 → omp（链序第三）；逐家摘除验证链序
+        let dir = std::env::temp_dir().join(format!("ainone-probe-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".omp/agent")).unwrap();
+        std::fs::create_dir_all(dir.join(".pi/agent")).unwrap();
+        std::fs::create_dir_all(dir.join(".config/opencode")).unwrap();
+        std::fs::write(dir.join(".omp/agent/models.yml"), OMP_YML).unwrap();
+        std::fs::write(dir.join(".pi/agent/auth.json"), r#"{}"#).unwrap();
+        std::fs::write(
+            dir.join(".config/opencode/opencode.json"),
+            r#"{"provider":{"ainone":{"options":{"baseURL":"https://oc/v1","apiKey":"sk-oc"}}},"model":"ainone/oc-m"}"#,
+        )
+        .unwrap();
+        assert_eq!(probe_harness(Some(&dir)).unwrap().source, "omp");
+        std::fs::remove_dir_all(dir.join(".omp")).unwrap();
+        assert_eq!(probe_harness(Some(&dir)).unwrap().source, "opencode");
+        // opencode 摘除后全空 → None
+        std::fs::remove_dir_all(dir.join(".config")).unwrap();
+        assert!(probe_harness(Some(&dir)).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pi_probe_without_model_field_falls_through() {
+        // pi 无 models[].id → 该家探测失败（链上无后续家 → None）
+        let dir = std::env::temp_dir().join(format!("ainone-probe-pi2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".pi/agent")).unwrap();
+        std::fs::write(
+            dir.join(".pi/agent/models.json"),
+            r#"{"providers":{"ainone":{"baseUrl":"https://pi/v1","apiKey":"sk-pi"}}}"#,
+        )
+        .unwrap();
         assert!(probe_harness(Some(&dir)).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }

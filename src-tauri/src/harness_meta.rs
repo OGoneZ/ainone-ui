@@ -96,7 +96,7 @@ pub(crate) fn harness_meta_inner(adapter_id: &str, home: Option<&Path>) -> Optio
     }
 }
 
-/// Claude settings.json：env.ANTHROPIC_BASE_URL / model（去 [1m]）；key 看 ANTHROPIC_AUTH_TOKEN。
+/// Claude settings.json：env.ANTHROPIC_BASE_URL / model（去 [1m]）；key 判定走 claude_key_present。
 pub(crate) fn meta_claude(raw: &str) -> Option<HarnessMeta> {
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
     let base = v
@@ -111,13 +111,24 @@ pub(crate) fn meta_claude(raw: &str) -> Option<HarnessMeta> {
         .and_then(|m| m.as_str())
         .map(crate::harness_probe::strip_model_suffix)
         .filter(|m| !m.is_empty());
-    let key_present = v
-        .get("env")
-        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
-        .and_then(|k| k.as_str())
-        .map(|k| !k.trim().is_empty())
-        .unwrap_or(false);
+    let key_present = claude_key_present(&v);
     Some(HarnessMeta { base_url: base, model, api_key_present: key_present })
+}
+
+/// Claude「已配置 key」的唯一判定（P32a R3）：env.ANTHROPIC_AUTH_TOKEN 或
+/// env.ANTHROPIC_API_KEY 任一非空。三处消费点（harness_meta 回显 / harness_config
+/// 代写回显 / adapters 认证探测）必须经由此函数，禁止各自再写判定防分叉。
+pub(crate) fn claude_key_present(v: &serde_json::Value) -> bool {
+    v.get("env")
+        .and_then(|e| e.as_object())
+        .map(|env| {
+            ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"].iter().any(|k| {
+                env.get(*k)
+                    .and_then(|x| x.as_str())
+                    .is_some_and(|s| !s.trim().is_empty())
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Codex config.toml：model_providers.<active>.base_url + 顶层 model；key 看 ~/.codex/auth.json。
@@ -313,9 +324,11 @@ pub(crate) fn harness_settings_write_inner(
         HarnessConfigKind::Codex => write_codex(&raw, model, base_url)?,
         HarnessConfigKind::Omp => write_omp(&raw, base_url)?,
         // pi 无验证过的定点替换语义 → 引导走配置代写（三格齐落盘）
-        HarnessConfigKind::Pi | HarnessConfigKind::OpenCode => {
+        HarnessConfigKind::Pi => {
             return Err("{adapter_id} 不支持定点替换，请走设置页配置保存".replace("{adapter_id}", adapter_id))
         }
+        // P32b：opencode 走 JSON 定点改写（provider.ainone 结构，与配置代写同构）
+        HarnessConfigKind::OpenCode => write_opencode(&raw, model, base_url)?,
     };
     backup(&path)?;
     std::fs::write(&path, updated).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
@@ -475,6 +488,50 @@ pub(crate) fn write_omp(raw: &str, base_url: Option<&str>) -> Result<String, Str
         s.push('\n');
     }
     Ok(s)
+}
+
+/// OpenCode opencode.json：serde_json 定点改写 provider.ainone.options.baseURL 与顶层
+/// model（统一 `ainone/<model>` 形态，与配置代写落盘结构一致）；其余键保留。
+pub(crate) fn write_opencode(raw: &str, model: Option<&str>, base_url: Option<&str>) -> Result<String, String> {
+    let mut v: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("opencode.json 解析失败: {e}（带注释请改用纯 JSON 形态）"))?;
+    let obj = v.as_object_mut().ok_or("opencode.json 顶层不是对象")?;
+    let provider = obj
+        .entry("provider")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or("provider 不是对象")?
+        .entry("ainone")
+        .or_insert_with(|| serde_json::json!({"npm": "@ai-sdk/openai-compatible", "name": "ainone", "options": {}}))
+        .as_object_mut()
+        .ok_or("provider.ainone 不是对象")?;
+    if let Some(b) = base_url {
+        provider
+            .entry("options")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or("provider.ainone.options 不是对象")?
+            .insert("baseURL".into(), serde_json::Value::String(b.to_string()));
+    }
+    if let Some(m) = model {
+        let m = m.trim();
+        if m.is_empty() {
+            return Err("模型名不能为空".into());
+        }
+        // 统一带 ainone/ 前缀（配置代写同构；已带前缀的不重复加）
+        let qualified = if m.starts_with("ainone/") { m.to_string() } else { format!("ainone/{m}") };
+        // models 目录登记该模型（代写结构：models.<id> = {name}；id 为剥前缀后的裸名）
+        let bare = qualified.strip_prefix("ainone/").unwrap_or(m).to_string();
+        provider
+            .entry("models")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or("provider.ainone.models 不是对象")?
+            .insert(bare.clone(), serde_json::json!({"name": bare}));
+        // provider 借用结束后再写顶层 model（借用检查顺序要求）
+        obj.insert("model".into(), serde_json::Value::String(qualified));
+    }
+    serde_json::to_string_pretty(&v).map_err(|e| format!("opencode.json 序列化失败: {e}"))
 }
 
 // ---------- 模型列表探测 ----------
@@ -671,6 +728,11 @@ fn codex_api_key(home: Option<&Path>) -> Option<String> {
 fn omp_api_key(home: Option<&Path>) -> Option<String> {
     let home = home.map(PathBuf::from).or_else(dirs::home_dir)?;
     let raw = std::fs::read_to_string(home.join(".omp/agent/models.yml")).ok()?;
+    omp_key_from_text(&raw)
+}
+
+/// omp models.yml 文本 → apiKey 明文（锚定 `apiKey:` 行；omp_api_key 与快问 probe 共用）。
+pub(crate) fn omp_key_from_text(raw: &str) -> Option<String> {
     for line in raw.lines() {
         let t = line.trim();
         if t.starts_with("apiKey:") {
@@ -681,6 +743,17 @@ fn omp_api_key(home: Option<&Path>) -> Option<String> {
         }
     }
     None
+}
+
+/// omp「已配置 key」判定（P32a：认证探测唯一事实源——omp 自身 models.yml，非 pi 的 auth.json）。
+pub(crate) fn omp_api_key_present(home: Option<&Path>) -> bool {
+    let Some(home) = home.map(PathBuf::from).or_else(dirs::home_dir) else {
+        return false;
+    };
+    std::fs::read_to_string(home.join(".omp/agent/models.yml"))
+        .ok()
+        .and_then(|raw| omp_key_from_text(&raw))
+        .is_some()
 }
 
 /// OpenCode opencode.json 的 provider.<ainone|首个含 baseURL>.options.apiKey
@@ -781,6 +854,26 @@ wire_api = "responses"
         assert_eq!(m.base_url, None);
         assert_eq!(m.model, None);
         assert!(!m.api_key_present);
+    }
+
+    // —— P32a R3：claude_key_present 双字段唯一判定（三处消费点统一语义） ——
+
+    #[test]
+    fn claude_key_present_dual_field_matrix() {
+        let parse = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        assert!(claude_key_present(&parse(r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"sk"}}"#)));
+        assert!(claude_key_present(&parse(r#"{"env":{"ANTHROPIC_API_KEY":"sk"}}"#)));
+        assert!(claude_key_present(&parse(
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"a","ANTHROPIC_API_KEY":"b"}}"#
+        )));
+        assert!(!claude_key_present(&parse(r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"  "}}"#)));
+        assert!(!claude_key_present(&parse(r#"{"env":{}}"#)));
+        assert!(!claude_key_present(&parse(r#"{}"#)));
+        // 非 JSON 输入的防御路径由调用方 from_str 兜住（此处仅验对象语义）
+        // 空白值 + 另一字段有效 → 仍算已配置（任一非空即可）
+        assert!(claude_key_present(&parse(
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"  ","ANTHROPIC_API_KEY":"sk"}}"#
+        )));
     }
 
     #[test]
@@ -957,9 +1050,58 @@ wire_api = "responses"
     fn write_requires_target_and_kind() {
         assert!(harness_settings_write_inner("omp", None, None, None).is_err());
         assert!(harness_settings_write_inner("pi", Some("m"), None, None).is_err());
-        // pi/opencode 无定点替换语义（写回落到配置代写链路），报错文案引导走设置页
-        assert!(harness_settings_write_inner("opencode", Some("m"), None, None).is_err());
+        // pi 无定点替换语义（写回落到配置代写链路）；opencode 已支持（P32b）；未登记 id 拦截
         assert!(harness_settings_write_inner("custom-x", Some("m"), None, None).is_err());
+    }
+
+    // —— P32b：opencode 定点写回（write_opencode，与配置代写结构同构） ——
+
+    #[test]
+    fn write_opencode_updates_model_and_baseurl() {
+        let raw = r#"{"$schema":"https://opencode.ai/config.json","theme":"dark","provider":{"ainone":{"npm":"@ai-sdk/openai-compatible","name":"ainone","options":{"baseURL":"https://old/v1","apiKey":"sk-keep"},"models":{"m1":{"name":"m1"}}}},"model":"ainone/m1"}"#;
+        let out = write_opencode(raw, Some("oc-new"), Some("https://new/v1")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["provider"]["ainone"]["options"]["baseURL"], "https://new/v1");
+        assert_eq!(v["provider"]["ainone"]["options"]["apiKey"], "sk-keep", "既有 key 保留");
+        assert_eq!(v["model"], "ainone/oc-new");
+        assert!(v["provider"]["ainone"]["models"]["oc-new"].is_object(), "models 目录登记新模型");
+        assert_eq!(v["theme"], "dark", "无关键保留");
+        assert_eq!(v["$schema"], "https://opencode.ai/config.json", "schema 键保留");
+    }
+
+    #[test]
+    fn write_opencode_creates_provider_when_absent() {
+        // 无 provider 结构（用户裸配置）→ 补齐 ainone provider 再写
+        let out = write_opencode(r#"{"theme":"dark"}"#, Some("oc-m"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["provider"]["ainone"]["npm"], "@ai-sdk/openai-compatible");
+        assert_eq!(v["model"], "ainone/oc-m");
+        assert!(v["provider"]["ainone"]["models"]["oc-m"].is_object());
+    }
+
+    #[test]
+    fn write_opencode_no_double_prefix_and_corrupt_json() {
+        // 已带 ainone/ 前缀的模型名不重复加
+        let out = write_opencode(r#"{"model":"ainone/m1"}"#, Some("ainone/m2"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["model"], "ainone/m2");
+        // jsonc（带注释）解析失败 → 结构化报错不静默
+        assert!(write_opencode("{// comment\n}", Some("m"), None).is_err());
+    }
+
+    #[test]
+    fn end_to_end_opencode_write_with_backup() {
+        let dir = std::env::temp_dir().join(format!("ainone-ocw-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".config/opencode")).unwrap();
+        let p = dir.join(".config/opencode/opencode.json");
+        std::fs::write(&p, r#"{"provider":{"ainone":{"options":{"baseURL":"https://old/v1","apiKey":"sk"}},"models":{"m1":{"name":"m1"}}},"model":"ainone/m1"}"#).unwrap();
+        let r = harness_settings_write_inner("opencode", Some("oc-n2"), None, Some(&dir)).unwrap();
+        assert!(r.backup.ends_with(".ainone-bak"));
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(v["model"], "ainone/oc-n2");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

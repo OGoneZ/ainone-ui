@@ -74,12 +74,12 @@ describe("SettingsModal", () => {
     mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
 
-    // 折叠区默认收起——展开后出现快问配置
+    // 折叠区默认收起——展开后出现快问配置（P32c：模型名改为探测入口按钮）
     const user = userEvent.setup();
     await user.click(await screen.findByTestId("more-toggle"));
     expect(screen.getByText("快问模型")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("https://api.openai.com/v1")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("gpt-4o-mini")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-model-pick")).toBeInTheDocument();
   });
 
   it("P22 语音服务配置区渲染（P29 折叠进「更多服务」）", async () => {
