@@ -33,7 +33,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY4NTRCNTY4RTM4MDgzOTkKUldTWmc0RGphTFZVYUJMTnNGaHNhTTZXVlNrMVRaYXJZYzc3c2FlWmljMEZ5MjlXbm9zMnNseGcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDRUJCNUNCRTFBRkM4MjUKUldRbHlLL2h5N1hyN09ZTGFtcHZjdkljSUhYZk1Uay9LRXNUQUVnQW5DTXpKUXhDQXpiRGxLdDcK",
       "endpoints": [
         "https://pkg.zhubaoduo.com/latest-updater.json"
       ],
