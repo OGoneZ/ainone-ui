@@ -43,10 +43,18 @@ function ThoughtView({
 }) {
   const [localOpen, setLocalOpen] = useState(live);
   const [thoughtStart, setThoughtStart] = useState<number | null>(null);
+  // P32 AC-1.4：用户流式中手动收起/展开后不再被自动逻辑反复翻转。
+  // seal（live→false）时的自动折叠仍执行——与折叠行语义一致，幂等无抖动。
+  const userToggledRef = useRef(false);
   useEffect(() => {
     // 流式结束（live true→false）自动折叠——仅在无全局覆写时生效
     if (!live && (activityOverride ?? null) === null) setLocalOpen(false);
   }, [live, activityOverride]);
+  // P32 AC-1.1：live 期间（含 thought 后已接 tool 的场景——live 与渲染位置解耦）
+  // 重新变为 live 且用户未手动操作过 → 回到展开（新思考段开流）。已手动操作则尊重。
+  useEffect(() => {
+    if (live && !userToggledRef.current) setLocalOpen(true);
+  }, [live]);
   // 实时计时（AC-P7-5-1 / P16b）：思考中每秒跳动——起点在 live 起时落定，
   // 用墙钟差而非 interval 计数（与总耗时同一时钟语义）
   useEffect(() => {
@@ -56,7 +64,8 @@ function ThoughtView({
   const elapsed = useElapsedTicker(thoughtStart ?? undefined);
   const isThinking = ms === undefined && live;
   const summary = ms !== undefined ? `已思考 ${(ms / 1000).toFixed(0)} 秒` : `思考中… ${elapsed}s`;
-  // P25：全局覆写优先（新流入的 thought 也受控）；null 回局部态
+  // P25：全局覆写优先（新流入的 thought 也受控）；null 回局部态。
+  // P32 AC-1.4：用户手动操作（覆写态下点击单卡）同样标记——回局部态后不再被自动翻转。
   const open = activityOverride ?? localOpen;
   return (
     <div
@@ -71,8 +80,10 @@ function ThoughtView({
         onClick={() => {
           if (activityOverride !== null && activityOverride !== undefined) {
             onActivityOverrideClear?.();
+            userToggledRef.current = true;
             setLocalOpen(false);
           } else {
+            userToggledRef.current = true; // P32 AC-1.4：手动操作后不再自动干预
             setLocalOpen((v) => !v);
           }
         }}

@@ -100,24 +100,15 @@ export function buildActivityGroups(blocks: BlockMsg[]): RenderItem[] {
 }
 
 /**
- * P30：流式中的分组——尾部一段（最后一个 text/工具边界之后）保持独立渲染，
- * 已完成的 tool 块不即时收组。理由：completed 是即时判定，流式中途把刚带 diff
- * 的写块收进折叠卡会让「写操作默认展开」落空（MessageLine busy&&isLast 时调用）。
- * 规则：从末尾向前找最后一个「不可组块」（text/运行中 tool）为界，界后全部独立；
- * 界前的连续段仍按 buildActivityGroups 分组（turn 前段活动收组，视觉紧凑）。
+ * P30：流式中的分组——尾部一段保持独立渲染，已完成 tool 块不即时收组。
+ * P32 修订（AC-1.3/2.4）：流式期间**一律不收组**（全部独立渲染）。
+ * 旧规则「以尾部不可组块为界、界前照常收组」在新 tool/pending 到达时边界来回移动：
+ * 上一帧独立的块下一帧被收进折叠组卡、再下一帧又弹回独立——这就是「一会儿展开
+ * 一会儿收起」的画面抖动主因。统一为流式不收组后，块的渲染形态在流式期间稳定
+ * （独立→独立），收组只发生在 turn 结束一次性完成（buildActivityGroups 全量）。
+ * 代价：长 turn 流式期间可见块数多几行折叠行，换取全程零抖动，值得。
  * turn 结束（busy=false）后由调用方切回 buildActivityGroups 全量收组。
  */
 export function buildStreamingItems(blocks: BlockMsg[]): RenderItem[] {
-  // 末尾不可组块（含 text）之后不可能再有内容——找最后一个 groupable 段的边界
-  let boundary = blocks.length;
-  while (boundary > 0 && groupable(blocks[boundary - 1])) boundary -= 1;
-  // boundary = 首个「从尾部连续 groupable 段」的起点；若整段全 groupable（纯工具序列流式）
-  // 则 boundary === 0，界后为空 —— 此时保守不入组（全部独立），等 turn 结束统一收
-  if (boundary === 0) {
-    return blocks.map((block): RenderItem => ({ type: "block", block }));
-  }
-  return [
-    ...buildActivityGroups(blocks.slice(0, boundary)),
-    ...blocks.slice(boundary).map((block): RenderItem => ({ type: "block", block })),
-  ];
+  return blocks.map((block): RenderItem => ({ type: "block", block }));
 }

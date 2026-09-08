@@ -119,7 +119,14 @@ export const MessageLine = memo(function MessageLine({
             <BlockView
               key={i}
               block={item.block}
-              live={busy && isLast && i === renderItems.length - 1 && (item.block.kind === "thought" ? item.block.ms === undefined : item.block.kind === "text")}
+              /* P32 AC-1.1/1.3：live 与「渲染树位置」解耦——只看数据（流式 turn 中且 ms 未落），
+                 thought 后跟 tool 时不再被误判非 live 而闪收。text 块沿用「最后一个渲染项」判定
+                 （streaming 模式 Markdown 只对增长中的尾段有意义）。 */
+              live={
+                busy && isLast && item.block.kind === "thought" && item.block.ms === undefined
+                  ? true
+                  : busy && isLast && i === renderItems.length - 1 && item.block.kind === "text"
+              }
               onSelect={onSelect}
               diffComments={diffComments}
               onAddDiffComment={onAddDiffComment}
