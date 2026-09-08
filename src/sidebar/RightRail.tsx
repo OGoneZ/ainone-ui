@@ -12,10 +12,14 @@ import { HistoryPanel } from "./HistoryPanel";
 import { collectModifiedPaths } from "@/lib/fileTree";
 import type { ChatMsg } from "@/acp/message-log";
 import type { AdapterWithStatus } from "@/ipc/adapters";
+import { useSessionStore } from "@/store/sessionStore";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { clampWidth, sidebarMaxWidth } from "@/lib/sidebarResize";
 import { logger } from "@/lib/logger";
 import "@/sidebar/sidebar.css";
+
+/** messages 为空时的稳定引用（store 无 runtime 记录时避免每渲染新数组） */
+const EMPTY_MESSAGES: ChatMsg[] = [];
 
 export type RailTab = "meta" | "files" | "history";
 
@@ -27,8 +31,7 @@ interface Props {
   cwd?: string;
   /** P29 R5：活跃会话句柄（模型切换 set_config_option 用；无会话 = null） */
   session: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null;
-  /** 当前会话消息（文件树「M」徽标数据源） */
-  messages: ChatMsg[];
+  /** P32 R2：messages 不再由 App 传递，组件内按 tabKey 细粒度订阅 store */
   /** P30：终端 tab 模式——无 harness 元数据/历史消息，只显示「文件」tab；
    *  折叠细栏杆也只剩文件入口，落点 tab 强制回 files */
   terminalOnly?: boolean;
@@ -69,7 +72,7 @@ export function saveRailState(s: RailState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
-export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, terminalOnly = false, open, tab, onSwitchTab, onToggle }: Props) {
+export function RightRail({ tabKey, adapter, sessionId, cwd, session, terminalOnly = false, open, tab, onSwitchTab, onToggle }: Props) {
   // F-21-6 右栏宽度（拖宽把手，独立 key 持久化；clamp 220~min(520,40vw)）
   const [width, setWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-rightrail-width")) || 260, 220, sidebarMaxWidth()),
@@ -77,6 +80,11 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, messages, 
   function persistWidth(w: number) {
     localStorage.setItem("ainone-rightrail-width", String(w));
   }
+
+  // F-9-4 最近改动文件（文件树「M」徽标）+ P16 F-16-2 历史锚点数据源。
+  // P32 R2：messages 改由本组件按 tabKey 细粒度订阅（原先 App 提升后整体
+  // 传递——App 订阅整个 runtime，流式期间每帧重渲染连带 Rail 全树）。
+  const messages = useSessionStore((s) => s.runtime[tabKey]?.messages) ?? EMPTY_MESSAGES;
 
   // F-9-4 最近改动文件（文件树「M」徽标）
   const modifiedPaths = useMemo(() => collectModifiedPaths(messages), [messages]);

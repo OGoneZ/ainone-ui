@@ -33,7 +33,7 @@ describe("会话状态推导（F-6-1）", () => {
     ).toBe("awaiting_input");
   });
 
-  it("collectSignals 把 tabs+runtime 聚合成 sessionId → 信号", () => {
+  it("collectSignals 把 tabs+状态信号聚合为 sessionId → 信号（P32 R2 投影签名）", () => {
     const signals = collectSignals(
       [
         { key: "k1", sessionId: "s-1" },
@@ -41,11 +41,13 @@ describe("会话状态推导（F-6-1）", () => {
         { key: "k3" }, // 新建中（无 sessionId）
       ],
       {
-        k1: { busy: true, perm: null, messages: [] },
-        k2: { busy: false, perm: { title: "x", options: [] }, messages: [1, 2, 3] },
+        k1: { busy: true, perm: null, hasMessages: false },
+        k2: { busy: false, perm: { title: "x", options: [] }, hasMessages: true },
       },
     );
     expect(signals.get("s-1")).toHaveLength(2);
+    expect(signals.get("s-1")![0].busy).toBe(true);
+    expect(signals.get("s-1")![1].hasMessages).toBe(true);
     expect(signals.has("s-1")).toBe(true);
   });
 });

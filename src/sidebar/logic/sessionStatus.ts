@@ -31,27 +31,35 @@ export interface TabRef {
   sessionId?: string;
 }
 
-export interface RuntimeRef {
+/** F-21-4 权限审批引用（与 sessionStore.PermState 结构对齐；此处只判 null） */
+export interface RuntimePermRef {
+  title: string;
+  options: unknown[];
+}
+
+/** P32 R2：运行时状态信号投影——App 层用 useShallow 提取标量子集，
+ *  不再传整个 runtime（messages 数组引用随流式提交每帧变化会打穿订阅等值） */
+export interface RuntimeSignalRef {
   busy: boolean;
-  perm: { title: string; options: unknown[] } | null;
-  messages: unknown[];
+  perm: RuntimePermRef | null;
+  hasMessages: boolean;
 }
 
 /**
- * 把 tabs + runtime 聚合成 sessionId → RuntimeSignal[]。
+ * 把 tabs + 状态信号聚合为 sessionId → RuntimeSignal[]。
  * 新建中的 Tab（无 sessionId）不参与（尚无会话索引）。
  */
 export function collectSignals(
   tabs: TabRef[],
-  runtime: Record<string, RuntimeRef>,
+  signalsByTab: Record<string, RuntimeSignalRef>,
 ): Map<string, RuntimeSignal[]> {
   const map = new Map<string, RuntimeSignal[]>();
   for (const t of tabs) {
     if (!t.sessionId) continue;
-    const rt = runtime[t.key];
-    if (!rt) continue;
+    const sig = signalsByTab[t.key];
+    if (!sig) continue;
     const arr = map.get(t.sessionId) ?? [];
-    arr.push({ busy: rt.busy, perm: rt.perm, hasMessages: rt.messages.length > 0 });
+    arr.push({ busy: sig.busy, perm: sig.perm, hasMessages: sig.hasMessages });
     map.set(t.sessionId, arr);
   }
   return map;

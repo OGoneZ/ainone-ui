@@ -53,6 +53,7 @@ import {
 import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
+import { useShallow } from "zustand/react/shallow";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
 import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, tabCycleShortcut, nextTabIndex, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
 import { matchShortcut } from "@/app/logic/keymap";
@@ -1006,18 +1007,41 @@ function App() {
   // adapterId → adapter 表：会话行 harness logo（F-8-1 AC-P8-1 按 adapter_id 解析）
   const adapterById = useMemo(() => new Map(adapters.map((a) => [a.id, a])), [adapters]);
 
-  // 会话状态（F-6-1）：非活跃 Tab 的 runtime 状态仍可读（zustand store）
-  const runtime = useSessionStore((s) => s.runtime);
-  // F-11-7 右栏数据：当前活跃 Tab 的消息（文件树「M」徽标）
-  const activeMessages = (activeTab && runtime[activeTab.key]?.messages) || [];
+  // 会话状态（F-6-1）：非活跃 Tab 的 runtime 状态仍可读（zustand store）。
+  // P32 R2：不再订阅整个 runtime——流式期间 updateLastAssistant/patch 每次提交
+  // 都换 runtime 引用，整订阅导致 App（含侧栏全部行 + flexlayout 树）按帧全量
+  // 重渲染。这里投影成「tabKey → 状态编码字符串」（原始值，浅比较稳定）：
+  // 仅当某 tab 的 busy/perm 非空/消息有无实际变化时字符串才变 → App 才重渲染。
+  const sessionSignals = useSessionStore(
+    useShallow((s) => {
+      const out: Record<string, string> = {};
+      for (const t of tabs) {
+        if (!t.sessionId) continue;
+        const rt = s.runtime[t.key];
+        if (!rt) continue;
+        out[t.key] = `${rt.busy ? 1 : 0}|${rt.perm ? rt.perm.title : ""}|${rt.messages.length > 0 ? 1 : 0}`;
+      }
+      return out;
+    }),
+  );
   const statusBySession = useMemo(() => {
-    const signals = collectSignals(tabs, runtime);
+    // 编码字符串 → 信号还原（collectSignals 只需要标量，perm 仅判空）
+    const signalsByTab: Record<string, { busy: boolean; perm: { title: string; options: unknown[] } | null; hasMessages: boolean }> = {};
+    for (const [key, code] of Object.entries(sessionSignals)) {
+      const [busy, permTitle, hasMessages] = code.split("|");
+      signalsByTab[key] = {
+        busy: busy === "1",
+        perm: permTitle ? { title: permTitle, options: [] } : null,
+        hasMessages: hasMessages === "1",
+      };
+    }
+    const signals = collectSignals(tabs, signalsByTab);
     const out = new Map<string, SessionStatus>();
     for (const [sid, sigs] of signals) {
       out.set(sid, deriveStatus(sigs));
     }
     return out;
-  }, [tabs, runtime]);
+  }, [tabs, sessionSignals]);
 
   function statusOf(sessionId: string): SessionStatus {
     return statusBySession.get(sessionId) ?? "done";
@@ -1290,7 +1314,6 @@ function App() {
               sessionId={activeTab.sessionId ?? null}
               cwd={activeTab.cwd}
               session={activeSession}
-              messages={activeMessages}
               terminalOnly={activeTab.kind === "terminal"}
               open={railState.open}
               tab={railState.tab}
