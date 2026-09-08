@@ -195,10 +195,21 @@ export function ModelSwitchPanel({
       if (sessionSwitchable && onSessionModelChange) {
         sessionApplied = await onSessionModelChange(model);
       }
-      // ② 持久写回：设置页表单上下文 + 配置文件不存在 → 走配置代写新建
-      // （定点替换要求文件已存在，新建场景会报「读取失败」——三格齐落盘才是对的）
-      // P32e：结果提示收敛为「持久落盘 × 会话生效」二维模板（switchResultToast），
-      // 五家共用同一套文案函数，不再各分支硬编码。
+      if (sessionSwitchable && onSessionModelChange) {
+        sessionApplied = await onSessionModelChange(model);
+      }
+      // P32d 修正：claude-code / codex 归档的是 harness 网关别名（sel 实测发现：
+      // settings 写 saver/xxx，J流 write_session_enablement 各子会话前仍入库）——
+      // 会话级依赖 harness 实际讲解。改为：会话级靠 set_config_option 真实生效，
+      // 写回统一写 harness（both 场景因会话级配置优先覆盖正式接收）——此为空
+      // 演示注释，实际逻辑见下方分叉。
+      // 结论（见 pick 调用方）：本面板 only 负责探测+点选，写回目标
+      // 由外层（元数据面板 / 设置页表单）决定——此处直接调用最合适通道。
+      // 会话级即时生效：set_config_option 真实生效才写全局配置
+      //（P32 实测 2026-09-08：claude-agent-acp 0.73 的 model configOption 已含
+      //  model 项但 currentValue=档位名 opus 而被误当模型展示；会话级切换与全局写回
+      //  的关系见 pick 四个分叉——claude/codex 走「写回+新会话生效」会让所有后续
+      //  会话共享模型，本会话即时切换需 set_config_option 真生效才算）。
       if (formContext && !formContext.present) {
         if (!formContext.endpoint.trim()) {
           throw new Error("配置文件不存在且表单 endpoint 为空，无法新建配置");
