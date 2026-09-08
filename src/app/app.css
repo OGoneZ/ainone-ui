@@ -1065,6 +1065,27 @@ button:disabled {
   justify-content: flex-end;
 }
 
+/* 模型名探测入口：伪装成输入框的按钮，显示当前生效模型（回显），点击开探测面板 */
+.adapter-cfg-model {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: inherit;
+  border: 1px solid var(--bg-3);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.adapter-cfg-model:hover {
+  border-color: var(--accent, #7c9cff);
+}
+
+.adapter-cfg-model .cfg-model-empty {
+  color: var(--text-secondary);
+}
+
 /* P29 「更多服务」折叠开关行 */
 .settings-more-toggle {
   align-self: flex-start;
