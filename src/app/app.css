@@ -903,6 +903,67 @@ button:disabled {
   font-size: 0.9em;
 }
 
+/* —— P26 主题选择下拉（替换原生 select）—— */
+/* 触发钮：伪装输入框（左图标+当前主题名，右展开箭头） */
+.theme-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 160px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: var(--text-primary);
+  font-size: 0.92em;
+  font-family: inherit;
+  cursor: pointer;
+}
+.theme-select-trigger:hover {
+  border-color: var(--text-disabled);
+}
+.theme-select-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 下拉项：图标 + 标题/说明两行 + 当前项对勾 */
+.theme-select-menu {
+  min-width: 210px;
+}
+.theme-select-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+}
+.theme-select-item.active {
+  background: var(--bg-hover);
+}
+.theme-select-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.theme-select-item-title {
+  font-size: 0.95em;
+  color: var(--text-primary);
+}
+.theme-select-item-desc {
+  font-size: 0.78em;
+  color: var(--text-secondary);
+}
+.theme-select-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
 /* 分区内的一张配置卡（快问 / 语音服务） */
 .settings-card {
   display: flex;

@@ -155,6 +155,36 @@
 
 /* ======================= 基础复位与全局 ======================= */
 
+/* —— 主题切换过渡（P26 主题快捷钮）：仅在切换瞬间挂 .theme-fading，350ms 后由 JS 摘除。
+   不设永久 transition——WKWebView 冻结 transition 时会永停中间态（P26c 同坑）。 —— */
+html.theme-fading,
+html.theme-fading *,
+html.theme-fading *::before,
+html.theme-fading *::after {
+  transition:
+    background-color 280ms ease,
+    color 280ms ease,
+    border-color 280ms ease,
+    fill 280ms ease,
+    stroke 280ms ease !important;
+  transition-delay: 0ms !important;
+}
+
+/* 侧栏主题钮图标：浅/深切换时旋转缩放进入（key 重挂载触发，sun⇄moon 交叉观感） */
+.theme-icon-pop {
+  animation: theme-icon-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes theme-icon-pop {
+  from {
+    transform: rotate(-120deg) scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: rotate(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
 html,
 body,
 #root {

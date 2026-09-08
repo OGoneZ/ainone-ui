@@ -36,6 +36,8 @@ import {
   MessageSquarePlus,
   Mic,
   Minimize2,
+  Monitor,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -45,6 +47,7 @@ import {
   Settings,
   Square,
   SquareTerminal,
+  Sun,
   Terminal,
   Trash2,
   CircleHelp,
@@ -105,3 +108,6 @@ export const ExpandIcon = Maximize2; // F-18-2 输入框全屏编辑
 export const ShrinkIcon = Minimize2; // F-18-2 退出全屏编辑
 export const DonateIcon = Coffee; // P22 打赏作者入口
 export const HelpIcon = CircleHelp; // P25 快捷键帮助入口
+export const ThemeAutoIcon = Monitor; // 主题·跟随系统
+export const ThemeLightIcon = Sun; // 主题·浅色
+export const ThemeDarkIcon = Moon; // 主题·深色
