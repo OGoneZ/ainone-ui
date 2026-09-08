@@ -24,6 +24,8 @@ import { useTypewriter } from "@/chat/hooks/useTypewriter";
 import { createStreamCommitThrottle } from "@/chat/hooks/streamCommitThrottle";
 import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "@/ipc/sessions";
+import { notifySend } from "@/ipc/notify";
+import { shouldNotify, turnEndBody } from "@/chat/logic/notify";
 import { parseLog, serializeMessages } from "@/acp/message-log";
 import { newTurn, applyEvent, type TurnAccumulator } from "@/acp/turn";
 import { completeCommand } from "../chat/logic/slash";
@@ -509,6 +511,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             options: params.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind ?? null })),
           };
           patch(tabKey, { perm });
+          // P32 F-32-1：窗口失焦时通知「等待权限批准」（决策在 shouldNotify 纯函数）
+          {
+            const decision = shouldNotify({ reason: "perm", windowFocused: document.hasFocus() });
+            if (decision.send) {
+              logger.info("notify", "fire", { reason: "perm", tabKey });
+              void notifySend(`${adapter.name} 等待权限批准`, perm.title);
+            }
+          }
           // P24e：60s 超时兜底——harness 撤回请求不发通知，超时回协议原生
           // cancelled，不让 PermCard 永远卡在界面上（三条清 timer 路径：
           // a) onPerm 正常决策；b) finally turn 收口；c) 组件卸载 cleanup）
@@ -1003,6 +1013,19 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         throttle.flush(); // 强制提交帧内未落的累积快照（终态必须可见）
         if (turnRef.current.blocks.length > 0) {
           useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
+        }
+        // P32 F-32-1：窗口失焦时通知「任务完成」（用户自己取消不发——shouldNotify 决策）
+        {
+          const reason = stopReasonRef.current ?? "end_turn";
+          const decision = shouldNotify({ reason: "turn_end", windowFocused: document.hasFocus(), stopReason: reason });
+          if (decision.send) {
+            logger.info("notify", "fire", { reason: "turn_end", tabKey, stopReason: reason });
+            const lastText = [...turnRef.current.blocks].reverse().find((b) => b.kind === "text");
+            void notifySend(
+              `${adapter.name} 任务完成`,
+              turnEndBody(lastText && lastText.kind === "text" ? lastText.text.split("\n")[0] : undefined),
+            );
+          }
         }
       } catch (err) {
         logger.error("chat", "prompt 失败", { tabKey, adapter: adapter.id, error: String(err) });
