@@ -22,6 +22,8 @@ import { Welcome } from "@/chat/Welcome";
 import { MessageLine } from "@/chat/message/MessageLine";
 import { useTypewriter } from "@/chat/hooks/useTypewriter";
 import { createStreamCommitThrottle } from "@/chat/hooks/streamCommitThrottle";
+import { createFollowBottom } from "@/chat/hooks/followBottom";
+import { ChevronDownIcon } from "@/components/ui/icons";
 import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "@/ipc/sessions";
 import { parseLog, serializeMessages } from "@/acp/message-log";
@@ -667,6 +669,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       if (ok) toast.success(`已加入队列（第 ${(useQueueStore.getState().queues[tabKey] ?? []).length} 位）`);
       return;
     }
+    follow.scrollToBottom(); // P32 AC-3.6：发送新消息强制回底并恢复跟随
     appendUser(tabKey, full);
     await runPrompt(full);
   }
@@ -1190,7 +1193,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const lastUserIdx = useMemo(() => lastUserIndex(messages), [messages]);
   const lastUserText = lastUserIdx >= 0 && messages[lastUserIdx].role === "user" ? messages[lastUserIdx].text : "";
   const [atBottom, setAtBottom] = useState(true);
-  // 滚动监听（raf 节流）：距底 >64px 显示气泡
+  // P32 AC-3.x：自动滚动跟随——流式/折叠展开引起内容增高时贴底；wheel 向上/远端按下
+  // 接管（跟随暂停）；滚回近底、点回底按钮、发送新消息恢复。逻辑在 followBottom.ts
+  // （纯逻辑注入可测），此处只做事件接线 + atBottom 显隐合一（一个来源，同一阈值）。
+  const followRef = useRef<ReturnType<typeof createFollowBottom> | null>(null);
+  if (!followRef.current) {
+    followRef.current = createFollowBottom({ getScroller: () => chatScrollRef.current });
+  }
+  const follow = followRef.current;
+  useEffect(() => () => follow.dispose(), [follow]);
+  // 滚动监听（raf 节流）：距底 >64px 显示气泡/回底按钮 + 跟随状态机消费 scroll
   useEffect(() => {
     const el = chatScrollRef.current;
     if (!el) return;
@@ -1200,6 +1212,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       raf = requestAnimationFrame(() => {
         const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
         setAtBottom(dist <= 64);
+        follow.onScroll();
         // H6：选中悬浮窗锚定的是内容坐标，滚动后锚点失效 → 直接关闭（残留修复）
         if (quickSelRef.current !== null) {
           setQuickSel(null);
@@ -1212,7 +1225,36 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       cancelAnimationFrame(raf);
       el.removeEventListener("scroll", onScroll);
     };
-  }, []);
+  }, [follow]);
+  // P32：用户手势接管——wheel 向上立即接管；按下（WKWebView 原生点击无 pointerdown，
+  // 记忆 P23）用 mousedown/touchstart 双通道。passive 不阻断默认滚动行为。
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      follow.onWheel(e.deltaY);
+    };
+    const onPress = () => follow.onPress();
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("mousedown", onPress, { passive: true });
+    el.addEventListener("touchstart", onPress, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("mousedown", onPress);
+      el.removeEventListener("touchstart", onPress);
+    };
+  }, [follow]);
+  // P32 AC-3.7：内容增高驱动跟随——虚拟容器（getTotalSize 撑高的节点）尺寸变化即
+  // onContentGrow，rAF 合帧推底。流式 chunk 与 diff 展开/收起共用该路径。
+  const streamContentRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const content = streamContentRef.current;
+    if (!content) return;
+    const ro = new ResizeObserver(() => follow.onContentGrow());
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [follow]);
   // L2：回跳目标消息短暂高亮（与搜索命中高亮同型，1.2s 后退场）
   const [lastPromptFlash, setLastPromptFlash] = useState(-1);
   // P16 F-16-2：通用跳转（双 rAF 校跳——远端未测量条目首跳按 estimateSize 漂移，
@@ -1425,6 +1467,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           <div className="hint degraded">⚠️ 未能恢复模型上下文，已新建会话；上方历史仅为本地存档</div>
         )}
         <div
+          ref={streamContentRef}
           style={{
             height: `${virtualizer.getTotalSize()}px`,
             width: "100%",
@@ -1482,6 +1525,23 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         {/* F-21-4 权限审批内嵌卡：窗格内渲染替代全屏 modal（多分屏不再互相遮挡） */}
         {perm && (
           <PermCard title={perm.title} options={perm.options} onDecide={onPerm} />
+        )}
+        {/* P32 AC-3.4：回到底部悬浮按钮——接管（上翻）后出现，点击恢复跟随。
+            与「你最后说的」回跳气泡互斥布局冲突小（一上一下），各自独立显隐。 */}
+        {!atBottom && (
+          <button
+            type="button"
+            className="scroll-to-bottom-btn"
+            data-testid="scroll-to-bottom"
+            aria-label="回到底部"
+            title="回到底部"
+            onClick={() => {
+              follow.scrollToBottom();
+              setAtBottom(true);
+            }}
+          >
+            <ChevronDownIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
+          </button>
         )}
         {/* F-8-6 回溯确认（破坏性操作，二次确认） */}
         <Dialog open={rewindTarget !== null} onOpenChange={() => setRewindTarget(null)}>

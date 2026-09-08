@@ -668,3 +668,36 @@
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
+
+/* —— P32 AC-3.4 回到底部悬浮按钮 ——
+ * 接管（用户上翻）后出现在消息区底部居中；点击恢复跟随。
+ * overflow-anchor:none：禁用浏览器 scroll anchoring，避免与自研跟随推底打架
+ * （内容增高时浏览器自行调 scrollTop 会破坏 pin 语义）。 */
+.chat {
+  overflow-anchor: none;
+}
+
+.scroll-to-bottom-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--dock-h, 200px) + 16px);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--bg-3);
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition: background var(--motion-fast) var(--ease-out-soft);
+}
+
+.scroll-to-bottom-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-primary);
+}
