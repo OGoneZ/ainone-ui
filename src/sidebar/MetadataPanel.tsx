@@ -45,7 +45,9 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
   const sessionId = storeSessionId ?? sessionIdProp;
   // P29 R3：会话级 configOptions（模型选择器 currentValue）
   const configOptions = useSessionStore((s) => s.runtime[tabKey]?.configOptions ?? null);
-  // P29 R3/R4：静态配置兜底（harness_meta；文件缺失/不支持 → null）
+  // P29 R3/R4：静态配置兜底（harness_meta；文件缺失/不支持 → null）。
+  // writeTick 入 deps：写回后刷新（原来独立 effect 与挂载 effect 重复加载两次）。
+  const [writeTick, setWriteTick] = useState(0);
   const [staticMeta, setStaticMeta] = useState<HarnessMeta | null>(null);
   useEffect(() => {
     let alive = true;
@@ -57,7 +59,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
     return () => {
       alive = false;
     };
-  }, [adapter.id]);
+  }, [adapter.id, writeTick]);
 
   const [open, setOpen] = useState<boolean>(() => localStorage.getItem(STORAGE_KEY) === "1");
   useEffect(() => {
@@ -73,32 +75,27 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
   // P29 baseUrl 优先级：providers 会话值 > 静态配置（UI 标注来源）
   const baseUrl = meta?.baseUrl ?? staticMeta?.base_url ?? null;
   const baseUrlSource = meta?.baseUrl ? "session" : staticMeta?.base_url ? "config" : null;
+  // P29 R5+: 探测基准与展示值分离。claude-code 的 providers/list 会话值谎报官方地址
+  // （连接器不反映 env.ANTHROPIC_BASE_URL，overridden=false 实锤），拿它探测 = 中转
+  // token 打官方 403。探测一律以「写回落点」为准（静态配置 = 本机真实生效网关），
+  // 会话值只作展示——与设置页表单链路（endpoint 优先）收敛为同一优先级约定。
+  const probeBaseUrl = staticMeta?.base_url ?? meta?.baseUrl ?? null;
 
   // P29 R5：模型/URL 切换面板开合
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [urlPanelOpen, setUrlPanelOpen] = useState(false);
 
-  /** 写回后刷新静态元数据 + 通知外层 */
-  const [writeTick, setWriteTick] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    fetchHarnessMeta(adapter.id)
-      .then((m) => {
-        if (alive) setStaticMeta(m);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [adapter.id, writeTick]);
-  /** 会话级切模型：session/set_config_option（configId=model；omp/pi 即时生效） */
+  /** 会话级切模型：session/set_config_option（configId=model；omp/pi 即时生效）。
+   *  返回 boolean 告知调用方是否真实生效——连接器拒绝（如 claude-code 的选择器外
+   *  网关模型）时 acp 层吞错返回 null，此处转 false，UI 才能如实提示而非谎报。 */
   const sessionModelChange = useCallback(
-    async (m: string) => {
+    async (m: string): Promise<boolean> => {
       const opt = configOptions?.find((o) => o.category === "model" && o.type === "select");
       const fn = liveSession?.setConfigOption;
-      if (!opt || !fn) return;
+      if (!opt || !fn) return false;
       const next = (await fn.call(liveSession, opt.id, m)) as AcpSessionConfigOption[] | null;
       if (next) useSessionStore.getState().setConfigOptions(tabKey, next);
+      return next !== null;
     },
     [configOptions, tabKey, liveSession],
   );
@@ -115,7 +112,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
           onClose={() => setModelPanelOpen(false)}
           adapterId={adapter.id}
           adapterName={adapter.name}
-          baseUrl={baseUrl}
+          baseUrl={probeBaseUrl}
           currentModel={model}
           configOptions={configOptions}
           onSessionModelChange={sessionModelChange}
@@ -171,7 +168,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
         onClose={() => setModelPanelOpen(false)}
         adapterId={adapter.id}
         adapterName={adapter.name}
-        baseUrl={baseUrl}
+        baseUrl={probeBaseUrl}
         currentModel={model}
         configOptions={configOptions}
         onSessionModelChange={sessionModelChange}

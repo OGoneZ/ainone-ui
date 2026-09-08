@@ -8,9 +8,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { probeModels, writeHarnessSettings, supportsWrite } from "@/ipc/harnessMeta";
+import { harnessConfigSave } from "@/ipc/adapters";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import type { AcpSessionConfigOption } from "@/store/sessionStore";
+
+/** 设置页配置表单上下文（存在时走表单探测+代写链路，区别于元数据面板的静态配置链路） */
+export interface FormContext {
+  /** 表单 endpoint（探测基准 + 代写落盘） */
+  endpoint: string;
+  /** 表单 API Key（明文仅 Rust 侧流转；空 = 用本机既有 key） */
+  apiKey: string;
+  /** 配置文件是否已存在（false = 点选写回走配置代写新建，而非定点替换） */
+  present: boolean;
+}
 
 interface Props {
   open: boolean;
@@ -23,10 +34,14 @@ interface Props {
   currentModel: string | null;
   /** 会话配置选项（含 model select 项时点选后同步 set_config_option 即时生效） */
   configOptions: AcpSessionConfigOption[] | null;
-  /** 会话级切模型回调；null = 无活跃会话（只写配置） */
-  onSessionModelChange: ((model: string) => Promise<void>) | null;
+  /** 会话级切模型回调；null = 无活跃会话（只写配置）。
+   *  resolve(true) = set_config_option 生效；resolve(false) = 连接器拒绝（如 claude-code
+   *  选择器外的网关模型，写入的 allowlist 只对新会话可见）——UI 据此如实提示。 */
+  onSessionModelChange: ((model: string) => Promise<boolean>) | null;
   /** 写回成功后通知外层刷新元数据 */
   onWritten: () => void;
+  /** 设置页配置表单上下文（设置页传入；元数据面板不传） */
+  formContext?: FormContext | null;
 }
 
 export function ModelSwitchPanel({
@@ -39,6 +54,7 @@ export function ModelSwitchPanel({
   configOptions,
   onSessionModelChange,
   onWritten,
+  formContext,
 }: Props) {
   const [models, setModels] = useState<string[] | null>(null);
   const [probing, setProbing] = useState(false);
@@ -54,14 +70,16 @@ export function ModelSwitchPanel({
   const sessionSwitchable = Boolean(modelOption && onSessionModelChange);
 
   const doProbe = useCallback(async () => {
-    if (!baseUrl) {
+    // 表单上下文优先：endpoint 用表单值（可为空 → Rust 侧回落本机配置）
+    const effectiveBase = formContext ? formContext.endpoint : baseUrl;
+    if (!effectiveBase && !formContext) {
       setProbeError("无 baseUrl 可探测（本 harness 未采集到接口地址）");
       return;
     }
     setProbing(true);
     setProbeError(null);
     try {
-      const ids = await probeModels(adapterId, baseUrl);
+      const ids = await probeModels(adapterId, effectiveBase ?? "", formContext?.apiKey || undefined);
       logger.info("meta", "models-probed", { adapterId, count: ids.length });
       setModels(ids);
     } catch (e) {
@@ -73,7 +91,7 @@ export function ModelSwitchPanel({
     } finally {
       setProbing(false);
     }
-  }, [adapterId, baseUrl]);
+  }, [adapterId, baseUrl, formContext]);
 
   // 打开即探测；baseUrl 变化（URL 编辑联动）重新探测
   useEffect(() => {
@@ -82,30 +100,57 @@ export function ModelSwitchPanel({
       void doProbe();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, baseUrl]);
+  }, [open, baseUrl, formContext?.endpoint, formContext?.apiKey]);
 
   const filtered = models?.filter((m) => m.toLowerCase().includes(filter.toLowerCase())) ?? [];
 
   async function pick(model: string) {
     setSaving(model);
     try {
-      // ① 会话级即时生效（有 model configOption 且有活跃会话）
+      // ① 会话级即时生效（有 model configOption 且有活跃会话）。
+      //    resolve(false) = 连接器拒绝（claude-code 选择器外的网关模型，写入的
+      //    allowlist 只对新会话可见）——持久写回继续，toast 如实提示。
+      let sessionApplied = false;
       if (sessionSwitchable && onSessionModelChange) {
-        await onSessionModelChange(model);
+        sessionApplied = await onSessionModelChange(model);
       }
-      // ② 持久写回（claude-code/codex/omp）
-      if (writable) {
+      // ② 持久写回：设置页表单上下文 + 配置文件不存在 → 走配置代写新建
+      // （定点替换要求文件已存在，新建场景会报「读取失败」——三格齐落盘才是对的）
+      if (formContext && !formContext.present) {
+        if (!formContext.endpoint.trim()) {
+          throw new Error("配置文件不存在且表单 endpoint 为空，无法新建配置");
+        }
+        const written = await harnessConfigSave({
+          program: adapterId,
+          endpoint: formContext.endpoint,
+          apiKey: formContext.apiKey,
+          model,
+        });
+        logger.info("meta", "model-created", { adapterId, model, path: written });
+        toast.success(`已写入 ${model}（配置新建，对新会话生效）`, {
+          description: `配置已写入 ${written}`,
+        });
+      } else if (writable) {
         const out = await writeHarnessSettings(adapterId, { model });
         logger.info("meta", "model-written", { adapterId, model, path: out.path });
-        toast.success(
-          `已切换到 ${model}` + (sessionSwitchable ? "" : "（对新会话生效）"),
-          { description: `配置已写入 ${out.path}（备份 ${out.backup}）` },
-        );
-      } else if (sessionSwitchable) {
+        const detail = `配置已写入 ${out.path}（备份 ${out.backup}）`;
+        if (sessionSwitchable && !sessionApplied) {
+          // claude-code 活跃会话选择器外模型：写入成功但会话内未生效——不谎报
+          toast.warning(`已写入 ${model}（对新会话生效）`, {
+            description: `当前会话不支持该模型，未能即时切换。${detail}`,
+          });
+        } else {
+          toast.success(`已切换到 ${model}（${sessionApplied ? "本会话即时生效" : "对新会话生效"}）`, {
+            description: detail,
+          });
+        }
+      } else if (sessionApplied) {
         // pi：无持久写回，仅会话级
         toast.success(`当前会话已切换到 ${model}（仅本会话生效）`);
       } else {
-        toast.error(`${adapterName} 不支持模型切换`);
+        toast.error(`当前会话不支持该模型（${adapterName} 无配置写回，无法持久化）`);
+        setSaving(null);
+        return;
       }
       onWritten();
       onClose();
@@ -124,7 +169,9 @@ export function ModelSwitchPanel({
         <DialogHeader>
           <DialogTitle>
             {adapterName} · 选择模型
-            {baseUrl && <span className="msm-base">{baseUrl}</span>}
+            {(formContext ? formContext.endpoint : baseUrl) && (
+              <span className="msm-base">{formContext ? formContext.endpoint : baseUrl}</span>
+            )}
           </DialogTitle>
         </DialogHeader>
 
@@ -177,8 +224,8 @@ export function ModelSwitchPanel({
         )}
 
         <div className="msm-foot">
-          {models !== null && <span>{models.length} 个模型 · 来自 {baseUrl}</span>}
-          {writable ? (
+          {models !== null && <span>{models.length} 个模型 · 来自 {formContext ? formContext.endpoint : baseUrl}</span>}
+          {writable || formContext ? (
             <span>选择后写入本机配置{sessionSwitchable ? "并即时应用到会话" : "（对新会话生效）"}</span>
           ) : sessionSwitchable ? (
             <span>该 harness 无配置写回，仅切换当前会话</span>
