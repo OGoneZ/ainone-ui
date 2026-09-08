@@ -1,4 +1,4 @@
-# P32 验收纪要：渲染性能与资源占用优化（2026-09-08）
+# P32 渲染性能优化验收纪要（2026-09-08；与并行期 p32_stream_ux 撞号，本文件是其性能系列验收）
 
 > 分支：`zhubaoduo/perf/p32_rendering_perf`（worktree `.claude/worktrees/p32-perf-rendering`）
 > 规格：`docs/plan-p32-rendering-perf.md`（R1–R8 全部落地，R9/原#10 经复核取消）
