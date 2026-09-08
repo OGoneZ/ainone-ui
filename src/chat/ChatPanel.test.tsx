@@ -392,3 +392,58 @@ describe("ChatPanel 交互行为", () => {
     expect(screen.queryByLabelText("搜索会话")).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// P31 流式提交节流（2026-09-08 事故）：旧实现每条 onOutgoing 事件都
+// updateLastAssistant 一次（新数组引用 → 全列表重渲染）。事故实测 48s 内
+// 396 条 update × 每条全量重渲染 → WebKit 主线程持续满载。现在内容事件
+// 走 streamCommitThrottle（rAF 帧内合并），turn 结束 flush 收口。
+// 本组用受控 fakeSession 突发多条 agent_text，断言：
+//   a) 事件不丢（最终内容完整）
+//   b) busy 复位后无 pending 帧回调泄漏（turn 正常收口）
+describe("P31 流式提交节流（渲染次数与事件到达率解耦）", () => {
+  it("单帧内多条 agent_text 突发 → 终态内容完整不丢事件", async () => {
+    // 同步连发 50 条（jsdom 下 rAF 由测试环境回退为 microtask 级合并——
+    // 无论合并成几次提交，最终 transcript 必须包含全部文本）
+    const events: Array<{ type: string; text?: string; stopReason?: string }> = [];
+    for (let i = 0; i < 50; i++) events.push({ type: "agent_text", text: `片段${i} ` });
+    events.push({ type: "turn_stop", stopReason: "end_turn" });
+    mockOpen.mockResolvedValue(fakeSession(events));
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+
+    const user = userEvent.setup();
+    await user.type(input(), "突发");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    // 终态：全部 50 个片段都渲染出来（顺序保持）
+    expect(await screen.findByText(new RegExp("片段49"))).toBeInTheDocument();
+    // 完整性：最后片段与前段拼接同框（无事件被节流丢弃）
+    const assistant = screen.getByText((_, el) => el?.classList.contains("md") === true);
+    expect(assistant.textContent).toContain("片段0 ");
+    expect(assistant.textContent).toContain("片段49");
+      });
+
+  it("turn 结束后 busy 复位（flush 收口不悬挂 UI 状态）", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_text", text: "一段" },
+        { type: "agent_text", text: "两段" },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    const user = userEvent.setup();
+    await user.type(input(), "hi");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/一段/)).toBeInTheDocument();
+    // busy=false 已复位（输入框恢复可用）
+    await vi.waitFor(() => {
+      expect(useSessionStore.getState().runtime["k1"]?.busy).toBe(false);
+    });
+    // 终态内容包含所有片段
+    const assistant = screen.getByText((_, el) => el?.classList.contains("md") === true);
+    expect(assistant.textContent).toContain("一段");
+    expect(assistant.textContent).toContain("两段");
+  });
+});

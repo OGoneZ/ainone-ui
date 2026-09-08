@@ -21,6 +21,7 @@ import { UsageBar } from "@/chat/components/UsageBar";
 import { Welcome } from "@/chat/Welcome";
 import { MessageLine } from "@/chat/message/MessageLine";
 import { useTypewriter } from "@/chat/hooks/useTypewriter";
+import { createStreamCommitThrottle } from "@/chat/hooks/streamCommitThrottle";
 import { useQueueStore } from "@/store/queueStore";
 import { logRead, logAppend, logTruncate, logCopy } from "@/ipc/sessions";
 import { parseLog, serializeMessages } from "@/acp/message-log";
@@ -931,6 +932,13 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     // P30：lastEventAt 同步落定——首事件前静默时长以 prompt 发出时刻起算
     patch(tabKey, { busy: true, turnStartedAt: Date.now(), lastEventAt: Date.now() });
     turnRef.current = newTurn();
+    // P31 流式提交节流：applyEvent 仍逐条累积到 turnRef（不丢事件），但
+    // 「累积结果 → store」按渲染帧合并提交。实测 8 条/s 的 update 频率 ×
+    // 每条全量重渲染是 WebView 满载主因（2026-09-08 事故），节流后每帧
+    // 最多一次提交，流式期间的渲染次数与帧率对齐而非与事件到达率对齐。
+    const throttle = createStreamCommitThrottle(() => {
+      useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
+    });
     const p = (async () => {
       try {
         const session = await ensureSession();
@@ -985,12 +993,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           }
           const next = applyEvent(turnRef.current, e, Date.now);
           turnRef.current = next;
-          // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）
+          // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）；
+          // lastEventAt 是标量 patch，跟随节流提交（不额外触发整列表重渲染）
           useSessionStore.getState().patch(tabKey, { lastEventAt: Date.now() });
-          useSessionStore.getState().updateLastAssistant(tabKey, () => next.blocks);
+          throttle.schedule();
         });
         // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）；
         // 空 turn（无事件）不新起 assistant 气泡（编辑重试后的静默重开场景）
+        throttle.flush(); // 强制提交帧内未落的累积快照（终态必须可见）
         if (turnRef.current.blocks.length > 0) {
           useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
         }
@@ -999,6 +1009,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         toast.error(`出错了：${String(err)}`);
         // P4：启动期失败常驻横幅（toast 一次即逝，用户无从得知下一步动作）
         setStartError(String(err));
+        throttle.dispose(); // 异常收口：撤销帧内 pending（catch 里直接提交终态快照）
         const next: TurnAccumulator = {
           ...turnRef.current,
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
