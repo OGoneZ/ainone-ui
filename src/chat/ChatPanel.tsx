@@ -47,7 +47,7 @@ import { doublePress, userIndices, nextUserCursor, matchShortcut, type ShortcutI
 import { inEditable } from "@/app/logic/layout";
 import { useKeymapStore } from "@/store/keymapStore";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
-import { canFork } from "../chat/logic/capabilities";
+import { canFork, capabilitySnapshot } from "../chat/logic/capabilities";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
 import { typewriterHint } from "../chat/logic/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
@@ -95,9 +95,11 @@ interface Props {
   /** P29 R5：活跃会话句柄上抛（App → RightRail → MetadataPanel 模型切换用）。
    *  建链/回收/重建时回调；null = 无活跃会话。 */
   onActiveSession?: (s: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null) => void;
+  /** P32d：session/list 句柄上抛（null = 未声明 list 能力 → 会话列表入口隐藏） */
+  onSessionList?: (list: (() => Promise<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>>) | null) => void;
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, onActiveSession, active = true}: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, onActiveSession, onSessionList, active = true}: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -596,8 +598,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       // 日志身份固化：全新会话（无恢复来源）首次建链时把 logSid 锚定为
       // harness sessionId；此后即使恢复链降级换 sessionId，日志文件身份不变
       if (logSidRef.current === null) logSidRef.current = s.sessionId;
-      // capability 存档进 store（fork/load 入口显隐的唯一数据源）
-      patch(tabKey, { capabilities: s.capabilities ?? null, degraded: null });
+      // capability 存档进 store（P32d：snapshot 五布尔——入口显隐与恢复链的单一事实源）
+      patch(tabKey, {
+        capabilities: s.capabilities ?? null,
+        caps: s.capabilities ? capabilitySnapshot(s.capabilities) : null,
+        degraded: null,
+      });
+      // P32d：session/list 句柄上抛（会话列表入口 gate = caps.list，句柄 null 即无能力）
+      onSessionList?.(s.listSessions ?? null);
       // 恢复链降级（session/load 失败 → session/new）：模型上下文丢了，
       // 用户必须知道——toast 一次 + 常驻降级标记（横幅渲染处消费）
       if (s.sessionOrigin === "degraded-new") {
@@ -1023,6 +1031,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           if (e.type === "config_options") {
             // P29：config_option_update 全量刷新（模型切换 currentValue 实时更新）
             useSessionStore.getState().setConfigOptions(tabKey, e.options);
+            return;
+          }
+          if (e.type === "session_info") {
+            // P32d：session_info_update——agent 生成的会话标题/更新时间
+            useSessionStore.getState().patch(tabKey, {
+              sessionInfo: {
+                ...(e.title !== undefined ? { title: e.title } : {}),
+                ...(e.updatedAt !== undefined ? { updatedAt: e.updatedAt } : {}),
+              },
+            });
             return;
           }
           const next = applyEvent(turnRef.current, e, Date.now);

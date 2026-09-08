@@ -60,6 +60,10 @@ export interface RuntimeState {
   lastEventAt?: number;
   /** initialize 握手存档的 agent 能力（capability gate 数据源；未声明 → null） */
   capabilities: AgentCapabilities | null;
+  /** P32d：capability snapshot 五布尔（capabilitySnapshot 派生存档——UI/恢复链只读布尔） */
+  caps: { fork: boolean; load: boolean; resume: boolean; close: boolean; list: boolean } | null;
+  /** P32d：session_info_update 采集（agent 生成的会话标题/最近活动时间；无通知 → null） */
+  sessionInfo: { title?: string; updatedAt?: string } | null;
   /** 恢复链降级记录（session/load 失败 → session/new）；null = 无降级 */
   degraded: { reason: string } | null;
 }
@@ -136,6 +140,8 @@ export const useSessionStore = create<SessionStore>()(
                 ask: null,
                 branch: null,
                 capabilities: null,
+                caps: null,
+                sessionInfo: null,
                 degraded: null,
               },
             },

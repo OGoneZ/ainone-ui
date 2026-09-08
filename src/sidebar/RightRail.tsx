@@ -31,6 +31,10 @@ interface Props {
   cwd?: string;
   /** P29 R5：活跃会话句柄（模型切换 set_config_option 用；无会话 = null） */
   session: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null;
+  /** P32d：session/list 句柄（null = 未声明 list 能力 → 会话列表入口隐藏） */
+  listSessions?: (() => Promise<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>>) | null;
+  /** P32d：选中历史会话恢复（App 提供——开 Tab 走既有恢复链） */
+  onResumeSession?: (sessionId: string) => void;
   /** P32 R2：messages 不再由 App 传递，组件内按 tabKey 细粒度订阅 store */
   /** P30：终端 tab 模式——无 harness 元数据/历史消息，只显示「文件」tab；
    *  折叠细栏杆也只剩文件入口，落点 tab 强制回 files */
@@ -72,7 +76,7 @@ export function saveRailState(s: RailState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
-export function RightRail({ tabKey, adapter, sessionId, cwd, session, terminalOnly = false, open, tab, onSwitchTab, onToggle }: Props) {
+export function RightRail({ tabKey, adapter, sessionId, cwd, session, listSessions, onResumeSession, terminalOnly = false, open, tab, onSwitchTab, onToggle }: Props) {
   // F-21-6 右栏宽度（拖宽把手，独立 key 持久化；clamp 220~min(520,40vw)）
   const [width, setWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-rightrail-width")) || 260, 220, sidebarMaxWidth()),
@@ -199,6 +203,8 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, terminalOn
             cwd={cwd}
             embedded
             session={session}
+            listSessions={listSessions}
+            onResumeSession={onResumeSession}
           />
         ) : effectiveTab === "files" ? (
           <div className="rail-files">

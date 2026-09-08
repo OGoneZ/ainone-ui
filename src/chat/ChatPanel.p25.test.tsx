@@ -73,6 +73,7 @@ function fakeSession(events: Array<{ type: string; [k: string]: any }> = [], can
     capabilities: null,
     agentInfo: null,
     sessionOrigin: "new",
+    listSessions: null,
     configOptions: null,
     setConfigOption: async () => null,
     prompt: async (_text: string, onOutgoing: (e: any) => void) => {

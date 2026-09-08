@@ -12,6 +12,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { extractUsage } from "./metadata";
 import { extractPlan } from "./plan";
+import { canLoad } from "@/chat/logic/capabilities";
 
 export type DiffContent = { path: string; oldText?: string | null; newText: string };
 export type TerminalContent = { terminalId: string };
@@ -50,6 +51,7 @@ export type Outgoing =
   | { type: "usage"; used: number; size: number; cost: number | null }
   | { type: "plan"; entries: PlanEntry[] }
   | { type: "config_options"; options: acp.SessionConfigOption[] }
+  | { type: "session_info"; title?: string; updatedAt?: string }
   | { type: "error"; message: string };
 
 /** P9 F-9-1 计划条目（从 ACP plan block 提取） */
@@ -103,6 +105,9 @@ export interface AcpSession {
   configOptions: acp.SessionConfigOption[] | null;
   /** P29：会话级设置配置选项（session/set_config_option；无该能力 → null） */
   setConfigOption: ((configId: string, value: string) => Promise<acp.SessionConfigOption[] | null>) | null;
+  /** P32d：session/list（agent 能力声明 list 时可用；无则 null——上层按此 gate 入口显隐）。
+   *  cursor 自动翻页聚合；cwd 过滤由 agent 侧完成（协议语义：返回该 cwd 下的会话）。 */
+  listSessions: (() => Promise<Array<acp.SessionInfo>>) | null;
   prompt(text: string, onOutgoing: (e: Outgoing) => void): Promise<void>;
   cancel(): Promise<void>;
   /** F-8-5 会话分叉：从当前状态 fork，返回新 sessionId */
@@ -343,8 +348,9 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
   //      白丢 stderr 上下文与一次 spawn 开销；new 也失败才走 openSession 的 kill 清理）
   //   ③ new 失败 → 原样上抛（外层 H8 catch 兜底 kill）
   if (resumeSessionId) {
-    // 能力预检：显式 false 才视为不支持（undefined = 老 harness 未声明，宽松尝试）
-    const loadSupported = agentCapabilities?.loadSession !== false;
+    // 能力预检（P32d：canLoad 单一实现——显式 false 才视为不支持，
+    // undefined = 老 harness 未声明，宽松尝试）
+    const loadSupported = canLoad(agentCapabilities);
     if (!loadSupported) {
       console.info("[acp] loadSession=false，跳过 session/load 直接 session/new");
     }
@@ -431,6 +437,23 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
         return null;
       }
     },
+    // P32d：session/list（能力声明 list 才挂载；cursor 自动翻页聚合）
+    listSessions: agentCapabilities?.sessionCapabilities?.list != null
+      ? async () => {
+          const all: acp.SessionInfo[] = [];
+          let cursor: string | null | undefined;
+          do {
+            const resp = (await connection.agent.request(acp.methods.agent.session.list as any, {
+              cwd,
+              ...(cursor ? { cursor } : {}),
+            })) as acp.ListSessionsResponse;
+            all.push(...(resp.sessions ?? []));
+            cursor = resp.nextCursor ?? null;
+          } while (cursor);
+          console.info("[acp] session/list 完成 count=", all.length);
+          return all;
+        }
+      : null,
     async prompt(text, onOutgoing) {
       console.info("[acp] session/prompt 开始 sessionId=", sessionId);
       // prompt 入口丢弃滞留 update：上一 turn 250ms 有界补派发的漏网尾巴
@@ -603,6 +626,14 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
     case "config_option_update":
       // P29：会话配置选项全量刷新（模型切换 currentValue 实时更新）
       onOutgoing({ type: "config_options", options: u.update.configOptions });
+      break;
+    case "session_info_update":
+      // P32d：会话标题/更新时间（agent 侧生成 title，如 opencode 自动命名）
+      onOutgoing({
+        type: "session_info",
+        title: u.update.title ?? undefined,
+        updatedAt: u.update.updatedAt ?? undefined,
+      });
       break;
     default:
       break;

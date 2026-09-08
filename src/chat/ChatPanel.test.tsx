@@ -92,6 +92,7 @@ function fakeSession(events: Array<{ type: string; [k: string]: any }>): AcpSess
     capabilities: null,
     agentInfo: null,
     sessionOrigin: "new",
+    listSessions: null,
     configOptions: null,
     setConfigOption: async () => null,
     prompt: async (_text: string, onOutgoing: (e: any) => void) => {
