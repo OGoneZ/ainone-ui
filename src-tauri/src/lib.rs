@@ -11,6 +11,7 @@ mod adapters;
 mod agent;
 mod asr;
 mod connector;
+mod embedded_runtime;
 mod env_path;
 mod fs;
 mod fslist;
