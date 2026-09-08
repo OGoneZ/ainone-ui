@@ -873,17 +873,27 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     const text = quickSel;
     logger.info("chat", "quick-ask", { textLen: text.length });
     setQuickPop({ state: "streaming", text: "" });
+    // P32 R6：delta 按帧合并提交——复用 streamCommitThrottle（与主聊天流式
+    // 同一节流语义）。SSE 每条 delta 一次 setState → 悬浮窗所在 ChatPanel
+    // 全量重渲染；rAF 合帧后 setState 频率与显示帧率对齐。完成/异常时 flush。
+    let pendingText = "";
+    const throttle = createStreamCommitThrottle(() => {
+      setQuickPop((prev) =>
+        prev && (prev.state === "streaming" || prev.state === "ok")
+          ? { state: "streaming", text: pendingText }
+          : prev,
+      );
+    });
     try {
       // P27 流式：Rust 侧 SSE 逐块推增量，悬浮窗实时渲染（不再整段等完）
       const out = await quickAsk(text, (delta) => {
-        setQuickPop((prev) =>
-          prev && (prev.state === "streaming" || prev.state === "ok")
-            ? { state: "streaming", text: prev.text + delta }
-            : prev,
-        );
+        pendingText += delta;
+        throttle.schedule();
       });
+      throttle.dispose();
       setQuickPop({ state: "ok", text: out });
     } catch (e) {
+      throttle.dispose();
       setQuickPop({ state: "error", text: String(e) });
     }
   }
