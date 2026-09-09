@@ -1329,7 +1329,7 @@ function App() {
                   const m = THEME_TOGGLE_META[visualTheme];
                   return <m.Icon key={visualTheme} className="theme-icon-pop" style={{ width: 16, height: 16, strokeWidth: 1.75 }} />;
                 })()}
-                <span>主题（{THEME_TOGGLE_META[visualTheme].next === "dark" ? "切深色" : "切浅色"}）</span>
+                <span>主题</span>
               </button>
               <button className="sidebar-footer-item" onClick={() => setSettingsOpen(true)}>
                 <SettingsIcon style={{ width: 16, height: 16, strokeWidth: 1.75 }} />
