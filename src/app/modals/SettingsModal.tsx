@@ -687,7 +687,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
               <label className="ns-label">
                 接口地址（endpoint）
                 <input
-                  placeholder="https://api.example.com/v1"
+                  placeholder="https://token.zhubaoduo.com"
                   value={a.cfgEndpoint ?? ""}
                   onChange={(e) => update(a.id, { cfgEndpoint: e.target.value })}
                 />
