@@ -705,6 +705,16 @@ pub fn harness_config_save(app: tauri::AppHandle, input: HarnessConfigInput) -> 
         std::fs::copy(&path, &bak).map_err(|e| format!("备份失败: {e}"))?;
     }
     std::fs::write(&path, new_text).map_err(|e| format!("写入配置失败: {e}"))?;
+    // omp 专属：OMP 的会话默认模型不读 models.yml 的 models[0]，只认 agent.db
+    // settings 表的 modelRoles.default（实测 2026-09-09；yml defaultModel 字段无效）。
+    // 不同步它，用户切的模型只落 yml，OMP 新会话仍用旧默认（如本机 ollama 的
+    // bge-m3）——侧栏与会话实际模型脱节的根因。
+    if input.program == "omp" {
+        if let Err(e) = crate::harness_meta::omp_set_default_model(&input.model) {
+            // yml 已写成功，默认模型联动失败只告警不回滚（非致命）
+            log::warn!("[harness-config] omp 默认模型联动失败: {e}");
+        }
+    }
     log::info!("[harness-config] {} 配置已写入 {}", input.program, path.display());
     Ok(path.to_string_lossy().into_owned())
 }
