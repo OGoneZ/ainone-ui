@@ -60,8 +60,10 @@ interface EditableAdapter {
   installTail?: string;
   /** P29：CLI 安装中（区别于装桥） */
   installingCli?: boolean;
-  /** P30 权限模式开关（仅 claude-code）：null = 读取中；true = bypassPermissions（免确认放行全部工具）；false = auto（分类器判权限） */
+  /** P30/P36 权限模式开关（四家）：null = 读取中/读取失败；true = 跳过权限确认；false = 恢复确认。
+   *  pi 无权限机制 → permUnsupported。 */
   permBypass?: boolean | null;
+  permUnsupported?: boolean;
   permMsg?: string | null;
   permErr?: string | null;
   /** P29：配置模型表单展开态 */
@@ -82,6 +84,29 @@ interface EditableAdapter {
 
 /** P29：预置 harness 判定（预置卡片走简化布局 + 配置模型；自定义行才暴露高级字段） */
 const PRESET_IDS = new Set(["omp", "pi", "claude-code", "codex", "opencode"]);
+
+/** P36 权限开关适用家（pi 无权限确认机制，不适用） */
+const PERM_SWITCH_IDS = new Set(["omp", "claude-code", "codex", "opencode"]);
+
+/** P36 各家开关文案（主标题 + 开/关详情；落点由 Rust 写入后回显） */
+const PERM_SWITCH_COPY: Record<string, { on: string; off: string }> = {
+  "claude-code": {
+    on: "开：全部工具直接放行，不再询问（写入 defaultMode=bypassPermissions）",
+    off: "关：由 Claude 自动判定权限（defaultMode=auto）",
+  },
+  omp: {
+    on: "开：自动放行全部工具调用（写入 tools.approvalMode=yolo）",
+    off: "关：写/exec 工具需要确认（approvalMode=always-ask）",
+  },
+  codex: {
+    on: "开：免审批 + 全盘访问（新会话以 full-access 模式启动）",
+    off: "关：默认审批模式，潜在不安全操作会询问",
+  },
+  opencode: {
+    on: "开：全部权限自动放行（写入 permission.*=allow）",
+    off: "关：edit/bash 等操作需要确认（permission.*=ask）",
+  },
+};
 
 /** P24g：握手能力摘要（诊断用——用户可直观看到 harness 声明了哪些能力） */
 function probeCapSummary(caps: import("@agentclientprotocol/sdk").AgentCapabilities | null): string {
@@ -456,21 +481,30 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     }
   }
 
-  /** P30 权限模式开关：打开设置时读回显（仅 claude-code 预置卡片渲染开关） */
+  /** P30/P36 权限模式开关：打开设置时读回显（四家预置卡片渲染开关；pi 探测不支持态） */
   useEffect(() => {
     if (!open) return;
     items.forEach((a) => {
-      if (a.id !== "claude-code" || a.permBypass !== undefined) return;
-      update(a.id, { permBypass: null });
+      // pi：探测一次 Rust read（必 Err）→ 渲染「无权限机制」说明
+      const isPi = a.id === "pi";
+      if (!PERM_SWITCH_IDS.has(a.id) && !isPi) return;
+      if (a.permBypass !== undefined) return;
+      update(a.id, { permBypass: null, permUnsupported: false });
       permissionModeRead(a.id)
-        .then((mode) => update(a.id, { permBypass: mode !== "auto" }))
-        // 读取失败（文件异常等）→ null，开关禁用展示「—」
-        .catch(() => update(a.id, { permBypass: null }));
+        // 未配置（null）→ 默认开：claude defaultMode 缺省即 bypass 语义（P30 沿革）；
+        // omp/opencode 默认放行；codex 未配置 Rust 侧已归一为 false
+        .then((bypass) => update(a.id, { permBypass: bypass ?? true }))
+        // pi 无机制 → 不支持态；其他读取失败 → null 开关禁用
+        .catch(() =>
+          isPi
+            ? update(a.id, { permBypass: null, permUnsupported: true })
+            : update(a.id, { permBypass: null }),
+        );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, items.length]);
 
-  /** P30 切换权限模式：开 = bypassPermissions / 关 = auto（单键合并写 settings.json） */
+  /** P30/P36 切换权限模式：开 = 跳过权限确认 / 关 = 恢复确认（按家落盘不同文件） */
   async function togglePermBypass(id: string, next: boolean) {
     const item = items.find((a) => a.id === id);
     if (!item) return;
@@ -665,18 +699,18 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                 : `✗ 握手失败：${a.probe.message}`}
           </p>
         )}
-        {a.id === "claude-code" && a.permBypass !== undefined && (
+        {PERM_SWITCH_IDS.has(a.id) && a.permBypass !== undefined && (
           <div className="adapter-perm" style={{ gridColumn: "1 / -1" }}>
-            {/* P30 bypass permissions 开关：默认开（免确认，绕过 auto 分类器——
-                分类器依赖的模型通道故障时会拦死所有 Bash）。只写 settings.json 的
-                permissions.defaultMode 单键，其余键不动；关 = auto。 */}
+            {/* P30/P36 跳过权限确认开关：claude-code defaultMode / omp tools.approvalMode /
+                opencode permission.* / codex INITIAL_AGENT_MODE（见 PERM_SWITCH_COPY）。
+                pi 无权限机制不渲染（PERM_SWITCH_IDS 不含）。 */}
             <label className="flex items-center justify-between gap-3 cursor-pointer select-none" style={{ margin: 0 }}>
               <span className="flex flex-col">
-                <span className="font-medium">跳过权限确认（bypass permissions）</span>
+                <span className="font-medium">跳过权限确认</span>
                 <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
                   {a.permBypass
-                    ? "开：全部工具直接放行，不再询问（写入 defaultMode=bypassPermissions）"
-                    : "关：由 Claude 自动判定权限（defaultMode=auto）"}
+                    ? PERM_SWITCH_COPY[a.id]?.on ?? ""
+                    : PERM_SWITCH_COPY[a.id]?.off ?? ""}
                 </span>
               </span>
               <Switch
@@ -689,6 +723,12 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
             </label>
             {a.permMsg && <p className="ok settings-hint" style={{ color: "var(--success)", margin: 0 }}>{a.permMsg}</p>}
             {a.permErr && <p className="bad settings-hint" style={{ color: "var(--danger)", margin: 0 }}>{a.permErr}</p>}
+          </div>
+        )}
+        {a.id === "pi" && a.permUnsupported && (
+          <div className="adapter-perm" style={{ gridColumn: "1 / -1", color: "var(--text-secondary)" }}>
+            {/* P36：pi 无权限确认机制（README「No permission popups」），如实呈现而非隐藏 */}
+            <span className="text-xs">Pi 无权限确认机制（所有工具直接执行），无可切换开关</span>
           </div>
         )}
         {a.cfgOpen && preset && (

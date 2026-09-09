@@ -153,12 +153,15 @@ export async function harnessConfigSave(input: HarnessConfigInput): Promise<stri
   return invoke<string>("harness_config_save", { input });
 }
 
-/** P30 权限模式开关（仅 claude-code）：读当前 permissions.defaultMode（未配置 → null） */
-export async function permissionModeRead(adapterId: string): Promise<string | null> {
-  return invoke<string | null>("permission_mode_read", { adapterId });
+/** P30 权限模式开关（P36 扩展至四家）：读当前权限档（未配置 → null）。
+ *  resolve 语义：true = 跳过权限确认；false = 恢复确认；null = 未配置。
+ *  pi 无权限机制 → reject（前端渲染不支持态）。 */
+export async function permissionModeRead(adapterId: string): Promise<boolean | null> {
+  return invoke<boolean | null>("permission_mode_read", { adapterId });
 }
 
-/** P30 权限模式开关：开 = bypassPermissions，关 = auto（单键合并写 + 备份）。resolve = 写入路径 */
+/** P36 权限模式开关：开 = 跳过权限确认（各家落点不同），关 = 恢复确认。
+ *  resolve = 写入位置描述（文件路径 / app 托管键）。 */
 export async function permissionModeSave(adapterId: string, mode: "bypassPermissions" | "auto"): Promise<string> {
   return invoke<string>("permission_mode_save", { adapterId, mode });
 }

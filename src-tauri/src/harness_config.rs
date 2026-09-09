@@ -833,42 +833,218 @@ pub fn write_permission_mode(raw: Option<&str>, mode: &str) -> Result<String, St
 }
 
 /// 读取当前权限模式回显（开关初值；未配置 → None → 前端按默认开渲染）。
+/// P36 扩展：按 adapter 分派——claude-code 读 settings.json defaultMode；
+/// omp 读 config.yml tools.approvalMode（yolo = 开）；opencode 读 opencode.json
+/// permission 全 allow = 开；codex 读应用托管 keys.json 的 codexPermBypass；
+/// pi 无机制 → Err（前端渲染「不支持」态）。
 #[tauri::command]
-pub fn permission_mode_read(app: tauri::AppHandle, adapter_id: String) -> Result<Option<String>, String> {
-    if adapter_id != "claude-code" {
-        return Ok(None);
-    }
+pub fn permission_mode_read(app: tauri::AppHandle, adapter_id: String) -> Result<Option<bool>, String> {
     let home = home_dir()?;
-    let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
-    let raw = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
-    Ok(read_permission_mode(raw.as_deref()))
+    let read_text = |p: &Path| -> Option<String> {
+        p.exists().then(|| std::fs::read_to_string(p).ok()).flatten()
+    };
+    match adapter_id.as_str() {
+        "claude-code" => {
+            let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
+            let raw = read_text(&path);
+            // auto → 关；bypass/未配置 → 开（与 P30 语义一致）
+            Ok(read_permission_mode(raw.as_deref()).map(|m| m != "auto"))
+        }
+        "omp" => {
+            let path = home.join(".omp/agent/config.yml");
+            let raw = read_text(&path);
+            // 未配置 = OMP schema 默认 yolo → 开；显式 always-ask/write → 关
+            Ok(Some(
+                read_omp_approval_mode(raw.as_deref())
+                    .map(|m| m == OMP_APPROVAL_YOLO)
+                    .unwrap_or(true),
+            ))
+        }
+        "opencode" => {
+            let path = config_file_for("opencode", &home).ok_or("无法定位 opencode.json")?;
+            let raw = read_text(&path);
+            // opencode 默认大多 allow（doom_loop/external_directory 除外），但
+            // bash/edit 等无默认 ask 的实证形态下开关初值取「是否全 allow」；
+            // 未配置 permission 键 → 视为开（默认已放行，与官方 Defaults 一致）
+            Ok(Some(read_opencode_perm_mode(raw.as_deref()).unwrap_or(true)))
+        }
+        "codex" => {
+            let dir = app.path().app_config_dir().ok();
+            let path = dir.map(|d| d.join("harness-keys.json"));
+            let raw = path.and_then(|p| read_text(&p));
+            let bypass = raw
+                .as_deref()
+                .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+                .and_then(|v| v.get("codexPermBypass").and_then(|b| b.as_bool()).map(|_| ()))
+                .and_then(|()| {
+                    serde_json::from_str::<serde_json::Value>(raw.as_deref().unwrap())
+                        .ok()
+                        .and_then(|v| v.get("codexPermBypass").and_then(|b| b.as_bool()))
+                });
+            // 未配置 → codex-acp 默认 agent 模式（会按需弹）→ 关
+            Ok(Some(bypass.unwrap_or(false)))
+        }
+        "pi" => Err("pi 无权限确认机制".into()),
+        other => Err(format!("{other} 不支持权限模式开关")),
+    }
 }
 
-/// 保存权限模式（开 = bypassPermissions，关 = auto；前端限制二值，后端再校验白名单）。
-/// 单键合并写 + 写前备份（与其他配置代写同一纪律）。
+/// 保存权限模式（开 = 跳过权限确认，关 = 恢复确认；按 adapter 分派落盘）。
+/// 损坏文件报错不覆盖；写前备份（与配置代写同一纪律）。
 #[tauri::command]
 pub fn permission_mode_save(app: tauri::AppHandle, adapter_id: String, mode: String) -> Result<String, String> {
-    if adapter_id != "claude-code" {
-        return Err(format!("{adapter_id} 不支持权限模式开关"));
-    }
-    if mode != PERMISSION_MODE_BYPASS && mode != PERMISSION_MODE_AUTO {
-        return Err(format!("不支持的权限模式: {mode}"));
-    }
+    let bypass = match mode.as_str() {
+        "bypassPermissions" => true,
+        "auto" => false,
+        other => return Err(format!("不支持的权限模式: {other}")),
+    };
     let home = home_dir()?;
-    let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    let save_file = |path: &Path, new_text: String| -> Result<String, String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+        }
+        let existing = path.exists().then(|| std::fs::read_to_string(path).ok()).flatten();
+        if existing.is_some() {
+            let bak = path.with_extension("ainone-bak");
+            std::fs::copy(path, &bak).map_err(|e| format!("备份失败: {e}"))?;
+        }
+        std::fs::write(path, new_text).map_err(|e| format!("写入配置失败: {e}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    };
+    match adapter_id.as_str() {
+        "claude-code" => {
+            let m = if bypass { PERMISSION_MODE_BYPASS } else { PERMISSION_MODE_AUTO };
+            let path = config_file_for("claude-code", &home).ok_or("无法定位 settings.json")?;
+            let existing = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
+            // 损坏文件报错不覆盖（与配置代写同一纪律）
+            let new_text = write_permission_mode(existing.as_deref(), m)?;
+            if existing.is_some() {
+                let bak = path.with_extension("ainone-bak");
+                std::fs::copy(&path, &bak).map_err(|e| format!("备份失败: {e}"))?;
+            }
+            std::fs::write(&path, new_text).map_err(|e| format!("写入配置失败: {e}"))?;
+            log::info!("[harness-config] {} permissions.defaultMode → {m}（{}）", adapter_id, path.display());
+            Ok(path.to_string_lossy().into_owned())
+        }
+        "omp" => {
+            let m = if bypass { OMP_APPROVAL_YOLO } else { OMP_APPROVAL_ASK };
+            let path = home.join(".omp/agent/config.yml");
+            let existing = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
+            let new_text = write_omp_approval_mode(existing.as_deref(), m)?;
+            let written = save_file(&path, new_text)?;
+            log::info!("[harness-config] omp tools.approvalMode → {m}");
+            Ok(written)
+        }
+        "opencode" => {
+            let path = config_file_for("opencode", &home).ok_or("无法定位 opencode.json")?;
+            let existing = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
+            let new_text = write_opencode_perm_mode(existing.as_deref(), bypass)?;
+            let written = save_file(&path, new_text)?;
+            log::info!("[harness-config] opencode permission → {}", if bypass { "allow" } else { "ask" });
+            Ok(written)
+        }
+        "codex" => {
+            // codex 无配置文件可写：状态存应用托管 keys.json，spawn 时注入 env
+            crate::harness_keys::store_codex_perm_bypass(&app, bypass)?;
+            log::info!("[harness-config] codex 权限开关 → bypass={bypass}（INITIAL_AGENT_MODE 注入，对新会话生效）");
+            Ok("app://harness-keys.json (INITIAL_AGENT_MODE)".into())
+        }
+        "pi" => Err("pi 无权限确认机制".into()),
+        other => Err(format!("{other} 不支持权限模式开关")),
     }
-    let existing = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
-    // 损坏文件报错不覆盖（与配置代写同一纪律）
-    let new_text = write_permission_mode(existing.as_deref(), &mode)?;
-    if existing.is_some() {
-        let bak = path.with_extension("ainone-bak");
-        std::fs::copy(&path, &bak).map_err(|e| format!("备份失败: {e}"))?;
+}
+
+// ---------------------------------------------------------------------------
+// P36 权限模式开关扩展（omp / opencode / codex / pi）
+//
+// 各家机制（2026-09-09 全部本机实测）：
+//   claude-code  settings.json permissions.defaultMode（既有实现，见上）
+//   omp          ~/.omp/agent/config.yml tools.approvalMode = yolo|write|always-ask
+//                （schema 默认 yolo；ACP 端到端：yolo 0 次弹权限，write/always-ask 弹）
+//   opencode     ~/.config/opencode/opencode.json permission.{edit,bash,...} = allow|ask
+//                （schema 官方 PermissionActionConfig；ask 实测弹 request_permission，
+//                allow 全放行）
+//   codex        config.toml 无效（codex-acp 每 turn 覆盖 approvalPolicy），
+//                唯一持久入口 INITIAL_AGENT_MODE env → harness_keys.rs 托管
+//   pi           无权限确认机制（README「No permission popups」）→ 开关不适用
+// ---------------------------------------------------------------------------
+
+/// omp approvalMode 的两档映射（跳过 = yolo；恢复确认 = always-ask。
+/// write 档只自动放行 write tier，bash 仍弹——与 claude 的 auto 语义对不齐，不用）。
+pub const OMP_APPROVAL_YOLO: &str = "yolo";
+pub const OMP_APPROVAL_ASK: &str = "always-ask";
+
+/// 纯函数：读 config.yml 文本里的 tools.approvalMode（缺失/损坏 → None）。
+pub fn read_omp_approval_mode(raw: Option<&str>) -> Option<String> {
+    let raw = raw?;
+    let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(raw).ok()?;
+    v.get("tools")?
+        .get("approvalMode")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// 纯函数：合并写 config.yml 的 tools.approvalMode 单键（serde_yaml_ng 定点改写，
+/// 其余键序保留；损坏 YAML → Err 不写盘）。OMP 默认即 yolo，但显式写入键值——
+/// 与 claude 开关语义一致（设置页状态可回读，不依赖「默认值恰好等于开关状态」）。
+pub fn write_omp_approval_mode(raw: Option<&str>, mode: &str) -> Result<String, String> {
+    let mut v: serde_yaml_ng::Value = match raw {
+        Some(r) if !r.trim().is_empty() => serde_yaml_ng::from_str(r).map_err(|e| format!("config.yml 解析失败: {e}"))?,
+        _ => serde_yaml_ng::Value::Mapping(Default::default()),
+    };
+    if !v.is_mapping() {
+        return Err("config.yml 顶层不是映射".into());
     }
-    std::fs::write(&path, new_text).map_err(|e| format!("写入配置失败: {e}"))?;
-    log::info!("[harness-config] {} permissions.defaultMode → {mode}（{}）", adapter_id, path.display());
-    Ok(path.to_string_lossy().into_owned())
+    let tools = match v.get_mut("tools") {
+        None => {
+            if let Some(map) = v.as_mapping_mut() {
+                map.insert(
+                    serde_yaml_ng::Value::String("tools".into()),
+                    serde_yaml_ng::Value::Mapping(Default::default()),
+                );
+            }
+            v.get_mut("tools").ok_or("config.yml tools 创建失败")?
+        }
+        Some(t) if !t.is_mapping() => return Err("config.yml tools 不是映射".into()),
+        Some(t) => t,
+    };
+    tools
+        .as_mapping_mut()
+        .ok_or("config.yml tools 不是映射")?
+        .insert(
+            serde_yaml_ng::Value::String("approvalMode".into()),
+            serde_yaml_ng::Value::String(mode.into()),
+        );
+    serde_yaml_ng::to_string(&v).map_err(|e| format!("config.yml 序列化失败: {e}"))
+}
+
+/// opencode permission 的两档映射（跳过 = 全部 allow；恢复确认 = 全部 ask）。
+/// 覆盖键取官方 PermissionConfig 的行为类动作（read/glob/grep 默认即 allow 无需写）。
+pub const OPENCODE_PERM_KEYS: &[&str] = &["edit", "bash", "webfetch", "websearch", "question"];
+
+/// 纯函数：读 opencode.json 里的 permission 档位。全部 allow → bypass；
+/// 存在任一 ask/deny 或缺 permission 键 → None/ask 语义（前端按关渲染）。
+pub fn read_opencode_perm_mode(raw: Option<&str>) -> Option<bool> {
+    let raw = raw?;
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let perm = v.get("permission")?.as_object()?;
+    // 全部键均为 "allow" 才算 bypass（部分 ask = 未全放行）
+    let all_allow = OPENCODE_PERM_KEYS
+        .iter()
+        .all(|k| perm.get(*k).and_then(|x| x.as_str()) == Some("allow"));
+    Some(all_allow)
+}
+
+/// 纯函数：合并写 opencode.json 的 permission 单层键（其余键/键序不动）。
+pub fn write_opencode_perm_mode(raw: Option<&str>, bypass: bool) -> Result<String, String> {
+    let action = if bypass { "allow" } else { "ask" };
+    let sets: Vec<(String, serde_json::Value)> = OPENCODE_PERM_KEYS
+        .iter()
+        .map(|k| (format!("permission.{k}"), serde_json::Value::String(action.into())))
+        .collect();
+    let refs: Vec<(&str, serde_json::Value)> =
+        sets.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    json_merge_set(raw.unwrap_or("{}"), &refs)
 }
 
 #[cfg(test)]
@@ -1304,5 +1480,103 @@ base_url = "https://old/v1"
     fn permission_mode_write_rejects_corrupt_input() {
         // 损坏 settings.json → Err，调用方保证不覆盖用户文件
         assert!(write_permission_mode(Some("{broken"), PERMISSION_MODE_BYPASS).is_err());
+    }
+
+    // ---------------- P36：omp tools.approvalMode 开关 ----------------
+
+    #[test]
+    fn omp_approval_read_detects_and_defaults() {
+        // 显式 yolo / always-ask / write 三档可读
+        assert_eq!(
+            read_omp_approval_mode(Some("modelRoles:\n  default: x\ntools:\n  approvalMode: yolo\n")),
+            Some("yolo".into())
+        );
+        assert_eq!(
+            read_omp_approval_mode(Some("tools:\n  approvalMode: always-ask\n")),
+            Some("always-ask".into())
+        );
+        // 未配置 → None（read 命令层按 OMP schema 默认 yolo 处理）
+        assert_eq!(read_omp_approval_mode(Some("modelRoles:\n  default: x\n")), None);
+        assert_eq!(read_omp_approval_mode(None), None);
+        // 损坏 YAML → None 不 panic
+        assert_eq!(read_omp_approval_mode(Some("{broken: [")), None);
+    }
+
+    #[test]
+    fn omp_approval_write_preserves_existing_keys() {
+        // 真实事故回归基础：config.yml 里已有的 modelRoles 必须原样保留
+        let raw = "modelRoles:\n  default: ainone/saver/glm-5.3-flash\n";
+        let out = write_omp_approval_mode(Some(raw), OMP_APPROVAL_YOLO).unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        assert_eq!(
+            v["modelRoles"]["default"].as_str().unwrap(),
+            "ainone/saver/glm-5.3-flash",
+            "modelRoles 不能丢"
+        );
+        assert_eq!(v["tools"]["approvalMode"].as_str().unwrap(), "yolo");
+        // 切回 always-ask：覆盖同一键而非追加
+        let out2 = write_omp_approval_mode(Some(&out), OMP_APPROVAL_ASK).unwrap();
+        let v2: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out2).unwrap();
+        assert_eq!(v2["tools"]["approvalMode"].as_str().unwrap(), "always-ask");
+        assert_eq!(
+            v2["modelRoles"]["default"].as_str().unwrap(),
+            "ainone/saver/glm-5.3-flash"
+        );
+    }
+
+    #[test]
+    fn omp_approval_write_creates_tools_when_missing() {
+        // 全新文件（None）→ 最小合法结构
+        let out = write_omp_approval_mode(None, OMP_APPROVAL_YOLO).unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        assert_eq!(v["tools"]["approvalMode"].as_str().unwrap(), "yolo");
+        // 损坏 YAML → Err 不写盘
+        assert!(write_omp_approval_mode(Some("{broken: ["), OMP_APPROVAL_YOLO).is_err());
+    }
+
+    // ---------------- P36：opencode permission 开关 ----------------
+
+    #[test]
+    fn opencode_perm_read_all_allow_and_partial() {
+        // 全 allow → bypass
+        assert_eq!(
+            read_opencode_perm_mode(Some(
+                r#"{"$schema":"x","permission":{"edit":"allow","bash":"allow","webfetch":"allow","websearch":"allow","question":"allow"}}"#
+            )),
+            Some(true)
+        );
+        // 部分 ask → 非 bypass
+        assert_eq!(
+            read_opencode_perm_mode(Some(r#"{"permission":{"bash":"ask"}}"#)),
+            Some(false)
+        );
+        // 无 permission 键 → None（命令层按开渲染——官方 Defaults 大多 allow）
+        assert_eq!(read_opencode_perm_mode(Some(r#"{"$schema":"x"}"#)), None);
+        assert_eq!(read_opencode_perm_mode(None), None);
+        // 损坏 JSON → None
+        assert_eq!(read_opencode_perm_mode(Some("{broken")), None);
+    }
+
+    #[test]
+    fn opencode_perm_write_merges_and_preserves() {
+        // 既有 provider/schema 键必须保留（配置代写同纪律）
+        let raw = r#"{"$schema":"https://opencode.ai/config.json","model":"ainone/m","permission":{"bash":"ask"}}"#;
+        let out = write_opencode_perm_mode(Some(raw), true).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["model"], "ainone/m", "model 键保留");
+        assert!(out.contains("opencode.ai/config.json"), "schema 保留");
+        for k in OPENCODE_PERM_KEYS {
+            assert_eq!(v["permission"][*k], "allow", "permission.{k} 应为 allow");
+        }
+        // 切回 ask
+        let out2 = write_opencode_perm_mode(Some(&out), false).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
+        assert_eq!(v2["permission"]["bash"], "ask");
+        // 全新文件
+        let out3 = write_opencode_perm_mode(None, true).unwrap();
+        let v3: serde_json::Value = serde_json::from_str(&out3).unwrap();
+        assert_eq!(v3["permission"]["edit"], "allow");
+        // 损坏 → Err
+        assert!(write_opencode_perm_mode(Some("{broken"), true).is_err());
     }
 }
