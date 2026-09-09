@@ -114,7 +114,7 @@ describe("P37：输出速率徽标", () => {
     // 徽标出现（速率估算已冻结）
     const badge = await screen.findByTestId("stream-rate");
     expect(badge).toBeInTheDocument();
-    expect(badge.textContent).toMatch(/⚡ \d+(\.\d+)? tok\/s/);
+    expect(badge.textContent).toMatch(/\d+(\.\d+)? tok\/s/); // P37 后续：图标改 lucide RateIcon，文本不再含 ⚡
     expect(badge.getAttribute("data-live")).toBe("false"); // 已收口 → 冻结态
   });
 
@@ -167,7 +167,7 @@ describe("P37：输出速率徽标", () => {
 
     await send("第二问");
     const second = await screen.findByTestId("stream-rate");
-    expect(second.textContent).toMatch(/⚡ \d+(\.\d+)? tok\/s/); // 仍正常显示
+    expect(second.textContent).toMatch(/\d+(\.\d+)? tok\/s/); // 仍正常显示
     // rate 对象每轮重建——这里主要锁定第二轮徽标存在且格式正确（值可能巧合相近）
     expect(second).not.toBe(first);
     void firstText;

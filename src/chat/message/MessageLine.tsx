@@ -25,6 +25,7 @@ import {
   EditIcon,
   EyeIcon,
   ForkIcon,
+  RateIcon,
   RewindIcon,
   ToolIcon,
 } from "@/components/ui/icons";
@@ -472,7 +473,7 @@ function TurnElapsed({ lastEventAt, turnStartedAt, turnEndedAt, rateRef }: { las
 function TurnElapsedTurnEnded({ startedAt, endedAt, rateRef }: { startedAt: number; endedAt: number; rateRef?: { current: StreamRate | null } }) {
   const seconds = Math.max(0, Math.round((endedAt - startedAt) / 1000));
   return (
-    <div className="turn-elapsed" data-testid="turn-elapsed-ended" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+    <div className="turn-elapsed" data-testid="turn-elapsed-ended" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px", display: "flex", alignItems: "center", gap: 4 }}>
       <span data-testid="turn-total" className="inline-flex items-center gap-1">
         <ClockIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
         用时 {formatElapsed(seconds)}
@@ -483,7 +484,7 @@ function TurnElapsedTurnEnded({ startedAt, endedAt, rateRef }: { startedAt: numb
   );
 }
 
-/** P37 R3：输出速率徽标——`⚡ N tok/s`，总时钟右侧。
+/** P37 R3：输出速率徽标——速率图标 + `N tok/s`，总时钟右侧。
  *  数据流：rateRef.current.display()（到达侧估算/终值冻结），不进 zustand store
  *  （P32 R2 教训：每秒变的值进 App 级订阅会击穿浅比较全树重渲染）。局部 1s
  *  interval 重读（与 useElapsedTicker 同频），仅挂载时运行——非末条不渲染本组件。
@@ -507,7 +508,8 @@ function StreamRateBadge({ rateRef, live }: { rateRef?: { current: StreamRate | 
       style={{ color }}
       title={live ? "当前输出速率（估算值）" : "本轮平均输出速率"}
     >
-      ⚡ {v < 10 ? v.toFixed(1) : Math.round(v)} tok/s
+      <RateIcon style={{ width: 12, height: 12, strokeWidth: 1.75, flexShrink: 0 }} />
+      {v < 10 ? v.toFixed(1) : Math.round(v)} tok/s
     </span>
   );
 }

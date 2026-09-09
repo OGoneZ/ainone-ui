@@ -9,6 +9,7 @@
 // 注：lucide 已把 CheckCircle2 更名为 CircleCheck，此处按语义导出，映射表仍成立。
 
 import {
+  Activity,
   ArchiveRestore,
   ArrowRight,
   ArrowUp,
@@ -95,6 +96,7 @@ export const RestoreIcon = ArchiveRestore; // P30 回收站「恢复」按钮（
 // 通用符号
 export const ChevronDownIcon = ChevronDown;
 export const ChevronRightIcon = ChevronRight;
+export const RateIcon = Activity; // P37：输出速率（心电波形，与线宽体系一致）
 export const CloseIcon = X;
 export const PlusIcon = Plus;
 export const CheckIcon = Check;
