@@ -192,6 +192,31 @@
   color: var(--text-primary);
 }
 
+/* P36 后续：原始/格式化视图切换钮（复制钮左侧，同 hover 显现） */
+.tool-command-toggle {
+  position: absolute;
+  top: 4px;
+  right: 46px;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.tool-command:hover .tool-command-toggle,
+.tool-command-toggle:focus-visible {
+  opacity: 1;
+}
+
+.tool-command-toggle:hover {
+  color: var(--text-primary);
+}
+
 .tool-text {
   margin: 0;
   white-space: pre-wrap;

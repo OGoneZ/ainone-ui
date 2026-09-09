@@ -139,3 +139,42 @@ describe("P36 R2 data-toolkind", () => {
     expect(document.querySelector(".tool")?.getAttribute("data-toolkind")).toBe("other");
   });
 });
+
+describe("P36 后续：命令格式化视图", () => {
+  it("长命令默认格式化断行展示；切「原始」回原文；复制永远复制原文", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const raw = "cd /app && pnpm install --frozen-lockfile || pnpm install; pnpm build";
+    renderMsg([
+      toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: raw } }),
+    ]);
+    fireEvent.click(screen.getByText("Terminal"));
+
+    const cmd = screen.getByTestId("tool-command").querySelector("pre");
+    // 默认格式化视图：操作符断行 + 缩进（原文子串拼接，零失真）
+    expect(cmd?.textContent).toBe(
+      "cd /app &&\n  pnpm install --frozen-lockfile ||\n  pnpm install;\n  pnpm build",
+    );
+
+    // 切「原始」→ 原文
+    fireEvent.click(screen.getByRole("button", { name: "切换为原始命令" }));
+    expect(screen.getByTestId("tool-command").querySelector("pre")?.textContent).toBe(raw);
+
+    // 复制（原始视图态）→ 复制原文
+    fireEvent.click(screen.getByRole("button", { name: "复制命令" }));
+    expect(writeText).toHaveBeenCalledWith(raw);
+
+    // 切回「格式化」
+    fireEvent.click(screen.getByRole("button", { name: "切换为格式化视图" }));
+    expect(screen.getByTestId("tool-command").querySelector("pre")?.textContent).toContain("\n  ");
+  });
+
+  it("单命令/多行原文无格式化收益 → 不出现切换钮", () => {
+    renderMsg([
+      toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: "ls -la" } }),
+    ]);
+    fireEvent.click(screen.getByText("Terminal"));
+    expect(screen.queryByRole("button", { name: "切换为原始命令" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换为格式化视图" })).toBeNull();
+  });
+});

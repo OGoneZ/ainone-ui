@@ -2,12 +2,13 @@
 // P32 R5：memo 化——MessageLine 重渲染时 props 引用未变的块跳过 reconcile；
 // 配合 MessageLine 的稳定 key（tool:toolCallId 等），流式新增块不拖动既有块。
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import type { BlockMsg } from "@/acp/message-log";
 import type { ToolContent } from "@/acp/session-core";
+import { formatShellCommand } from "@/acp/commandFormat";
 import { kindIcon, previewTargetOf, toolCommand, toolOutputFallback, toolSubtitle } from "@/acp/toolDisplay";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import { shouldAutoOpen } from "@/chat/logic/disclosure";
@@ -283,12 +284,32 @@ function ToolBlock({
 }
 
 /** P36 R1：命令段——rawInput.command 全文（保留换行，不截断）+ 复制小钮。
- *  独立于输出段，视觉上是一个浅底等宽块。 */
+ *  独立于输出段，视觉上是一个浅底等宽块。
+ *  P36 后续：长命令（&&/||/;/| 串联）自动格式化断行展示；默认格式化视图，
+ *  可切回「原始」。复制按钮永远复制原始 command 全文（可回放执行）。 */
 function CommandView({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
+  // formatShellCommand 不抛错；null = 无格式化收益（单命令/已排版）→ 无切换钮，原文直出
+  const formatted = useMemo(() => formatShellCommand(command), [command]);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const shown = formatted !== null && !showOriginal ? formatted : command;
   return (
     <div className="tool-command" data-testid="tool-command">
-      <pre className="tool-command-text">{command}</pre>
+      <pre className="tool-command-text">{shown}</pre>
+      {formatted !== null && (
+        <button
+          type="button"
+          className="tool-command-toggle"
+          aria-label={showOriginal ? "切换为格式化视图" : "切换为原始命令"}
+          title={showOriginal ? "格式化视图" : "原始命令"}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowOriginal((v) => !v);
+          }}
+        >
+          {showOriginal ? "格式化" : "原始"}
+        </button>
+      )}
       <button
         type="button"
         className="tool-command-copy"
