@@ -58,11 +58,11 @@ portable-pty = "0.9"
 # P35 白屏自愈：web-process-crashed 信号监听（webview_resilience.rs）。
 # 仅 Linux 有效；版本必须与 wry 内部依赖一致（Cargo.lock 已锁定 2.0.2），
 # 否则 with_webview 返回的类型会对不上——升级 tauri/wry 时同步检查。
-[target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = "2.0.2"
-
 # P32g omp models.yml 格式保留合并写（解析+定点改写+重序列化；yaml 无注释保留承诺）
 serde_yaml_ng = "0.10.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0.2"
 
 [features]
 webdriver = ["dep:tauri-plugin-webdriver"]
