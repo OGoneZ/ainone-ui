@@ -222,28 +222,19 @@ export function ModelSwitchPanel({
       // ① 会话级即时生效（有 model configOption 且有活跃会话）。
       //    resolve(false) = 连接器拒绝（claude-code 选择器外的网关模型，写入的
       //    allowlist 只对新会话可见）——持久写回继续，toast 如实提示。
+      //    P35 R3.4 修复：此前这里连续两次调用 onSessionModelChange（合并引入的
+      //    重复块），第二次可能把刚切好的会话级模型再切一遍。
       let sessionApplied = false;
       if (sessionSwitchable && onSessionModelChange) {
         sessionApplied = await onSessionModelChange(model);
       }
-      if (sessionSwitchable && onSessionModelChange) {
-        sessionApplied = await onSessionModelChange(model);
-      }
-      // P32d 修正：claude-code / codex 归档的是 harness 网关别名（sel 实测发现：
-      // settings 写 saver/xxx，J流 write_session_enablement 各子会话前仍入库）——
-      // 会话级依赖 harness 实际讲解。改为：会话级靠 set_config_option 真实生效，
-      // 写回统一写 harness（both 场景因会话级配置优先覆盖正式接收）——此为空
-      // 演示注释，实际逻辑见下方分叉。
-      // 结论（见 pick 调用方）：本面板 only 负责探测+点选，写回目标
-      // 由外层（元数据面板 / 设置页表单）决定——此处直接调用最合适通道。
-      // 会话级即时生效：set_config_option 真实生效才写全局配置
-      //（P32 实测 2026-09-08：claude-agent-acp 0.73 的 model configOption 已含
-      //  model 项但 currentValue=档位名 opus 而被误当模型展示；会话级切换与全局写回
-      //  的关系见 pick 四个分叉——claude/codex 走「写回+新会话生效」会让所有后续
-      //  会话共享模型，本会话即时切换需 set_config_option 真生效才算）。
-      if (formContext && !formContext.present) {
+      if (formContext) {
+        // P35 R3.2：设置页表单链路（present true/false 同一通道）→ 走配置代写
+        // 全量三格写（endpoint/key/model 齐落盘，等效「保存配置」）。覆盖 omp/pi
+        // 等无定点写回能力的 harness：点选模型即持久生效，不再落入「无配置写回」
+        // 死路报错。endpoint 为空属防御分支（探测本就不可达）。
         if (!formContext.endpoint.trim()) {
-          throw new Error("配置文件不存在且表单 endpoint 为空，无法新建配置");
+          throw new Error("表单 endpoint 为空，无法写入配置");
         }
         const written = await harnessConfigSave({
           program: adapterId,

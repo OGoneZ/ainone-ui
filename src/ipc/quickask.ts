@@ -12,6 +12,8 @@ export interface QuickAskConfigView {
   protocol: string;
   /** "" = 手动；"auto:claude-code" / "auto:codex" = 从 harness settings 自动探测（P22） */
   source: string;
+  /** P35 R2：自定义解释提示词（"" = 用内置默认） */
+  system_prompt: string;
 }
 
 export interface QuickAskConfigInput {
@@ -19,6 +21,8 @@ export interface QuickAskConfigInput {
   model: string;
   timeout_ms: number;
   api_key: string;
+  /** P35 R2：空 = 恢复内置默认提示词 */
+  system_prompt: string;
 }
 
 export async function quickAskConfigGet(): Promise<QuickAskConfigView> {

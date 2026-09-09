@@ -22,6 +22,9 @@ import { Welcome } from "@/chat/Welcome";
 import { MessageLine } from "@/chat/message/MessageLine";
 import { useTypewriter } from "@/chat/hooks/useTypewriter";
 import { createStreamCommitThrottle } from "@/chat/hooks/streamCommitThrottle";
+import { createStreamPacer } from "@/chat/hooks/streamPacer";
+import { createRevealScheduler } from "@/chat/hooks/revealScheduler";
+import { overlayRevealedText } from "@/chat/hooks/overlayRevealed";
 import { createFollowBottom } from "@/chat/hooks/followBottom";
 import { ChevronDownIcon } from "@/components/ui/icons";
 import { useQueueStore } from "@/store/queueStore";
@@ -48,6 +51,7 @@ import { inEditable } from "@/app/logic/layout";
 import { useKeymapStore } from "@/store/keymapStore";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
 import { canFork, capabilitySnapshot } from "../chat/logic/capabilities";
+import { clampQuickAnchor } from "../chat/logic/quickPopClamp";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
 import { typewriterHint } from "../chat/logic/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
@@ -905,7 +909,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // P11 F-R7：useCallback 稳定引用，避免 memo 化的 MessageLine 因回调新引用而失效
   const onSelectText = useCallback((text: string, e?: React.MouseEvent) => {
     setQuickSel(text);
-    // H6：悬浮窗是 absolute 定位（祖先 = .layout-host），clientX/Y 是视口坐标，
+    // H6：悬浮窗是 absolute 定位（祖先 = .chat），clientX/Y 是视口坐标，
     // 直接塞会恒定偏移侧栏+工具栏。换算为 .chat 内容区相对坐标。
     const chat = chatScrollRef.current;
     if (chat && e) {
@@ -919,6 +923,29 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
     setQuickPop(null);
   }, []);
+  // P35 R1 视口自适应：悬浮窗实测尺寸渲染后才可得——挂载/尺寸变化（流式增长）
+  // 时把 anchor 收回容器内（右/下溢出左/上移，四周留 QUICK_POP_MARGIN）。
+  // anchor 与容器尺寸同为 .chat 坐标系（H6），实测尺寸取 popRect；absolute 祖先
+  // 是 .layout-host，但对原始定位引入的常数偏移在修正前后一致，不改变 clamp 语义。
+  // ResizeObserver 盖住 streaming→ok 的内容增长与窗口缩放两种尺寸变化源。
+  useEffect(() => {
+    if (!quickSel) return;
+    const chat = chatScrollRef.current;
+    const pop = quickPopRef.current;
+    if (!chat || !pop) return;
+    const clampNow = () => {
+      const popRect = pop.getBoundingClientRect();
+      const chatRect = chat.getBoundingClientRect();
+      if (popRect.width === 0 || popRect.height === 0) return;
+      setQuickAnchor((prev) =>
+        clampQuickAnchor(prev, { width: popRect.width, height: popRect.height }, { width: chatRect.width, height: chatRect.height }),
+      );
+    };
+    clampNow();
+    const ro = new ResizeObserver(clampNow);
+    ro.observe(pop);
+    return () => ro.disconnect();
+  }, [quickSel]);
   async function runQuickAsk() {
     if (!quickSel) return;
     const text = quickSel;
@@ -1004,13 +1031,29 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     // 下传所有 MessageLine 击穿 memo。改为 commit 时一并写入（帧级），事件
     // 循环内只记到局部变量。
     let lastEventAtPending: number | undefined;
+    // P35 R2：平滑揭示——pacer 把 text 流的到达节奏（~121ms/条突发）转为
+    // 30fps 匀速揭示（比例控制器 + catch-up）；revealScheduler 在积压未清时
+    // 自持帧时钟（P31 throttle 只在事件到达时排帧，空窗期揭示会停滞）。
+    // tool/thought 块不走 pacing（状态即时性优先）。reduced-motion 直通。
+    const pacer = createStreamPacer({
+      reducedMotion:
+        typeof window !== "undefined" &&
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true,
+    });
     const throttle = createStreamCommitThrottle(() => {
-      useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
+      // 揭示覆盖：text 块按 pacer 揭示前缀切分（未揭示置空），tool/thought 原样。
+      // blocks 为空（零事件 turn，如编辑重发静默重开）跳过——updateLastAssistant
+      // 会新起空 assistant 气泡（P12 编辑重发测试锁定此语义）。
+      if (turnRef.current.blocks.length > 0) {
+        const revealed = overlayRevealedText(turnRef.current.blocks, pacer.revealedText());
+        useSessionStore.getState().updateLastAssistant(tabKey, () => revealed);
+      }
       if (lastEventAtPending !== undefined) {
         useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
         lastEventAtPending = undefined;
       }
     });
+    const scheduler = createRevealScheduler(pacer, throttle.schedule);
     const p = (async () => {
       try {
         const session = await ensureSession();
@@ -1075,15 +1118,23 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           }
           const next = applyEvent(turnRef.current, e, Date.now);
           turnRef.current = next;
+          // P35 R2：text 增量喂 pacer（揭示节奏的输入流）；tool/thought 不喂
+          //（即时状态语义）。喂后 kick 排帧——自持循环会在积压清空前的每个
+          // 帧里 tick + 提交，空窗期揭示不停滞。
+          if (e.type === "agent_text") pacer.onChunk(e.text);
           // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）。
           // P32 R1：不再逐事件 patch store（事件率写库击穿 memo），记到局部变量
           // 随节流提交（帧级），flush 时一并落定终态
           lastEventAtPending = Date.now();
-          throttle.schedule();
+          scheduler.kick();
         });
         // turn 结束：摊平 blocks 到 store（applyEvent 已封口 thinking）；
         // 空 turn（无事件）不新起 assistant 气泡（编辑重试后的静默重开场景）
-        throttle.flush(); // 强制提交帧内未落的累积快照（终态必须可见）
+        // P35 R2：scheduler.flush 先推完 pacer 积压再提交（终态全文完整）；
+        // 其内部的 commit 就是 throttle.schedule（同一帧提交链）
+        // P35 R2：scheduler.flush 推完 pacer 积压并立即提交（终态全文完整，
+        // 同时撤销自持帧——finally 的 dispose 兜底幂等）
+        scheduler.flush();
         if (lastEventAtPending !== undefined) {
           // P32 R1：帧内事件无 pending 提交时（如 flush 前 schedule 未触发），终态 lastEventAt 仍落定
           useSessionStore.getState().patch(tabKey, { lastEventAt: lastEventAtPending });
@@ -1115,6 +1166,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         // P4：启动期失败常驻横幅（toast 一次即逝，用户无从得知下一步动作）
         setStartError(String(err));
         throttle.dispose(); // 异常收口：撤销帧内 pending（catch 里直接提交终态快照）
+        scheduler.dispose(); // P35 R2：撤销自持揭示帧
         const next: TurnAccumulator = {
           ...turnRef.current,
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
@@ -1142,6 +1194,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         // 异常结束 turnEndedAt 恒为 undefined，常驻分支不满足，残留值无消费点。
         patch(tabKey, { busy: false, lastEventAt: undefined });
         runRef.current = null;
+        // P35 R2：turn 收口必须撤销揭示帧——自持帧若跨 turn 存活，会把旧 turn
+        // 的揭示提交打进后续 runtime（测试实证：跨测试污染新起空气泡）
+        scheduler.dispose();
         // H10：turn 结束时未决的权限请求/提问卡一并收口（turn 已中止，
         // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）。
         // P24e：收口语义统一为协议原生 cancelled（替代旧「猜 reject 选项」启发式——
