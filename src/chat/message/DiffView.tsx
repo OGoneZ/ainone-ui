@@ -1,13 +1,14 @@
 // diff 渲染：逐行 del/add/ctx + F-12-5 行内评论入口。自 ChatPanel 拆出（P13 C3）。
 //
 // P36 修复（用户实测：点评论卡住）：评论输入原用 window.prompt——同步阻塞 API，
-// WKWebView（wry）不实现同步 prompt，点击后 UI 无响应。改为 Radix Dialog + 受控
-// input（与 ChatPanel 回溯确认框同范式），异步不阻塞。
+// WKWebView（wry）不实现同步 prompt，点击后 UI 无响应。
+// P36 修订（用户反馈：居中大弹窗遮罩破坏沉浸感）：改行尾 Popover 小悬浮窗——
+// 贴着评论按钮弹出（side="left"），无遮罩，点外/Esc 关闭，左侧行仍可滚动浏览。
 
 import { useState } from "react";
 import { CommentIcon } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { DiffComment } from "@/chat/logic/diffComments";
 
 export function DiffView({
@@ -24,9 +25,16 @@ export function DiffView({
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
 }) {
-  // 评论输入弹窗状态（P36：window.prompt 在 WKWebView 卡死 → Dialog 受控输入）
-  const [promptTarget, setPromptTarget] = useState<{ line: number; lineText: string } | null>(null);
+  // 评论输入浮层状态（P36：window.prompt 卡死 → 行尾 Popover 小悬浮窗）
+  const [promptLine, setPromptLine] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  const submit = (line: number, lineText: string) => {
+    const text = draft.trim();
+    if (!text || !onAddDiffComment) return;
+    onAddDiffComment({ path, line, lineText, comment: text });
+    setPromptLine(null);
+    setDraft("");
+  };
   const oldLines = (oldText ?? "").split("\n");
   const newLines = newText.split("\n");
   const rows: { type: "del" | "add" | "ctx"; line: string; /** 该行在 newText 中的 1 基行号；del 行 0 */ newLine: number }[] = [];
@@ -55,76 +63,55 @@ export function DiffView({
         <div key={i} className={`diff-line group/diff ${r.type}`} data-commented={commented(r.newLine, r.line) ? "true" : "false"}>
           <span className="diff-sign">{r.type === "add" ? "+" : r.type === "del" ? "-" : " "}</span>
           {r.line}
-          {/* F-12-5：hover 行尾浮现评论入口（del 行无新行号，不支持评论） */}
+          {/* F-12-5：hover 行尾浮现评论入口（del 行无新行号，不支持评论）。
+              P36：点开行尾 Popover 小悬浮窗（无遮罩不挡消息区） */}
           {onAddDiffComment && r.newLine > 0 && (
-            <button
-              type="button"
-              aria-label={`评论 ${path}:${r.newLine}`}
-              className="diff-comment-btn ml-auto inline-flex items-center rounded px-1 text-[11px] opacity-0 transition-opacity group-hover/diff:opacity-100 hover:bg-[var(--bg-hover)]"
-              style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
-              onClick={() => {
-                setDraft("");
-                setPromptTarget({ line: r.newLine, lineText: r.line });
-              }}
-            >
-              <CommentIcon style={{ width: 11, height: 11, strokeWidth: 1.75 }} />
-              评论
-            </button>
+            <Popover open={promptLine === r.newLine} onOpenChange={(o) => setPromptLine(o ? r.newLine : null)}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`评论 ${path}:${r.newLine}`}
+                  className="diff-comment-btn ml-auto inline-flex items-center rounded px-1 text-[11px] opacity-0 transition-opacity group-hover/diff:opacity-100 hover:bg-[var(--bg-hover)]"
+                  style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
+                >
+                  <CommentIcon style={{ width: 11, height: 11, strokeWidth: 1.75 }} />
+                  评论
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                side="left"
+                align="end"
+                sideOffset={6}
+                className="w-72 p-2.5"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="text-[11px] mb-1.5" style={{ color: "var(--text-secondary)" }}>
+                  评论 {path}:{r.newLine}
+                  <span className="ml-1.5" style={{ opacity: 0.7 }}>{r.line}</span>
+                </div>
+                <input
+                  autoFocus
+                  className="w-full rounded-md border border-[var(--bg-3)] bg-[var(--bg-1)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--primary)]"
+                  placeholder="输入评论，随消息发给模型…"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submit(r.newLine, r.line);
+                  }}
+                />
+                <div className="mt-2 flex justify-end gap-1.5">
+                  <Button variant="outline" size="sm" onClick={() => setPromptLine(null)}>
+                    取消
+                  </Button>
+                  <Button size="sm" disabled={!draft.trim()} onClick={() => submit(r.newLine, r.line)}>
+                    添加
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
           )}
         </div>
       ))}
-
-      {/* P36：评论输入弹窗（替代 window.prompt——WKWebView 不支持同步 prompt） */}
-      {onAddDiffComment && (
-      <Dialog
-        open={promptTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setPromptTarget(null);
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              评论 {path}
-              {promptTarget ? `:${promptTarget.line}` : ""}
-            </DialogTitle>
-          </DialogHeader>
-          {promptTarget && (
-            <p className="perm-code" style={{ opacity: 0.75 }}>
-              {promptTarget.lineText}
-            </p>
-          )}
-          <input
-            autoFocus
-            className="w-full rounded-md border border-[var(--bg-3)] bg-[var(--bg-1)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
-            placeholder="输入评论内容…"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && promptTarget && draft.trim()) {
-                onAddDiffComment({ path, line: promptTarget.line, lineText: promptTarget.lineText, comment: draft.trim() });
-                setPromptTarget(null);
-              }
-            }}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPromptTarget(null)}>
-              取消
-            </Button>
-            <Button
-              disabled={!draft.trim()}
-              onClick={() => {
-                if (!promptTarget || !draft.trim()) return;
-                onAddDiffComment({ path, line: promptTarget.line, lineText: promptTarget.lineText, comment: draft.trim() });
-                setPromptTarget(null);
-              }}
-            >
-              添加评论
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      )}
     </div>
   );
 }

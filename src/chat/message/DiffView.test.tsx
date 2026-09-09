@@ -36,9 +36,9 @@ describe("DiffView 行内评论（P36 Dialog 修复）", () => {
     const onAdd = vi.fn();
     renderDiff(onAdd);
     fireEvent.click(screen.getByRole("button", { name: "评论 /a/b.ts:1" }));
-    const input = screen.getByPlaceholderText("输入评论内容…");
+    const input = screen.getByPlaceholderText("输入评论，随消息发给模型…");
     fireEvent.change(input, { target: { value: "这里用 const 更好" } });
-    fireEvent.click(screen.getByRole("button", { name: "添加评论" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
     expect(onAdd).toHaveBeenCalledWith({
       path: "/a/b.ts",
       line: 1,
@@ -51,9 +51,9 @@ describe("DiffView 行内评论（P36 Dialog 修复）", () => {
     const onAdd = vi.fn();
     renderDiff(onAdd);
     fireEvent.click(screen.getByRole("button", { name: "评论 /a/b.ts:1" }));
-    const input = screen.getByPlaceholderText("输入评论内容…");
+    const input = screen.getByPlaceholderText("输入评论，随消息发给模型…");
     // 空评论：添加按钮禁用
-    expect(screen.getByRole("button", { name: "添加评论" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "添加" }).hasAttribute("disabled")).toBe(true);
     fireEvent.change(input, { target: { value: "ok" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onAdd).toHaveBeenCalledTimes(1);
