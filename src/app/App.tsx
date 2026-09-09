@@ -58,7 +58,7 @@ import { groupSessions } from "@/sidebar/logic/workspaceGroup";
 import { useSessionStore } from "@/store/sessionStore";
 import { useShallow } from "zustand/react/shallow";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
-import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, focusArrowShortcut, pickFocusTarget, tabCycleShortcut, nextTabIndex, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
+import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, visibleKeysOf, focusArrowShortcut, pickFocusTarget, tabCycleShortcut, nextTabIndex, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
 import { matchShortcut } from "@/app/logic/keymap";
 import { useKeymapStore } from "@/store/keymapStore";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
@@ -128,6 +128,10 @@ function App() {
   const [adapters, setAdapters] = useState<AdapterWithStatus[]>([]);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeKey, setActiveKey] = useState<string>("");
+  // P34 R1：屏幕可见 tabKey 集合（每个 tabset 的选中 tab）——分屏时多个窗格各自
+  // 可见；activeKey 是全局唯一焦点。可见性驱动虚拟列表计算（ChatPanel.visible），
+  // 焦点驱动交互路由（ChatPanel.active）——两个正交信号不可混用（R7 白屏教训）。
+  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(() => new Set());
   const [history, setHistory] = useState<SessionEntry[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -221,10 +225,11 @@ function App() {
     };
   }
 
-  /** 从 flexlayout Model 投影回业务 tabs + activeKey（单向同步，不反向重建 model） */
+  /** 从 flexlayout Model 投影回业务 tabs + activeKey + visibleKeys（单向同步，不反向重建 model） */
   function syncFromModel() {
     const m = getModel();
     setTabs(extractTabsFromModel(m));
+    setVisibleKeys(visibleKeysOf(m));
     const key = activeKeyOf(m);
     // P20：拖拽/调整分栏过程中 flexlayout 的 getActiveTabset 可能短暂为空
     // （拖拽 tabset 尚未 set active）→ activeKey 抖成空串 → activeTab=undefined
@@ -647,6 +652,9 @@ function App() {
         resumeSessionId={t.sessionId}
         cwd={t.cwd}
         active={t.key === activeKey}
+        /* P34 R1：可见性（per-tabset 选中 = 屏幕显示）驱动虚拟列表；active（全局
+           焦点）只驱动交互路由。分屏失焦窗格 visible=true → 正常渲染不白屏。 */
+        visible={visibleKeys.has(t.key)}
         onFirstPrompt={(text, sid) => handleFirstPrompt(sid, t.adapterId, text, t.workspaceId, t.cwd)}
         onFork={(fromId, toId) => handleFork(fromId, toId, t.adapterId, t.workspaceId, t.cwd)}
         onForkNavigate={(toId) => handleForkNavigate(toId, t.adapterId, t.workspaceId, t.cwd)}

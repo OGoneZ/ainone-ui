@@ -83,8 +83,15 @@ interface Props {
   /** 会话运行目录（工作区 cwd）；缺省用 adapter.cwd */
   cwd?: string;
   /** M5：当前 Tab 是否活跃（flexlayout 非激活窗格保持挂载，ref-file/拖拽等
-   *  window 级事件必须只作用于活跃实例，否则多窗格互相串扰） */
+   *  window 级事件必须只作用于活跃实例，否则多窗格互相串扰）。
+   *  注意：这是「全局焦点」语义（App 只给 activeKey 的实例传 true）——
+   *  分屏时非焦点窗格也屏幕可见，可见性走 visible。 */
   active?: boolean;
+  /** P34 R1：当前 Tab 是否屏幕可见（= 其所在 tabset 的选中 tab，flexlayout
+   *  positionTabPanels 的 visible 判定同源）。驱动虚拟列表 enabled——
+   *  可见即计算，display:none 的非选中 tab 冻结。默认 true 向后兼容。
+   *  R7 教训：enabled 曾绑 active（全局焦点），分屏失焦窗格被误冻结 → 白屏。 */
+  visible?: boolean;
   onFirstPrompt?: (text: string, sessionId: string) => void;
   /** F-8-5 分叉：返回 (父 sessionId, 新 sessionId) 供 App 落索引 */
   onFork?: (fromSessionId: string, toSessionId: string) => void;
@@ -99,7 +106,7 @@ interface Props {
   onSessionList?: (list: (() => Promise<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>>) | null) => void;
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, onActiveSession, onSessionList, active = true}: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, onActiveSession, onSessionList, active = true, visible = true}: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -1255,18 +1262,21 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const forkEnabled = canFork(rt?.capabilities ?? null);
 
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息。
-  // P32 R7：enabled: active——flexlayout 非激活窗格 display:none，滚动容器
-  // rect=0 会让 calculateRange 短路（outerSize=0 → range=null）→ 全部虚拟项
-  // 卸载，切回时整列表重挂载 + measureElement 全量重测 + Streamdown 重解析。
-  // enabled=false 时 virtualizer 冻结（源码核实：scrollRect/scrollOffset 置
-  // null、不挂 ResizeObserver、不消费 scrollElement），切回自动恢复观察。
+  // P34 R1：enabled: visible——绑定「屏幕可见性」（本 tab 是其 tabset 的选中 tab）
+  // 而非「全局焦点」。R7 曾绑 active（全局焦点）：分屏失焦窗格屏幕上明明可见，
+  // 却被冻结 → calculateRange 短路 → 全部虚拟项卸载 → 白屏（用户实测）。
+  // display:none 的非选中 tab（同 tabset 切走）真不可见，enabled=false 冻结：
+  // 滚动容器 rect=0 会让 range=null → 虚拟项全卸载，切回时整列表重挂载 +
+  // measureElement 全量重测 + Streamdown 重解析。enabled=false 时 virtualizer
+  // 冻结（源码核实：scrollRect/scrollOffset 置 null、不挂 ResizeObserver、
+  // 不消费 scrollElement），切回自动恢复观察。
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => chatScrollRef.current,
     estimateSize: () => 120,
     overscan: 8,
-    enabled: active,
+    enabled: visible,
   });
 
   // F-11-9 上一条指令回跳气泡

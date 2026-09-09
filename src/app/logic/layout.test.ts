@@ -9,6 +9,7 @@ import {
   resolveSplitTab,
   extractTabsFromModel,
   activeKeyOf,
+  visibleKeysOf,
   focusArrowShortcut,
   pickFocusTarget,
   tabCycleShortcut,
@@ -114,6 +115,67 @@ describe("P10 分屏纯逻辑", () => {
     expect(activeKeyOf(withSel)).toBe("k9");
     const none: ModelLike = { visitNodes: () => {}, getActiveTabset: () => undefined };
     expect(activeKeyOf(none)).toBe("");
+  });
+
+  // —— P34 R1：可见性投影（分屏失焦窗格白屏回归的语义修正）——
+
+  /** 造一个鸭子 tab 节点（可见性测试只需 getType/getId） */
+  const mkVisTab = (id: string) => ({
+    getType: () => "tab",
+    getId: () => id,
+    getName: () => id,
+    getConfig: () => ({}),
+  });
+
+  /** 造一个鸭子 tabset 节点 */
+  const mkTabset = (id: string, selectedId?: string) => ({
+    getType: () => "tabset",
+    getId: () => id,
+    ...(selectedId !== undefined
+      ? { getSelectedNode: () => ({ getId: () => selectedId }) }
+      : { getSelectedNode: () => undefined }),
+  });
+
+  it("visibleKeysOf：每个 tabset 的选中 tab 都可见（分屏多窗格各有一个）", () => {
+    const model: ModelLike = {
+      visitNodes: (fn) => {
+        fn(mkTabset("ts1", "k1"), 1);
+        fn(mkVisTab("k1"), 2);
+        fn(mkTabset("ts2", "k2"), 1);
+        fn(mkVisTab("k2"), 2);
+        fn(mkVisTab("k3"), 2); // ts1 的非选中 tab
+      },
+      getActiveTabset: () => ({ getSelectedNode: () => ({ getId: () => "k1" }) }),
+    };
+    const vis = visibleKeysOf(model);
+    // 分屏：两个 tabset 的选中 tab 都屏幕可见
+    expect(vis.has("k1")).toBe(true);
+    expect(vis.has("k2")).toBe(true);
+    // 非选中 tab 不可见
+    expect(vis.has("k3")).toBe(false);
+  });
+
+  it("visibleKeysOf：可见集合 ≠ 焦点——焦点只在 activeKeyOf，可见是全集", () => {
+    const model: ModelLike = {
+      visitNodes: (fn) => {
+        fn(mkTabset("ts1", "kA"), 1);
+        fn(mkTabset("ts2", "kB"), 1);
+      },
+      getActiveTabset: () => ({ getSelectedNode: () => ({ getId: () => "kA" }) }),
+    };
+    // 焦点单值（kA），可见双值（kA、kB）——R7 白屏的语义根源即二者混淆
+    expect(activeKeyOf(model)).toBe("kA");
+    expect(visibleKeysOf(model)).toEqual(new Set(["kA", "kB"]));
+  });
+
+  it("visibleKeysOf：tabset 无选中/空布局 → 空集", () => {
+    const noSel: ModelLike = {
+      visitNodes: (fn) => fn(mkTabset("ts1"), 1),
+      getActiveTabset: () => undefined,
+    };
+    expect(visibleKeysOf(noSel).size).toBe(0);
+    const empty: ModelLike = { visitNodes: () => {}, getActiveTabset: () => undefined };
+    expect(visibleKeysOf(empty).size).toBe(0);
   });
 
   it("focusArrowShortcut：macOS Cmd+方向键→方向，裸方向键/Alt 修饰→null", () => {
