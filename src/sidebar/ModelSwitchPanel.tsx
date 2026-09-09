@@ -113,6 +113,12 @@ interface Props {
   qaMode?: boolean;
   /** 快问模型点选回调（qaMode=true 时必传）；resolve 后由外层保存 quickask 配置 */
   onQaModelPick?: (model: string) => void;
+  /** 仅会话级（P32f）：侧栏元数据面板语义——切模型只调用 set_config_option
+   *  作用于当前会话，绝不写全局配置文件。five harness 的 configOption
+   *  category=model 实测（2026-09-09）全部可达，故侧栏统一走会话级。 */
+  sessionOnly?: boolean;
+  /** 会话级切换失败/暂不支持时提示（sessionOnly=true 且无法会话级切换时返回 null） */
+  onSessionOnlyFail?: (msg: string) => void;
 }
 
 export function ModelSwitchPanel({
@@ -128,6 +134,8 @@ export function ModelSwitchPanel({
   formContext,
   qaMode,
   onQaModelPick,
+  sessionOnly,
+  onSessionOnlyFail,
 }: Props) {
   const [models, setModels] = useState<string[] | null>(null);
   const [probing, setProbing] = useState(false);
@@ -183,6 +191,29 @@ export function ModelSwitchPanel({
     if (qaMode && onQaModelPick) {
       onQaModelPick(model);
       toast.success(`快问模型已选择 ${model}`, { description: "点「保存」后生效（写入快问配置，不影响任何 harness）" });
+      setSaving(null);
+      onClose();
+      return;
+    }
+    // P32f：仅会话级（右栏元数据面板）——五家 configOption category=model
+    // 实测全可达（claude-code/codex/opencode/omp/pi 均返回 model select）。
+    // 只发 session/set_config_option + ACP 即时生效，绝不写配置文件——
+    // 每会话独立模型，新会话不继承，全局配置（设置页）不被触碰。
+    if (sessionOnly) {
+      if (!sessionSwitchable || !onSessionModelChange) {
+        const msg = `当前会话不支持模型切换（${adapterName} 无 model 配置项）`;
+        toast.error(msg);
+        onSessionOnlyFail?.(msg);
+        setSaving(null);
+        return;
+      }
+      const ok = await onSessionModelChange(model);
+      if (ok) {
+        const t = switchResultToast({ persisted: "none", sessionApplied: true });
+        toast[t.kind](t.message(model), { description: "仅当前会话生效，其他会话与全局配置不变" });
+      } else {
+        toast.error(`切换失败：${adapterName} 未接受该模型（${model}）`);
+      }
       setSaving(null);
       onClose();
       return;
@@ -320,6 +351,8 @@ export function ModelSwitchPanel({
           {models !== null && <span>{models.length} 个模型 · 来自 {formContext ? formContext.endpoint : baseUrl}</span>}
           {qaMode ? (
             <span>选择后作为快问模型（仅写入快问配置）</span>
+          ) : sessionOnly ? (
+            <span>选择后仅切换当前会话（不写全局配置）</span>
           ) : writable || formContext ? (
             <span>选择后写入本机配置{sessionSwitchable ? "并即时应用到会话" : "（对新会话生效）"}</span>
           ) : sessionSwitchable ? (

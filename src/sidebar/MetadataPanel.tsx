@@ -218,6 +218,7 @@ export function MetadataPanel({ tabKey, adapter, sessionId: sessionIdProp, cwd, 
         configOptions={configOptions}
         onSessionModelChange={sessionModelChange}
         onWritten={() => setWriteTick((t) => t + 1)}
+        sessionOnly
       />
       {supportsWrite(adapter.id) && (
         <UrlEditPanel
