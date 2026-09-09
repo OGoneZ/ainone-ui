@@ -1,34 +1,34 @@
 import { describe, it, expect } from "vitest";
 import { shouldNotify, turnEndBody, USER_CANCELLED, type NotifyDecisionInput } from "./notify";
 
-// P33 AC-P33-5：触发决策四态矩阵。意图——防打扰原则下，
-// 「失焦 + 非用户取消」才提醒；用户盯着屏幕或自己叫停时保持安静。
+// P33 AC-P33-5：触发决策矩阵（2026-09-09 调整）。意图——完成/权限等待一律提醒
+// （不再看窗口聚焦）；用户自己叫停的不发完成提醒。
 
 const base: NotifyDecisionInput = { reason: "turn_end", windowFocused: false };
 
 describe("shouldNotify（F-32-1）", () => {
-  it("失焦 + turn 正常结束 → 发", () => {
-    expect(shouldNotify(base)).toEqual({ send: true, why: "unfocused-turn-end" });
+  it("turn 正常结束（失焦）→ 发", () => {
+    expect(shouldNotify(base)).toEqual({ send: true, why: "turn-end" });
   });
 
-  it("聚焦时 turn 结束 → 不发（用户正看着）", () => {
-    expect(shouldNotify({ ...base, windowFocused: true }).send).toBe(false);
+  it("turn 正常结束（聚焦）→ 也发（只要完成就提醒）", () => {
+    expect(shouldNotify({ ...base, windowFocused: true })).toEqual({ send: true, why: "turn-end" });
   });
 
-  it("失焦 + 用户主动取消 → 不发（自己叫停的不算完成提醒）", () => {
-    const d = shouldNotify({ ...base, stopReason: USER_CANCELLED });
-    expect(d.send).toBe(false);
+  it("用户主动取消 → 不发（自己叫停的不算完成提醒）", () => {
+    expect(shouldNotify({ ...base, stopReason: USER_CANCELLED }).send).toBe(false);
+    expect(shouldNotify({ ...base, windowFocused: true, stopReason: USER_CANCELLED }).send).toBe(false);
   });
 
-  it("失焦 + 权限等待 → 发（等批准是用户必须回来的事）", () => {
+  it("权限等待（失焦）→ 发（等批准是用户必须回来的事）", () => {
     expect(shouldNotify({ reason: "perm", windowFocused: false })).toEqual({
       send: true,
-      why: "unfocused-perm",
+      why: "perm",
     });
   });
 
-  it("聚焦 + 权限等待 → 不发", () => {
-    expect(shouldNotify({ reason: "perm", windowFocused: true }).send).toBe(false);
+  it("权限等待（聚焦）→ 也发", () => {
+    expect(shouldNotify({ reason: "perm", windowFocused: true }).send).toBe(true);
   });
 
   it("stopReason 缺省（无响应字段）→ 视为正常完成发", () => {

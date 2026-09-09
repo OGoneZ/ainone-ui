@@ -567,7 +567,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             options: params.options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind ?? null })),
           };
           patch(tabKey, { perm });
-          // P33 F-32-1：窗口失焦时通知「等待权限批准」（决策在 shouldNotify 纯函数）
+          // P33 F-32-1：通知「等待权限批准」（2026-09-09 起不看聚焦，一律发）
           {
             const decision = shouldNotify({ reason: "perm", windowFocused: document.hasFocus() });
             if (decision.send) {
@@ -1178,7 +1178,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         // turn_stop 已先行捕获 outputTokens（协议前向兼容，当前 harness 不填）。
         rate.finalize(stopReasonOutputTokensRef.current, Date.now());
         stopReasonOutputTokensRef.current = null;
-        // P33 F-32-1：窗口失焦时通知「任务完成」（用户自己取消不发——shouldNotify 决策）
+        // P33 F-32-1：通知「任务完成」（2026-09-09 起不看聚焦，一律发；
+        // 用户自己取消不发——shouldNotify 决策）
         {
           const reason = stopReasonRef.current ?? "end_turn";
           const decision = shouldNotify({ reason: "turn_end", windowFocused: document.hasFocus(), stopReason: reason });
