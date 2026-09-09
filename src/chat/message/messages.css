@@ -33,14 +33,23 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   border: none;
   border-radius: 4px;
   background: transparent;
   color: var(--text-secondary);
-  padding: 2px;
+  padding: 2px 4px;
   cursor: pointer;
   opacity: 0;
   transition: opacity var(--motion-fast) ease;
+}
+
+/* P36 用户反馈：纯眼睛图标发现性差——hover 显现时带「点击预览」文字标签 */
+.tool-preview-btn-label {
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
 }
 
 .tool-head:hover .tool-preview-btn,

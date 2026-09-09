@@ -71,6 +71,18 @@ describe("P36 R3 预览文件按钮", () => {
     expect(screen.getByRole("button", { name: "预览 /x/b.ts" })).toBeTruthy();
   });
 
+  it("P36 反馈：按钮带「点击预览」文字标签（纯图标发现性差）", () => {
+    renderMsg([
+      toolBlock({
+        status: "in_progress",
+        toolKind: "edit",
+        content: [{ kind: "diff", diff: { path: "/a/b.ts", oldText: "x", newText: "y" } }],
+      }),
+    ]);
+    const btn = screen.getByRole("button", { name: "预览 /a/b.ts" });
+    expect(btn.textContent).toContain("点击预览");
+  });
+
   it("AC-3.2 点击 dispatch ainone:open-file detail={path, tabKey}；不改折叠态", () => {
     const dispatched: CustomEvent[] = [];
     const spy = (e: Event) => dispatched.push(e as CustomEvent);

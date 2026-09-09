@@ -262,6 +262,8 @@ function ToolBlock({
             }}
           >
             <EyeIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
+            {/* P36 用户反馈：纯图标不可发现——hover 显现时带文字标签 */}
+            <span className="tool-preview-btn-label">点击预览</span>
           </button>
         )}
         <span className="status">{TOOL_STATUS_LABEL[status] ?? status}</span>

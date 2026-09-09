@@ -401,6 +401,8 @@ function FileChangeRow({
         }}
       >
         <EyeIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+        {/* P36 用户反馈：纯图标不可发现——hover 显现时带文字标签 */}
+        <span className="tool-preview-btn-label">点击预览</span>
       </button>
       {open && (
         <div className="mt-1">
