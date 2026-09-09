@@ -125,3 +125,17 @@ describe("P36 R1 终端两段式展开", () => {
     expect(screen.getByText("out only")).toBeTruthy();
   });
 });
+
+// —— P36 R2：data-toolkind 差异化外观挂点 ——
+describe("P36 R2 data-toolkind", () => {
+  it("AC-2.1 根容器带 data-toolkind=协议 kind；旧日志缺省 → other", () => {
+    renderMsg([
+      toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: "ls" } }),
+    ]);
+    expect(document.querySelector(".tool")?.getAttribute("data-toolkind")).toBe("execute");
+    cleanup();
+
+    renderMsg([toolBlock({ status: "in_progress", content: [{ kind: "text", text: "x" }] })]);
+    expect(document.querySelector(".tool")?.getAttribute("data-toolkind")).toBe("other");
+  });
+});

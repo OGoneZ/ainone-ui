@@ -52,6 +52,60 @@
   color: var(--danger);
 }
 
+/* —— P36 R2：工具卡按 kind 差异化外观——左边框 + 图标色两级点睛，不改大面积底色
+ * （DEC-48 中性化结论不推翻）。取色全部走设计令牌，dark 主题换值自动生效。
+ * 失败态合并：failed/error 时左边框统一置 danger（危险语义优先于 kind 语义）。 —— */
+
+/* execute：执行/命令语义 → primary */
+.tool[data-toolkind="execute"] {
+  border-left: 2px solid var(--primary);
+}
+
+.tool[data-toolkind="execute"] .tool-head > svg {
+  color: var(--primary);
+}
+
+/* edit：写操作警示 → warning */
+.tool[data-toolkind="edit"],
+.tool[data-toolkind="move"] {
+  border-left: 2px solid var(--warning);
+}
+
+.tool[data-toolkind="edit"] .tool-head > svg,
+.tool[data-toolkind="move"] .tool-head > svg {
+  color: var(--warning);
+}
+
+/* delete：删除 → danger */
+.tool[data-toolkind="delete"] {
+  border-left: 2px solid var(--danger);
+}
+
+.tool[data-toolkind="delete"] .tool-head > svg {
+  color: var(--danger);
+}
+
+/* search / fetch / switch_mode：只点图标色，不加边框（低频操作不喧宾） */
+.tool[data-toolkind="search"] .tool-head > svg {
+  color: var(--primary);
+}
+
+.tool[data-toolkind="fetch"] .tool-head > svg,
+.tool[data-toolkind="switch_mode"] .tool-head > svg {
+  color: var(--success);
+}
+
+/* 失败态：kind 左边框让位于危险语义 */
+.tool[data-status="failed"],
+.tool[data-status="error"] {
+  border-left: 2px solid var(--danger) !important;
+}
+
+.tool[data-status="failed"] .tool-head > svg,
+.tool[data-status="error"] .tool-head > svg {
+  color: var(--danger) !important;
+}
+
 .tool-body {
   padding: 8px;
   background: var(--bg-2);

@@ -204,8 +204,10 @@ function ToolBlock({
   const hasTextContent = content.some((c) => c.kind === "text");
   const outputFallback = !hasTextContent ? toolOutputFallback(rawOutput) : null;
   return (
-    // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）
-    <div className="tool" data-status={status}>
+    // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）。
+    // P36 R2：data-toolkind 驱动 kind 差异化外观（左边框/图标色，CSS 层分支）；
+    // 旧日志缺省 → "other"（中性兜底）。
+    <div className="tool" data-status={status} data-toolkind={toolKind ?? "other"}>
       <div
         className="tool-head"
         onClick={() => {
