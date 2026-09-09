@@ -125,6 +125,16 @@
   color: var(--success);
 }
 
+/* P36 反馈：危险命令（rm/dd/…）execute 卡红色警示——kind 语义让位于危险语义。
+ * 仅边框/图标点睛（不改大面积底色，与 DEC-48 一致），不吞失败态（同为 danger）。 */
+.tool[data-risk="danger"] {
+  border-left: 2px solid var(--danger) !important;
+}
+
+.tool[data-risk="danger"] .tool-head > svg {
+  color: var(--danger) !important;
+}
+
 /* 失败态：kind 左边框让位于危险语义 */
 .tool[data-status="failed"],
 .tool[data-status="error"] {

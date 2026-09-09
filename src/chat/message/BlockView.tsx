@@ -9,6 +9,7 @@ import { math } from "@streamdown/math";
 import type { BlockMsg } from "@/acp/message-log";
 import type { ToolContent } from "@/acp/session-core";
 import { formatShellCommand } from "@/acp/commandFormat";
+import { isRiskyCommand } from "@/acp/toolDisplay";
 import { kindIcon, previewTargetOf, toolCommand, toolOutputFallback, toolSubtitle } from "@/acp/toolDisplay";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import { shouldAutoOpen } from "@/chat/logic/disclosure";
@@ -214,7 +215,12 @@ function ToolBlock({
     // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）。
     // P36 R2：data-toolkind 驱动 kind 差异化外观（左边框/图标色，CSS 层分支）；
     // 旧日志缺省 → "other"（中性兜底）。
-    <div className="tool" data-status={status} data-toolkind={toolKind ?? "other"}>
+    <div
+      className="tool"
+      data-status={status}
+      data-toolkind={toolKind ?? "other"}
+      data-risk={command && isRiskyCommand(command) ? "danger" : undefined}
+    >
       <div
         className="tool-head"
         onClick={() => {

@@ -191,3 +191,27 @@ export function toolOutputFallback(rawOutput: unknown): string | null {
   }
   return null;
 }
+
+// —— P36 反馈：危险命令识别（rm 等删除类命令 execute 卡红色警示）——
+// claude 桥对 rm 命令报 kind=execute（非 delete），纯 kind 分支无危险语义。
+// 命令级检测：解析首 token（穿透 env= 前缀 / sudo），basename 命中危险清单 → danger。
+// 保守清单起步：文件/目录删除 + 磁盘覆写类。宁可漏报不误报（find -delete、git clean 不收）。
+const DANGEROUS_COMMANDS = new Set(["rm", "rmdir", "shred", "unlink", "mkfs", "mkfs.ext4", "mkfs.xfs", "truncate"]);
+
+/** execute 命令是否具危险语义（渲染层 data-risk="danger" → 红色边框/图标）。
+ *  引号内不做解析（首 token 在引号内是病态命令，不识别也不误伤）。 */
+export function isRiskyCommand(command: string): boolean {
+  const tokens = command.trim().split(/\s+/);
+  if (tokens.length === 0) return false;
+  for (const t of tokens) {
+    // 穿透 env 赋值前缀（FOO=1 …）
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue;
+    // 穿透 sudo / env
+    if (t === "sudo" || t === "env") continue;
+    // 管道/分隔符后续段不判（只看首命令）
+    if (/^[|;&]$/.test(t)) return false;
+    const base = t.split("/").pop() ?? t;
+    return DANGEROUS_COMMANDS.has(base);
+  }
+  return false;
+}

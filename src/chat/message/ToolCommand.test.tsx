@@ -140,6 +140,23 @@ describe("P36 R2 data-toolkind", () => {
   });
 });
 
+describe("P36 反馈：危险命令红色警示", () => {
+  it("rm 命令 → data-risk=danger；普通命令无该属性", () => {
+    renderMsg([
+      toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: "rm /x/helloworld.ts" } }),
+    ]);
+    fireEvent.click(screen.getByText("Terminal"));
+    expect(screen.getByTestId("tool-command").closest(".tool")?.getAttribute("data-risk")).toBe("danger");
+    cleanup();
+
+    renderMsg([
+      toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: "ls -la" } }),
+    ]);
+    fireEvent.click(screen.getByText("Terminal"));
+    expect(screen.getByTestId("tool-command").closest(".tool")?.getAttribute("data-risk")).toBeNull();
+  });
+});
+
 describe("P36 后续：命令格式化视图", () => {
   it("长命令默认格式化断行展示；切「原始」回原文；复制永远复制原文", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);

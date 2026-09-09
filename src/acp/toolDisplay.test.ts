@@ -1,7 +1,7 @@
 // P30 AC-2.1/2.2：toolDisplay 纯函数测试——kindIcon 全覆盖 + toolSubtitle 参数提炼。
 
 import { describe, it, expect } from "vitest";
-import { kindIcon, kindLabel, toolCommand, toolOutputFallback, toolSubtitle } from "./toolDisplay";
+import { isRiskyCommand, kindIcon, kindLabel, toolCommand, toolOutputFallback, toolSubtitle } from "./toolDisplay";
 import { ToolIcon, TerminalIcon, FileTextIcon, EditIconKind, DeleteIcon, MoveIcon, SearchIcon, ThinkingIcon, FetchIcon, SwitchModeIcon } from "@/components/ui/icons";
 
 describe("kindIcon（P30 AC-2.1）", () => {
@@ -142,5 +142,33 @@ describe("toolOutputFallback", () => {
       details: { totalLines: 2, secret: "internal" },
     });
     expect(out).toBe("line1\nline2");
+  });
+});
+
+// —— P36 反馈：isRiskyCommand（危险命令红色警示）——
+describe("isRiskyCommand（P36 危险命令警示）", () => {
+  it("删除/覆写类首命令命中", () => {
+    expect(isRiskyCommand("rm /Users/x/helloworld.ts")).toBe(true);
+    expect(isRiskyCommand("rm -rf /tmp/build")).toBe(true);
+    expect(isRiskyCommand("rmdir empty_dir")).toBe(true);
+    expect(isRiskyCommand("truncate -s 0 big.log")).toBe(true);
+  });
+
+  it("穿透 env 前缀与 sudo", () => {
+    expect(isRiskyCommand("FOO=1 rm x")).toBe(true);
+    expect(isRiskyCommand("sudo rm -rf /")).toBe(true);
+    expect(isRiskyCommand("sudo env rm x")).toBe(true);
+  });
+
+  it("绝对路径首命令按 basename 命中", () => {
+    expect(isRiskyCommand("/bin/rm x")).toBe(true);
+    expect(isRiskyCommand("/usr/sbin/rmdir d")).toBe(true);
+  });
+
+  it("安全命令不误报", () => {
+    expect(isRiskyCommand("git status && npm run build")).toBe(false);
+    expect(isRiskyCommand("ls -la")).toBe(false);
+    expect(isRiskyCommand("echo rm")).toBe(false); // echo 的参数不算首命令
+    expect(isRiskyCommand("")).toBe(false);
   });
 });
