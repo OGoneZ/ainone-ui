@@ -40,16 +40,24 @@ jobs:
 
       - name: Verify signing key configured
         # P32 引入的必此前置：conf 已开 createUpdaterArtifacts=true，签名密钥缺失
-        # 会让 build 四腿在 ta(uri-action 处全部失败（20 分钟后才炸）。这里把
+        # 会让 build 四腿在 tauri-action 处全部失败（20 分钟后才炸）。这里把
         # 前置校验提前到门禁期：secret 未配/为空 → 30 秒内直接红，省下四腿构建费。
+        # PASSWORD 同为必配：密钥已升级为 rsign 加密版（ce72faf），密码留空时
+        # tauri signer 解密必失败（本地实测 "incorrect updater private key
+        # password: Wrong password for that key"），一并提前拦截。
         env:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if [ -z "$KEY" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY 未配置——发版前先在 Settings→Secrets 配置（值为 ~/.tauri/ainone-ui.key 文件内容，须以 = 结尾的 base64 全量粘贴），否则 build 四腿签名步骤必失败"
             exit 1
           fi
-          echo "✓ 签名密钥已配置（前 8 字符: ${KEY:0:8}…）"
+          if [ -z "$PASSWORD" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD 未配置——当前签名密钥为加密版（rsign encrypted），密码留空时四腿签名步骤解密必失败；发版前在 Settings→Secrets 一并配置"
+            exit 1
+          fi
+          echo "✓ 签名密钥与密码均已配置"
 
       # P32：updater 版本严格递增门禁。原放 publish(构建后)——版本没递增要烧 4×20
       # 分钟才报错，位置不对称；上提到 preflight。R2 上现存 latest-updater.json 的
@@ -65,17 +73,25 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -e
-          if aws s3api get-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
-              --key latest-updater.json prev-latest.json 2>/dev/null; then
-            PREV=$(jq -r .version prev-latest.json)
-            echo "previous: $PREV / this: $VERSION"
-            HIGHER=$(printf '%s\n%s\n' "$PREV" "$VERSION" | sort -V | tail -1)
-            if [ "$HIGHER" != "$VERSION" ] || [ "$PREV" = "$VERSION" ]; then
-              echo "::error::updater 版本号未严格递增（R2 现存 $PREV，本次 $VERSION）——先 bump package.json + tauri.conf.json 再打 tag"
-              exit 1
+          # 先探清单是否可访问：404（NoSuchKey）= 首发跳过校验；其他错误
+          # （凭据无效/网络/权限）必须 fail loud——吞掉会让门禁静默失效
+          GET_ERR=$(aws s3api get-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
+              --key latest-updater.json prev-latest.json 2>&1 >/dev/null) && GET_RC=0 || GET_RC=$?
+          if [ "$GET_RC" -ne 0 ]; then
+            if echo "$GET_ERR" | grep -q "NoSuchKey"; then
+              echo "R2 无现存 updater 清单（首次发布），跳过递增校验"
+              exit 0
             fi
-          else
-            echo "R2 无现存 updater 清单（首次发布），跳过递增校验"
+            echo "::error::读取 R2 现存 latest-updater.json 失败（rc=$GET_RC）——凭据/权限/网络问题会让递增门禁静默失效，拒绝在未知状态下发版"
+            echo "$GET_ERR"
+            exit 1
+          fi
+          PREV=$(jq -r .version prev-latest.json)
+          echo "previous: $PREV / this: $VERSION"
+          HIGHER=$(printf '%s\n%s\n' "$PREV" "$VERSION" | sort -V | tail -1)
+          if [ "$HIGHER" != "$VERSION" ] || [ "$PREV" = "$VERSION" ]; then
+            echo "::error::updater 版本号未严格递增（R2 现存 $PREV，本次 $VERSION）——先 bump package.json + tauri.conf.json 再打 tag"
+            exit 1
           fi
 
   build:
@@ -281,6 +297,8 @@ jobs:
           # .sig 必须与产物同在（tauri build 相邻生成），缺失即失败（不许错位签名上架）
           for f in "$UPD_ARM" "$UPD_X64" "$UPD_NSIS" "$UPD_APPIMAGE"; do
             [ -f "$f.sig" ] || { echo "ERROR: signature missing for $f"; exit 1; }
+            # 非空校验（-s）：空 .sig 会让清单 signature 上架为空串，客户端验签必失败
+            [ -s "$f.sig" ] || { echo "ERROR: signature file empty for $f"; exit 1; }
           done
 
           # 双架构 macOS 同名（ainone-ui.app.tar.gz）→ 重命名区分后平铺
