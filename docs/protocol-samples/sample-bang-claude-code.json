@@ -2,10 +2,10 @@
   "adapter": "claude-code",
   "program": "claude-agent-acp",
   "bangEcho": {
-    "reply": "`hello-ainone`**Notice:** Stop says: Turn 11.03s · Session 11.03s"
+    "reply": "hello-ainone**Notice:** Stop says: Turn 11.89s · Session 11.89s"
   },
   "bangLs": {
-    "reply": "当前目录内容：\n\n- `probe-dir/`\n- `probe-file.txt`**Notice:** Stop says: Turn 10.16s · Session 21.19s"
+    "reply": "当前目录下有两个条目：\n\n- `probe-dir/`（目录）\n- `probe-file.txt`（文件）**Notice:** Stop says: Turn 7.89s · Session 19.77s"
   },
   "executed": true,
   "verdict": "分支 a：harness 解释 ! 前缀（客户端透传）"
