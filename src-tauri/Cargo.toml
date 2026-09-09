@@ -61,5 +61,8 @@ portable-pty = "0.9"
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0.2"
 
+# P32g omp models.yml 格式保留合并写（解析+定点改写+重序列化；yaml 无注释保留承诺）
+serde_yaml_ng = "0.10.0"
+
 [features]
 webdriver = ["dep:tauri-plugin-webdriver"]
