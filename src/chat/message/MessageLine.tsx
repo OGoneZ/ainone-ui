@@ -188,10 +188,13 @@ export const MessageLine = memo(function MessageLine({
             TurnElapsed（下方保留）承担。
             turn 总耗时：运行中从 turnStartedAt 走秒（runtime 实时值，仅末条）。
             P38：结束后读消息级 turnMs/rateTokPerS（随 JSONL 持久化）——每条
-            assistant 消息独立判断，历史轮重开照常显示冻结值。 */}
+            assistant 消息独立判断，历史轮重开照常显示冻结值。
+            P37b 修复：结束态判定从「全局 !busy」收紧为「本消息不处于流式轮」
+            （!isLast || !busy）——旧条件在流式中会把历史轮的冻结行一并藏掉
+            （用户实测：第 2/3 轮输出期间，前几轮的用时/速率消失，收口才回显）。 */}
         {busy && isLast && lastEventAt ? (
           <TurnElapsed lastEventAt={lastEventAt} turnStartedAt={turnStartedAt} turnEndedAt={turnEndedAt} rateRef={rateRef} />
-        ) : !busy && msg.role === "assistant" && msg.turnMs !== undefined ? (
+        ) : !(busy && isLast) && msg.role === "assistant" && msg.turnMs !== undefined ? (
           <TurnElapsedTurnEnded turnMs={msg.turnMs} rateTokPerS={msg.rateTokPerS} />
         ) : null}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
