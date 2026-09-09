@@ -48,6 +48,7 @@ import { inEditable } from "@/app/logic/layout";
 import { useKeymapStore } from "@/store/keymapStore";
 import { truncateMessagesToEdit } from "../chat/logic/edit-resend";
 import { canFork, capabilitySnapshot } from "../chat/logic/capabilities";
+import { clampQuickAnchor } from "../chat/logic/quickPopClamp";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
 import { typewriterHint } from "../chat/logic/welcome";
 import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
@@ -882,7 +883,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // P11 F-R7：useCallback 稳定引用，避免 memo 化的 MessageLine 因回调新引用而失效
   const onSelectText = useCallback((text: string, e?: React.MouseEvent) => {
     setQuickSel(text);
-    // H6：悬浮窗是 absolute 定位（祖先 = .layout-host），clientX/Y 是视口坐标，
+    // H6：悬浮窗是 absolute 定位（祖先 = .chat），clientX/Y 是视口坐标，
     // 直接塞会恒定偏移侧栏+工具栏。换算为 .chat 内容区相对坐标。
     const chat = chatScrollRef.current;
     if (chat && e) {
@@ -896,6 +897,29 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
     setQuickPop(null);
   }, []);
+  // P35 R1 视口自适应：悬浮窗实测尺寸渲染后才可得——挂载/尺寸变化（流式增长）
+  // 时把 anchor 收回容器内（右/下溢出左/上移，四周留 QUICK_POP_MARGIN）。
+  // anchor 与容器尺寸同为 .chat 坐标系（H6），实测尺寸取 popRect；absolute 祖先
+  // 是 .layout-host，但对原始定位引入的常数偏移在修正前后一致，不改变 clamp 语义。
+  // ResizeObserver 盖住 streaming→ok 的内容增长与窗口缩放两种尺寸变化源。
+  useEffect(() => {
+    if (!quickSel) return;
+    const chat = chatScrollRef.current;
+    const pop = quickPopRef.current;
+    if (!chat || !pop) return;
+    const clampNow = () => {
+      const popRect = pop.getBoundingClientRect();
+      const chatRect = chat.getBoundingClientRect();
+      if (popRect.width === 0 || popRect.height === 0) return;
+      setQuickAnchor((prev) =>
+        clampQuickAnchor(prev, { width: popRect.width, height: popRect.height }, { width: chatRect.width, height: chatRect.height }),
+      );
+    };
+    clampNow();
+    const ro = new ResizeObserver(clampNow);
+    ro.observe(pop);
+    return () => ro.disconnect();
+  }, [quickSel]);
   async function runQuickAsk() {
     if (!quickSel) return;
     const text = quickSel;
