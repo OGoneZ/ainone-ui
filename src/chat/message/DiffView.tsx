@@ -1,6 +1,13 @@
 // diff 渲染：逐行 del/add/ctx + F-12-5 行内评论入口。自 ChatPanel 拆出（P13 C3）。
+//
+// P36 修复（用户实测：点评论卡住）：评论输入原用 window.prompt——同步阻塞 API，
+// WKWebView（wry）不实现同步 prompt，点击后 UI 无响应。改为 Radix Dialog + 受控
+// input（与 ChatPanel 回溯确认框同范式），异步不阻塞。
 
+import { useState } from "react";
 import { CommentIcon } from "@/components/ui/icons";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { DiffComment } from "@/chat/logic/diffComments";
 
 export function DiffView({
@@ -17,6 +24,9 @@ export function DiffView({
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
 }) {
+  // 评论输入弹窗状态（P36：window.prompt 在 WKWebView 卡死 → Dialog 受控输入）
+  const [promptTarget, setPromptTarget] = useState<{ line: number; lineText: string } | null>(null);
+  const [draft, setDraft] = useState("");
   const oldLines = (oldText ?? "").split("\n");
   const newLines = newText.split("\n");
   const rows: { type: "del" | "add" | "ctx"; line: string; /** 该行在 newText 中的 1 基行号；del 行 0 */ newLine: number }[] = [];
@@ -53,10 +63,8 @@ export function DiffView({
               className="diff-comment-btn ml-auto inline-flex items-center rounded px-1 text-[11px] opacity-0 transition-opacity group-hover/diff:opacity-100 hover:bg-[var(--bg-hover)]"
               style={{ color: "var(--text-secondary)", transitionDuration: "var(--motion-fast)" }}
               onClick={() => {
-                const comment = window.prompt(`评论 ${path}:${r.newLine}`);
-                if (comment && comment.trim()) {
-                  onAddDiffComment({ path, line: r.newLine, lineText: r.line, comment: comment.trim() });
-                }
+                setDraft("");
+                setPromptTarget({ line: r.newLine, lineText: r.line });
               }}
             >
               <CommentIcon style={{ width: 11, height: 11, strokeWidth: 1.75 }} />
@@ -65,6 +73,58 @@ export function DiffView({
           )}
         </div>
       ))}
+
+      {/* P36：评论输入弹窗（替代 window.prompt——WKWebView 不支持同步 prompt） */}
+      {onAddDiffComment && (
+      <Dialog
+        open={promptTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setPromptTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              评论 {path}
+              {promptTarget ? `:${promptTarget.line}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {promptTarget && (
+            <p className="perm-code" style={{ opacity: 0.75 }}>
+              {promptTarget.lineText}
+            </p>
+          )}
+          <input
+            autoFocus
+            className="w-full rounded-md border border-[var(--bg-3)] bg-[var(--bg-1)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
+            placeholder="输入评论内容…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && promptTarget && draft.trim()) {
+                onAddDiffComment({ path, line: promptTarget.line, lineText: promptTarget.lineText, comment: draft.trim() });
+                setPromptTarget(null);
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPromptTarget(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={!draft.trim()}
+              onClick={() => {
+                if (!promptTarget || !draft.trim()) return;
+                onAddDiffComment({ path, line: promptTarget.line, lineText: promptTarget.lineText, comment: draft.trim() });
+                setPromptTarget(null);
+              }}
+            >
+              添加评论
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      )}
     </div>
   );
 }
