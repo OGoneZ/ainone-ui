@@ -459,6 +459,9 @@ select {
 }
 
 .welcome-hint kbd {
+  box-sizing: border-box; /* min-width 含边框计入，两个键帽严格等宽 */
+  min-width: 64px; /* 键帽等宽（N/T 字宽不同会差 1px），后续 action 文案起点才对齐 */
+  text-align: center;
   padding: 2px 8px;
   border: 1px solid var(--bg-3);
   border-radius: 5px;
