@@ -18,7 +18,7 @@ const CJK_CHARS_PER_TOKEN = 1.5;
 const LATIN_CHARS_PER_TOKEN = 4;
 
 export interface StreamRate {
-  /** 到达侧字符增量（与 pacer.onChunk 同点位喂入） */
+  /** 到达侧字符增量（与 pacer.onChunk 同点位喂入）；时间戳显式传入 */
   onChunk(text: string, now: number): void;
   /** 窗口估算 tok/s（EMA 平滑后）；窗口空/样本不足 → null */
   rate(now: number): number | null;
@@ -30,7 +30,7 @@ export interface StreamRate {
   reset(): void;
 }
 
-export function createStreamRate(now: () => number = Date.now): StreamRate {
+export function createStreamRate(): StreamRate {
   /** (时间, 字符增量) 样本；text 增量按窗口累计，不存全文（内存有界） */
   let samples: Array<{ ts: number; chars: number; cjk: number }> = [];
   let ema: number | null = null; // 平滑后的估算 tok/s

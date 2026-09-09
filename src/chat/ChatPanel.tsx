@@ -24,6 +24,8 @@ import { useTypewriter } from "@/chat/hooks/useTypewriter";
 import { createStreamCommitThrottle } from "@/chat/hooks/streamCommitThrottle";
 import { createStreamPacer } from "@/chat/hooks/streamPacer";
 import { createRevealScheduler } from "@/chat/hooks/revealScheduler";
+import { createStreamRate } from "@/chat/hooks/streamRate";
+import { rateStoreOf, rateStoreDrop } from "@/chat/hooks/streamRateStore";
 import { overlayRevealedText } from "@/chat/hooks/overlayRevealed";
 import { createFollowBottom } from "@/chat/hooks/followBottom";
 import { ChevronDownIcon } from "@/components/ui/icons";
@@ -189,6 +191,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const pendingTextRef = useRef<string | null>(null);
   // M1：当前 turn 的 stopReason（turn_stop 时写入；finally 中消费后清空）
   const stopReasonRef = useRef<string | null>(null);
+  // P37 R4：turn_stop 携带的权威输出 token 数（PromptResponse.usage 前向兼容，
+  // 当前 harness 不填 → null）——turn 收口时喂 StreamRate.finalize
+  const stopReasonOutputTokensRef = useRef<number | null>(null);
+  // P37 R2：速率器登记引用（组件级，MessageLine JSX 读取；runPrompt 每轮
+  // turn 覆盖 .current 为新建的 StreamRate）
+  const rateStoreRef = rateStoreOf(tabKey);
   // 当前 turn 的 blocks 累加器（流式事件 → 块结构，见 acp/turn.ts）
   const turnRef = useRef(newTurn());
   // 已落盘的消息条数（JSONL 日志增量追加的游标）
@@ -1054,6 +1062,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       }
     });
     const scheduler = createRevealScheduler(pacer, throttle.schedule);
+    // P37：输出速率估算器——与 pacer 同点位喂「到达侧」text 流（揭示是 30fps
+    // 匀速假象，测它得到的是 pacing 参数不是模型速率）。状态只走 MessageLine
+    // 末条实例局部订阅（rateStoreRef），不进 store（P32 R2 教训：每秒变的
+    // 值进 sessionSignals 编码投影会击穿 App 级浅比较）。
+    const rate = createStreamRate();
+    rateStoreRef.current = rate; // 末条 MessageLine 经 rateRef prop 读取当前 turn 的速率器
     const p = (async () => {
       try {
         const session = await ensureSession();
@@ -1083,6 +1097,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             // M1：区分停止原因——用户取消（cancel）后不再自动消费队列下一条，
             // 只允许 steering 续跑（用户主动输入的意图必须被尊重）
             stopReasonRef.current = e.stopReason;
+            // P37 R4：权威输出 token 数暂存（收口时喂 rate.finalize）
+            stopReasonOutputTokensRef.current = e.outputTokens ?? null;
             return;
           }
           if (e.type === "usage") {
@@ -1121,7 +1137,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           // P35 R2：text 增量喂 pacer（揭示节奏的输入流）；tool/thought 不喂
           //（即时状态语义）。喂后 kick 排帧——自持循环会在积压清空前的每个
           // 帧里 tick + 提交，空窗期揭示不停滞。
-          if (e.type === "agent_text") pacer.onChunk(e.text);
+          if (e.type === "agent_text") {
+            pacer.onChunk(e.text);
+            rate.onChunk(e.text, Date.now()); // P37：到达侧字符增量（同点位输入流）
+          }
           // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）。
           // P32 R1：不再逐事件 patch store（事件率写库击穿 memo），记到局部变量
           // 随节流提交（帧级），flush 时一并落定终态
@@ -1147,6 +1166,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         // 「起点→终点」墙钟差，不再随 busy 清除消失。下个 turn 开始时 runPrompt
         // 会重置 turnStartedAt 并清 endTurnAt，计时归零重走。
         useSessionStore.getState().patch(tabKey, { turnEndedAt: Date.now() });
+        // P37：turn 收口——速率器冻结显示值（终值回算 / 保留最后估算）。
+        // turn_stop 已先行捕获 outputTokens（协议前向兼容，当前 harness 不填）。
+        rate.finalize(stopReasonOutputTokensRef.current, Date.now());
+        stopReasonOutputTokensRef.current = null;
         // P33 F-32-1：窗口失焦时通知「任务完成」（用户自己取消不发——shouldNotify 决策）
         {
           const reason = stopReasonRef.current ?? "end_turn";
@@ -1167,6 +1190,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         setStartError(String(err));
         throttle.dispose(); // 异常收口：撤销帧内 pending（catch 里直接提交终态快照）
         scheduler.dispose(); // P35 R2：撤销自持揭示帧
+        rate.finalize(stopReasonOutputTokensRef.current, Date.now()); // P37：异常收口同样冻结速率
+        stopReasonOutputTokensRef.current = null;
         const next: TurnAccumulator = {
           ...turnRef.current,
           blocks: [...turnRef.current.blocks, { kind: "text", text: `\n\n⚠️ ${String(err)}` }],
@@ -1676,6 +1701,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   // turn 总计时：同 lastEventAt 口径只传末条（TurnElapsed 消费）
                   turnStartedAt={vi.index === messages.length - 1 ? rt?.turnStartedAt : undefined}
                   turnEndedAt={vi.index === messages.length - 1 ? rt?.turnEndedAt : undefined}
+                  // P37：速率器只给末条（消费点在末条下方 TurnElapsed 行右侧；
+                  // 传所有行会击穿全部 MessageLine 的 memo）
+                  rateRef={vi.index === messages.length - 1 ? rateStoreRef : undefined}
                   onSelect={onSelectText}
                   onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}
@@ -1808,4 +1836,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         onSendNow={sendNowSteer}
       />    </div>
   );
+
+  // P37：面板卸载时摘除速率器登记（末条 MessageLine 经 rateStoreOf(tabKey) 读取，
+  // 残留 entry 会让后续同 key 面板读到上一会话的冻结速率）
+  useEffect(() => {
+    return () => {
+      rateStoreDrop(tabKey);
+    };
+  }, [tabKey]);
 }

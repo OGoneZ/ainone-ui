@@ -54,7 +54,7 @@ export type Outgoing =
       rawOutput?: unknown;
       content: ToolContent[];
     }
-  | { type: "turn_stop"; stopReason: string }
+  | { type: "turn_stop"; stopReason: string; /** P37 R4：turn 终态权威输出 token（PromptResponse.usage，harness 未填则 null） */ outputTokens?: number | null }
   | { type: "available_commands"; commands: CommandWord[] }
   | { type: "usage"; used: number; size: number; cost: number | null }
   | { type: "plan"; entries: PlanEntry[] }
@@ -538,7 +538,12 @@ export async function createAcpSession(opts: OpenOptions): Promise<AcpSession> {
         drained++;
       }
       console.info("[acp] session/prompt 结束 stopReason=", resp.stopReason);
-      onOutgoing({ type: "turn_stop", stopReason: resp.stopReason });
+      // P37 R4：PromptResponse.usage.outputTokens（UNSTABLE experimental）——turn
+      // 终态权威输出 token 数。当前 harness（claude-acp/codex-acp）均不填，属前向
+      // 兼容：协议一旦填上，速率显示即从估算升级为精确均值（StreamRate.finalize）。
+      const respUsage = (resp as { usage?: { outputTokens?: number | null } | null })?.usage ?? null;
+      const outputTokens = typeof respUsage?.outputTokens === "number" ? respUsage.outputTokens : null;
+      onOutgoing({ type: "turn_stop", stopReason: resp.stopReason, outputTokens });
     },
     /** F-8-4 元数据：拉取当前 provider 路由信息（apiType/baseUrl），失败静默。 */
     async listProviders() {

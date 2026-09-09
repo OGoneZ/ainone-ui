@@ -4,8 +4,9 @@
 // 也就跳过 Streamdown 对长文本的全量重解析。导出供测试。
 // 自 ChatPanel 拆出（P13 C3）：props 签名逐字保持，memo 语义不变。
 
-import { memo, useState } from "react";
+import { memo, useState, useEffect } from "react";
 import type { ChatMsg } from "@/store/sessionStore";
+import type { StreamRate } from "@/chat/hooks/streamRate";
 import type { ToolContent } from "@/acp/session-core";
 import type { AdapterWithStatus } from "@/ipc/adapters";
 import type { DiffComment } from "@/chat/logic/diffComments";
@@ -46,6 +47,7 @@ export const MessageLine = memo(function MessageLine({
   lastEventAt,
   turnStartedAt,
   turnEndedAt,
+  rateRef,
   ownerTabKey,
   onSelect,
   onFork,
@@ -66,6 +68,8 @@ export const MessageLine = memo(function MessageLine({
   turnStartedAt?: number;
   /** turn 总耗时常驻：正常结束时的终点时间戳——结束后冻结为起点→终点墙钟差 */
   turnEndedAt?: number;
+  /** P37 R3：速率器登记引用（末条消息专属）——TurnElapsed 右侧速率徽标数据源 */
+  rateRef?: { current: import("@/chat/hooks/streamRate").StreamRate | null };
   /** P36 R3：所属窗格 tabKey——工具卡「预览文件」事件的归属标识（缺省不带） */
   ownerTabKey?: string;
   onSelect?: (text: string, e: React.MouseEvent) => void;
@@ -184,9 +188,9 @@ export const MessageLine = memo(function MessageLine({
             turn 总耗时常驻：运行中从 turnStartedAt 走秒；正常结束后冻结为
             turnEndedAt - turnStartedAt（下个 turn 开始时归零重走）。 */}
         {busy && isLast && lastEventAt ? (
-          <TurnElapsed lastEventAt={lastEventAt} turnStartedAt={turnStartedAt} turnEndedAt={turnEndedAt} />
+          <TurnElapsed lastEventAt={lastEventAt} turnStartedAt={turnStartedAt} turnEndedAt={turnEndedAt} rateRef={rateRef} />
         ) : !busy && turnEndedAt && turnStartedAt ? (
-          <TurnElapsedTurnEnded startedAt={turnStartedAt} endedAt={turnEndedAt} />
+          <TurnElapsedTurnEnded startedAt={turnStartedAt} endedAt={turnEndedAt} rateRef={rateRef} />
         ) : null}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -437,7 +441,7 @@ function formatElapsed(totalSeconds: number): string {
   return parts.join(" ");
 }
 
-function TurnElapsed({ lastEventAt, turnStartedAt, turnEndedAt }: { lastEventAt: number; turnStartedAt?: number; turnEndedAt?: number }) {
+function TurnElapsed({ lastEventAt, turnStartedAt, turnEndedAt, rateRef }: { lastEventAt: number; turnStartedAt?: number; turnEndedAt?: number; rateRef?: { current: StreamRate | null } }) {
   const silent = useElapsedTicker(lastEventAt);
   // turn 总耗时：从 turn 发出时刻起走秒（墙钟）；已封口（turnEndedAt）则冻结终点不再走
   const ticking = useElapsedTicker(turnStartedAt && !turnEndedAt ? turnStartedAt : undefined);
@@ -452,6 +456,9 @@ function TurnElapsed({ lastEventAt, turnStartedAt, turnEndedAt }: { lastEventAt:
           用时 {formatElapsed(total)}
         </span>
       ) : null}
+      {/* P37 R3：输出速率徽标——总时钟右侧（TurnElapsed 只在 busy && isLast 渲染，
+          live 恒为 true；收口后由 TurnElapsedTurnEnded 的 live=false 分支显示冻结值） */}
+      <StreamRateBadge rateRef={rateRef} live={true} />
       {silent >= SILENT_THRESHOLD_S && (
         <span data-testid="silent-hint" style={{ color: "var(--warning)" }}>
           · 静默 {silent} 秒（可能在运行长任务或子代理）
@@ -462,7 +469,7 @@ function TurnElapsed({ lastEventAt, turnStartedAt, turnEndedAt }: { lastEventAt:
 }
 
 /** turn 结束后的常驻总耗时（冻结值，不走秒不消失）——末条消息 busy=false 时显示 */
-function TurnElapsedTurnEnded({ startedAt, endedAt }: { startedAt: number; endedAt: number }) {
+function TurnElapsedTurnEnded({ startedAt, endedAt, rateRef }: { startedAt: number; endedAt: number; rateRef?: { current: StreamRate | null } }) {
   const seconds = Math.max(0, Math.round((endedAt - startedAt) / 1000));
   return (
     <div className="turn-elapsed" data-testid="turn-elapsed-ended" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
@@ -470,6 +477,37 @@ function TurnElapsedTurnEnded({ startedAt, endedAt }: { startedAt: number; ended
         <ClockIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
         用时 {formatElapsed(seconds)}
       </span>
+      {/* P37 R3：收口后冻结的平均速率（与总耗时常驻语义对齐） */}
+      <StreamRateBadge rateRef={rateRef} live={false} />
     </div>
+  );
+}
+
+/** P37 R3：输出速率徽标——`⚡ N tok/s`，总时钟右侧。
+ *  数据流：rateRef.current.display()（到达侧估算/终值冻结），不进 zustand store
+ *  （P32 R2 教训：每秒变的值进 App 级订阅会击穿浅比较全树重渲染）。局部 1s
+ *  interval 重读（与 useElapsedTicker 同频），仅挂载时运行——非末条不渲染本组件。
+ *  分档着色（pi-token-speed 阈值）：<15 danger / 15-30 warning / ≥30 success。 */
+function StreamRateBadge({ rateRef, live }: { rateRef?: { current: StreamRate | null }; live: boolean }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => force((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!rateRef?.current) return null;
+  const v = rateRef.current.display(Date.now());
+  if (v === null || v <= 0) return null;
+  const color =
+    v < 15 ? "var(--danger)" : v < 30 ? "var(--warning)" : "var(--success)";
+  return (
+    <span
+      data-testid="stream-rate"
+      data-live={live ? "true" : "false"}
+      className="inline-flex items-center gap-1"
+      style={{ color }}
+      title={live ? "当前输出速率（估算值）" : "本轮平均输出速率"}
+    >
+      ⚡ {v < 10 ? v.toFixed(1) : Math.round(v)} tok/s
+    </span>
   );
 }
