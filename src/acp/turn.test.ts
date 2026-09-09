@@ -115,6 +115,28 @@ describe("turn 事件累加（F-4-2 thinking 折叠）", () => {
     expect(blk2.rawInput).toEqual({ file_path: "/x" });
   });
 
+  // P36 R1 AC-1.4：rawOutput 落块（携带才覆盖，缺省保留旧值）
+  it("P36：tool_call/tool_update 带 rawOutput 入块；不携带保留旧值", () => {
+    let acc = newTurn();
+    acc = applyEvent(
+      acc,
+      { type: "tool_call", toolCallId: "a", title: "Terminal", status: "pending", content: [] },
+      () => 1,
+    );
+    expect((acc.blocks[0] as { rawOutput?: unknown }).rawOutput).toBeUndefined();
+
+    acc = applyEvent(
+      acc,
+      { type: "tool_update", toolCallId: "a", status: "in_progress", content: [], rawOutput: { content: [{ type: "text", text: "out" }] } },
+      () => 2,
+    );
+    expect((acc.blocks[0] as { rawOutput?: unknown }).rawOutput).toEqual({ content: [{ type: "text", text: "out" }] });
+
+    // 不携带 → 保留旧值
+    acc = applyEvent(acc, { type: "tool_update", toolCallId: "a", status: "completed", content: [] }, () => 3);
+    expect((acc.blocks[0] as { rawOutput?: unknown }).rawOutput).toEqual({ content: [{ type: "text", text: "out" }] });
+  });
+
   // P30 AC-1.3：协议失败终态 failed 也封口 ms（error 为本地历史值，另行覆盖）
   it("P30：failed 终态封口 ms", () => {
     let t = 0;

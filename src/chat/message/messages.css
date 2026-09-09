@@ -59,6 +59,50 @@
   overflow-y: auto;
 }
 
+/* —— P36 R1：execute 类两段式展开 —— */
+/* 命令段：rawInput.command 全文（pre 保留换行），浅底圆角块 + hover 显现复制钮 */
+.tool-command {
+  position: relative;
+  margin-bottom: 6px;
+  border: 1px solid var(--bg-3);
+  border-radius: 4px;
+  background: var(--bg-1);
+}
+
+.tool-command-text {
+  margin: 0;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.8em;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--text-primary);
+}
+
+.tool-command-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.tool-command:hover .tool-command-copy,
+.tool-command-copy:focus-visible {
+  opacity: 1;
+}
+
+.tool-command-copy:hover {
+  color: var(--text-primary);
+}
+
 .tool-text {
   margin: 0;
   white-space: pre-wrap;

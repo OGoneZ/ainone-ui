@@ -123,6 +123,42 @@ describe("session-core · dispatchUpdate", () => {
     ]);
   });
 
+  // P36 R1：rawOutput 兜底透传——omp update 帧实测只有 rawOutput 无 content text
+  it("tool_call/tool_update 带 rawOutput → 透传同值；不带 → 干净缺省（AC-1.4）", () => {
+    const ompOutput = { content: [{ type: "text", text: "hello" }], details: {} };
+    const withOut = collect(
+      notif({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Terminal",
+        status: "in_progress",
+        rawOutput: ompOutput,
+        content: [],
+      }),
+    );
+    expect(withOut).toEqual([
+      { type: "tool_call", toolCallId: "t1", title: "Terminal", status: "in_progress", rawOutput: ompOutput, content: [] },
+    ]);
+
+    const updWithOut = collect(
+      notif({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        status: "completed",
+        rawOutput: ompOutput,
+        content: [],
+      }),
+    );
+    expect(updWithOut).toEqual([
+      { type: "tool_update", toolCallId: "t1", status: "completed", rawOutput: ompOutput, content: [] },
+    ]);
+
+    const without = collect(
+      notif({ sessionUpdate: "tool_call", toolCallId: "t2", title: "T", status: "pending", content: [] }),
+    );
+    expect("rawOutput" in without[0]).toBe(false);
+  });
+
   it("usage_update → usage（含 cost 数值 / 无 cost → null）", () => {
     expect(
       collect(notif({ sessionUpdate: "usage_update", used: 100, size: 1000, cost: { amount: 1.5, currency: "USD" } })),

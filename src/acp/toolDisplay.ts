@@ -120,3 +120,50 @@ export function toolSubtitle(rawInput: unknown): string | null {
   }
   return null;
 }
+
+/** P36 R1：execute 类工具的完整命令原文（两段式展开的命令段数据源）。
+ *  与 toolSubtitle 不同——不做截断/空格折叠，保留换行原样。
+ *  命中条件（不依赖 kind 准确性，与 toolSubtitle 同纪律）：
+ *    kind === "execute"，或 kind 缺省但 rawInput 有非空 command 字段。
+ *  命中不了 → null（组件侧整段不渲染）。 */
+export function toolCommand(toolKind: string | undefined | null, rawInput: unknown): string | null {
+  const isExecute = toolKind === "execute" || toolKind === undefined || toolKind === null;
+  if (!isExecute) return null;
+  if (rawInput === null || typeof rawInput !== "object" || Array.isArray(rawInput)) return null;
+  const command = (rawInput as Record<string, unknown>).command;
+  if (typeof command !== "string" || !command.trim()) return null;
+  return command;
+}
+
+/** P36 R1：rawOutput → 兜底输出文本（content 无 text 输出时两段式展开的输出段数据源）。
+ *  已知形状（omp 实测）：{content:[{type:"text",text}], details:{…}}——取 content 内 text 拼接；
+ *  纯字符串直接用；其他对象 JSON pretty；null/空 → null（不渲染输出段）。 */
+export function toolOutputFallback(rawOutput: unknown): string | null {
+  if (rawOutput === null || rawOutput === undefined) return null;
+  if (typeof rawOutput === "string") return rawOutput.length > 0 ? rawOutput : null;
+  if (Array.isArray(rawOutput)) {
+    const joined = rawOutput
+      .map((item) => {
+        if (typeof item === "object" && item !== null) {
+          // omp content 元素形状：{type:"text", text}——text 直取；
+          // 兼容嵌套 {content:[…]}（递归）
+          const rec = item as Record<string, unknown>;
+          if (rec.type === "text" && typeof rec.text === "string") return rec.text;
+          if (Array.isArray(rec.content)) return toolOutputFallback(rec.content) ?? "";
+        }
+        return typeof item === "string" ? item : "";
+      })
+      .join("");
+    return joined.length > 0 ? joined : null;
+  }
+  if (typeof rawOutput === "object") {
+    const content = (rawOutput as Record<string, unknown>).content;
+    if (Array.isArray(content)) return toolOutputFallback(content);
+    try {
+      return JSON.stringify(rawOutput, null, 2);
+    } catch {
+      return String(rawOutput);
+    }
+  }
+  return null;
+}

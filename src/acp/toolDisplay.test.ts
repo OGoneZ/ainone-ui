@@ -1,7 +1,7 @@
 // P30 AC-2.1/2.2：toolDisplay 纯函数测试——kindIcon 全覆盖 + toolSubtitle 参数提炼。
 
 import { describe, it, expect } from "vitest";
-import { kindIcon, kindLabel, toolSubtitle } from "./toolDisplay";
+import { kindIcon, kindLabel, toolCommand, toolOutputFallback, toolSubtitle } from "./toolDisplay";
 import { ToolIcon, TerminalIcon, FileTextIcon, EditIconKind, DeleteIcon, MoveIcon, SearchIcon, ThinkingIcon, FetchIcon, SwitchModeIcon } from "@/components/ui/icons";
 
 describe("kindIcon（P30 AC-2.1）", () => {
@@ -76,5 +76,63 @@ describe("toolSubtitle（P30 AC-2.2）", () => {
     expect(toolSubtitle(42)).toBeNull();
     expect(toolSubtitle(["a"])).toBeNull();
     expect(toolSubtitle({ command: "" })).toBeNull(); // 空串不算命中
+  });
+});
+
+// —— P36 R1：toolCommand（命令段数据源）——
+describe("toolCommand", () => {
+  it("execute + command → 返回原文（不截断不折叠空格，保留换行）", () => {
+    const multiline = "echo a \\\n  && echo b   &&   echo c";
+    expect(toolCommand("execute", { command: multiline })).toBe(multiline);
+  });
+
+  it("kind 缺省（旧日志/粗桥）但 rawInput 有 command → 仍命中", () => {
+    expect(toolCommand(undefined, { command: "ls -la" })).toBe("ls -la");
+    expect(toolCommand(null, { command: "ls -la" })).toBe("ls -la");
+  });
+
+  it("非 execute kind 不命中（read/edit 等不渲染命令段）", () => {
+    expect(toolCommand("read", { command: "x" })).toBeNull();
+    expect(toolCommand("edit", { command: "x" })).toBeNull();
+  });
+
+  it("坏形状 / 空 command → null", () => {
+    expect(toolCommand("execute", {})).toBeNull();
+    expect(toolCommand("execute", { command: "  " })).toBeNull();
+    expect(toolCommand("execute", undefined)).toBeNull();
+    expect(toolCommand("execute", null)).toBeNull();
+    expect(toolCommand("execute", "ls")).toBeNull();
+    expect(toolCommand("execute", 42)).toBeNull();
+  });
+});
+
+// —— P36 R1：toolOutputFallback（rawOutput 兜底输出）——
+describe("toolOutputFallback", () => {
+  it("omp 形状 {content:[{type:text,text}]} → 取 text 拼接", () => {
+    expect(toolOutputFallback({ content: [{ type: "text", text: "hello" }], details: {} })).toBe("hello");
+    expect(toolOutputFallback({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] })).toBe("ab");
+  });
+
+  it("纯字符串 → 原样；空串 → null", () => {
+    expect(toolOutputFallback("plain out")).toBe("plain out");
+    expect(toolOutputFallback("")).toBeNull();
+  });
+
+  it("对象无 content → JSON pretty", () => {
+    expect(toolOutputFallback({ foo: "bar" })).toBe('{\n  "foo": "bar"\n}');
+  });
+
+  it("null/undefined/其他原始值 → null", () => {
+    expect(toolOutputFallback(null)).toBeNull();
+    expect(toolOutputFallback(undefined)).toBeNull();
+    expect(toolOutputFallback(42)).toBeNull();
+  });
+
+  it("omp details 私有结构不被解析进输出（只取 content text）", () => {
+    const out = toolOutputFallback({
+      content: [{ type: "text", text: "line1\nline2" }],
+      details: { totalLines: 2, secret: "internal" },
+    });
+    expect(out).toBe("line1\nline2");
   });
 });

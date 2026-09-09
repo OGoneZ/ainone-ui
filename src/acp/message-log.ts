@@ -27,6 +27,9 @@ export type BlockMsg =
       toolKind?: string;
       /** P30：工具原始入参（驱动参数副标题）；原样保留，旧日志缺省 */
       rawInput?: unknown;
+      /** P36 R1：工具原始出参（omp update 帧 {content:[{type:"text",text}],…}）——
+       *  content 无 text 输出时的兜底数据源；原样保留不解释，旧日志缺省 */
+      rawOutput?: unknown;
       content: ToolContent[];
       /** F-16-2（DEC-49）：工具耗时计时——startTs = tool_call 事件时间戳（写入即持久化）；
        *  ms = 收尾时封口的耗时毫秒。旧日志缺省 → 按 0 计不参与累加。 */
@@ -138,10 +141,11 @@ export function appendTool(blocks: BlockMsg[], tool: BlockMsg & { kind: "tool" }
   return [...blocks, tool];
 }
 
-/** 按 toolCallId 更新 tool block 的 status/title/toolKind/rawInput/content（找不到则原样返回）。
+/** 按 toolCallId 更新 tool block 的 status/title/toolKind/rawInput/rawOutput/content（找不到则原样返回）。
  *  F-16-2（DEC-49）：status 进入终态（completed/failed，error 为本地历史值）且块带
  *  startTs 时封口 ms = now - startTs。P30：toolKind/rawInput 仅在事件携带时覆盖（缺省保留旧值）。
  *  title upsert：协议 update 可带更完整标题（skill 流式补全场景），缺省保留旧值。
+ *  P36 R1：rawOutput 同款「携带才覆盖」（兜底输出数据源）。
  *  注：协议 kind 落块级字段名 toolKind（块 kind 是块类型判别符，不能覆盖）。 */
 export function updateTool(
   blocks: BlockMsg[],
@@ -149,7 +153,7 @@ export function updateTool(
   status: string | null,
   content: ToolContent[],
   now?: () => number,
-  patch?: { title?: string; toolKind?: string; rawInput?: unknown },
+  patch?: { title?: string; toolKind?: string; rawInput?: unknown; rawOutput?: unknown },
 ): BlockMsg[] {
   const idx = blocks.findIndex(
     (b) => b.kind === "tool" && b.toolCallId === toolCallId,
@@ -170,6 +174,7 @@ export function updateTool(
       ...(patch?.title !== undefined ? { title: patch.title } : {}),
       ...(patch?.toolKind !== undefined ? { toolKind: patch.toolKind } : {}),
       ...(patch && "rawInput" in patch ? { rawInput: patch.rawInput } : {}),
+      ...(patch && "rawOutput" in patch ? { rawOutput: patch.rawOutput } : {}),
       ...(finished && now ? { ms: Math.max(0, now() - b.startTs!) } : {}),
     };
   }

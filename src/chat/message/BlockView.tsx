@@ -8,7 +8,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import type { BlockMsg } from "@/acp/message-log";
 import type { ToolContent } from "@/acp/session-core";
-import { kindIcon, toolSubtitle } from "@/acp/toolDisplay";
+import { kindIcon, toolCommand, toolOutputFallback, toolSubtitle } from "@/acp/toolDisplay";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import { shouldAutoOpen } from "@/chat/logic/disclosure";
 import { MarkdownView } from "./MarkdownView";
@@ -145,6 +145,7 @@ function ToolBlock({
   content,
   toolKind,
   rawInput,
+  rawOutput,
   diffComments,
   onAddDiffComment,
   activityOverride,
@@ -156,6 +157,8 @@ function ToolBlock({
   /** P30：协议 ToolKind（read/edit/execute/…）+ 原始入参（参数副标题）；旧日志缺省 */
   toolKind?: string;
   rawInput?: unknown;
+  /** P36 R1：工具原始出参（content 无 text 输出时的兜底）；旧日志缺省 */
+  rawOutput?: unknown;
   startTs?: number;
   ms?: number;
   content: ToolContent[];
@@ -194,6 +197,12 @@ function ToolBlock({
   // P30 AC-2.3：kind 驱动图标（缺省回退扳手）+ rawInput 提炼参数副标题
   const KindIcon = kindIcon(toolKind);
   const subtitle = toolSubtitle(rawInput);
+  // P36 R1：execute 类两段式展开——命令段（rawInput.command 全文）+ 输出段。
+  // 输出优先级：content text（ToolTextView 原路径）→ rawOutput 兜底（omp 实测
+  // update 帧只有 rawOutput）→ 两者皆无时只显示命令段。
+  const command = toolCommand(toolKind, rawInput);
+  const hasTextContent = content.some((c) => c.kind === "text");
+  const outputFallback = !hasTextContent ? toolOutputFallback(rawOutput) : null;
   return (
     // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）
     <div className="tool" data-status={status}>
@@ -232,13 +241,45 @@ function ToolBlock({
         {timeLabel && <span className="tool-elapsed">{timeLabel}</span>}
         <span className="status">{TOOL_STATUS_LABEL[status] ?? status}</span>
       </div>
-      {open && content.length > 0 && (
+      {(open && command) || (open && (content.length > 0 || outputFallback)) ? (
         <div className="tool-body">
-          {content.map((c, i) => (
-            <ToolContentView key={i} content={c} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
-          ))}
+          {open && command && <CommandView command={command} />}
+          {open && outputFallback && <ToolTextView text={outputFallback} />}
+          {open &&
+            content.map((c, i) => (
+              <ToolContentView key={i} content={c} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+            ))}
         </div>
-      )}
+      ) : null}
+    </div>
+  );
+}
+
+/** P36 R1：命令段——rawInput.command 全文（保留换行，不截断）+ 复制小钮。
+ *  独立于输出段，视觉上是一个浅底等宽块。 */
+function CommandView({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="tool-command" data-testid="tool-command">
+      <pre className="tool-command-text">{command}</pre>
+      <button
+        type="button"
+        className="tool-command-copy"
+        aria-label="复制命令"
+        title="复制命令"
+        onClick={(e) => {
+          e.stopPropagation();
+          navigator.clipboard?.writeText(command).then(
+            () => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            },
+            () => {},
+          );
+        }}
+      >
+        {copied ? "已复制" : "复制"}
+      </button>
     </div>
   );
 }
@@ -313,6 +354,7 @@ export const BlockView = memo(function BlockView({
           status={block.status}
           toolKind={block.toolKind}
           rawInput={block.rawInput}
+          rawOutput={block.rawOutput}
           startTs={block.startTs}
           ms={block.ms}
           content={block.content}

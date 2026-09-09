@@ -70,6 +70,8 @@ export function applyEvent(
           // P30：协议 kind/rawInput 透传入块（kind 落 toolKind 避开块类型判别符；缺省不带键）
           ...(e.kind !== undefined ? { toolKind: e.kind } : {}),
           ...(e.rawInput !== undefined ? { rawInput: e.rawInput } : {}),
+          // P36 R1：rawOutput 兜底输出透传（缺省不带键）
+          ...(e.rawOutput !== undefined ? { rawOutput: e.rawOutput } : {}),
           content: e.content,
           // F-16-2（DEC-49）：记起始时间戳，收尾封口耗时
           startTs: now(),
@@ -90,6 +92,7 @@ export function applyEvent(
             ...(e.title !== undefined ? { title: e.title } : {}),
             ...(e.kind !== undefined ? { toolKind: e.kind } : {}),
             ...(e.rawInput !== undefined ? { rawInput: e.rawInput } : {}),
+            ...(e.rawOutput !== undefined ? { rawOutput: e.rawOutput } : {}),
           },
         ),
       };

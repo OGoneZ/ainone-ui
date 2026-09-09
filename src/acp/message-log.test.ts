@@ -219,4 +219,22 @@ describe("turn 内 block 追加 / 合并", () => {
     expect((overridden[0] as { toolKind?: string }).toolKind).toBe("edit");
     expect((overridden[0] as { rawInput?: unknown }).rawInput).toEqual({ file_path: "/x" });
   });
+
+  // P36 R1 AC-1.4/1.5：rawOutput 落盘往返无损 + updateTool 携带才覆盖
+  it("P36：rawOutput 序列化往返无损；updateTool 携带覆盖、不携带保留", () => {
+    const ompOutput = { content: [{ type: "text", text: "hello" }], details: { totalLines: 3 } };
+    const line = JSON.stringify({
+      role: "assistant",
+      blocks: [{ kind: "tool", toolCallId: "t1", title: "Terminal", status: "completed", content: [], rawOutput: ompOutput }],
+    });
+    const parsed = parseLine(line) as { blocks: Array<{ rawOutput?: unknown }> } | null;
+    expect(parsed).not.toBeNull();
+    expect(parsed!.blocks[0].rawOutput).toEqual(ompOutput);
+
+    const b = [{ ...tool("a") }];
+    const kept = updateTool(b, "a", "completed", [], undefined);
+    expect((kept[0] as { rawOutput?: unknown }).rawOutput).toBeUndefined();
+    const overridden = updateTool(b, "a", "completed", [], undefined, { rawOutput: ompOutput });
+    expect((overridden[0] as { rawOutput?: unknown }).rawOutput).toEqual(ompOutput);
+  });
 });

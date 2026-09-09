@@ -36,6 +36,9 @@ export type Outgoing =
       kind?: string;
       /** P30：工具原始入参（Bash→{command}、Edit→{file_path}…），驱动参数副标题；原样透传不解释 */
       rawInput?: unknown;
+      /** P36 R1：工具原始出参（omp update 帧实测 {content:[{type:"text",text}], details:{...}}），
+       *  content 无 text 输出时的兜底数据源；原样透传不解释（omp details 私有结构不解析） */
+      rawOutput?: unknown;
       content: ToolContent[];
     }
   | {
@@ -47,6 +50,8 @@ export type Outgoing =
       title?: string;
       kind?: string;
       rawInput?: unknown;
+      /** P36 R1：同 tool_call（协议 update 可携带 rawOutput 兜底输出） */
+      rawOutput?: unknown;
       content: ToolContent[];
     }
   | { type: "turn_stop"; stopReason: string }
@@ -605,6 +610,8 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
         // P30：kind/rawInput 透传（字段缺省时不带键，保持事件形状干净）
         ...(u.update.kind ? { kind: u.update.kind } : {}),
         ...("rawInput" in u.update ? { rawInput: u.update.rawInput } : {}),
+        // P36 R1：rawOutput 兜底透传（omp update 帧实测只有 rawOutput 无 content text）
+        ...("rawOutput" in u.update ? { rawOutput: u.update.rawOutput } : {}),
         content: toToolContent(u.update.content),
       });
       break;
@@ -618,6 +625,7 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
         ...(u.update.title ? { title: u.update.title } : {}),
         ...(u.update.kind ? { kind: u.update.kind } : {}),
         ...("rawInput" in u.update ? { rawInput: u.update.rawInput } : {}),
+        ...("rawOutput" in u.update ? { rawOutput: u.update.rawOutput } : {}),
         content: toToolContent(u.update.content),
       });
       break;
