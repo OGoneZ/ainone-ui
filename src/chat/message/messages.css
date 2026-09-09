@@ -29,6 +29,8 @@
 }
 
 /* P36 R3：工具卡「预览文件」按钮（头部 + 文件变更行共用）——hover 显现，不夺状态字 */
+/* P36 反馈修订：预览按钮常驻（不再 hover 才显现）——用户实测「不知道有这个功能」，
+ * 可发现性优先于界面安静。文字标签仍在，点击区域大；hover 仍给高亮反馈。 */
 .tool-preview-btn {
   flex-shrink: 0;
   display: inline-flex;
@@ -40,8 +42,7 @@
   color: var(--text-secondary);
   padding: 2px 4px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--motion-fast) ease;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
 }
 
 /* P36 用户反馈：纯眼睛图标发现性差——hover 显现时带「点击预览」文字标签 */
@@ -50,12 +51,6 @@
   line-height: 1;
   white-space: nowrap;
   color: var(--text-secondary);
-}
-
-.tool-head:hover .tool-preview-btn,
-.tool-preview-btn:focus-visible,
-.file-change-row:hover .tool-preview-btn {
-  opacity: 1;
 }
 
 .tool-preview-btn:hover {
