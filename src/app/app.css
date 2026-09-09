@@ -475,8 +475,9 @@ select {
  *  - 移动为主、压扁为辅：整体平移扛「看」的语义，斜眼 squash 只做次信号；
  *  - 平移与压缩必须同向叠加（挤过去），不能反向补偿——反向补偿会吃掉
  *    净位移，实测读作「原地哆嗦、两边收缩」（两轮翻车根因）；
- *  - 眨眼与扫视相位锁定（8.6 = 2 × 4.3）：眨眼只落在注视停留段，
- *    绝不砸在弹射/压扁半路上（实测随机相位会撞出双重形变的怪异感）；
+ *  - 眨眼与扫视同周期（8.6s）：一轮「看左→看右→回中」只眨一次，落在
+ *    末段回中停留段，绝不砸在弹射/压扁半路上（实测随机相位会撞出
+ *    双重形变的怪异感）；
  *  - 换向弹射 + overshoot 回弹，注视期轻微游移；
  *  - 身体跟随用呼吸（缩放）替代僵硬的左右倾。
  * 打字机 JS 侧在 useHeadlineTypewriter（打完停住），光标闪烁交给 CSS。 */
@@ -509,14 +510,14 @@ select {
 }
 
 /* 眨眼（scaleY 压扁）挂内层 .welcome-logo-lid——与扫视分离成两条时间线。
- * 周期 4.3s = 扫视 8.6s 的一半：眨眼相位与扫视**锁定**在注视段
- * （扫视 37%~46% 回中停留 ↔ 眨眼 74%~92% 闭合弹回；扫视 87%~100% 尾段
- * ↔ 眨眼 0%~22% 又一次），绝不砸在弹射/形变半路上——上一版互质随机
- * 相位实测会撞出「形变进行到一半又叠一次闭合」的怪异双重形变。 */
+ * 周期 8.6s = 扫视同周期：一轮「看左→看右→回中」只眨一次，眨眼相位锁定
+ * 在扫视**末段居中停留**（look 87%~100% ↔ 眨眼 85%~98%），绝不砸在
+ * 弹射/形变半路上——上一版互质随机相位实测会撞出「形变进行到一半又叠
+ * 一次闭合」的怪异双重形变。 */
 .welcome-logo-lid {
   transform-origin: 327px 172px;
   transform-box: view-box;
-  animation: welcome-logo-blink 4.3s ease-in-out infinite;
+  animation: welcome-logo-blink 8.6s ease-in-out infinite;
 }
 
 /* 扫视循环（8.6s）：大步幅平移（±26px）+ 斜眼 squash。
@@ -554,15 +555,15 @@ select {
   100% { transform: translate(0, 0) scale(1, 1); }
 }
 
-/* 眨眼循环（4.3s，= 扫视半周期）：微眯预告 → 闭合 → 快速弹回 → 过开回落。
- * 横向 1.03 微鼓是 squash-and-stretch（体积守恒），比单段压扁更有弹性。 */
+/* 眨眼循环（8.6s，与扫视同周期）：微眯预告 → 闭合 → 快速弹回 → 过开回落。
+ * 一轮只眨一次，落在扫视末段回中停留段（look 87% 起）。横向 1.03 微鼓是
+ * squash-and-stretch（体积守恒），比单段压扁更有弹性。 */
 @keyframes welcome-logo-blink {
-  0%, 74% { transform: scale(1, 1); }
-  80% { transform: scale(1.01, 0.85); }
-  86% { transform: scale(1.03, 0.08); }
-  92% { transform: scale(1.02, 1.07); }
-  97% { transform: scale(1, 1); }
-  100% { transform: scale(1, 1); }
+  0%, 85% { transform: scale(1, 1); }
+  89% { transform: scale(1.01, 0.85); }
+  93% { transform: scale(1.03, 0.08); }
+  96% { transform: scale(1.02, 1.07); }
+  98%, 100% { transform: scale(1, 1); }
 }
 
 .welcome-logo-tail {
@@ -979,6 +980,40 @@ button:disabled {
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* P38 版本卡头部动作排（检查更新 / 官方网站 / 更新日志，ml-auto 右对齐） */
+.settings-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* P38 版本卡按钮（检查更新/官网/更新日志同外观）——图标+文字横排不换行 */
+.settings-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bg-3);
+  padding: 0.45em 0.9em;
+  font-size: 0.9em;
+  font-family: inherit;
+  color: var(--text-primary);
+  background-color: var(--bg-1);
+}
+.settings-card-actions button:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+/* P38 按钮内图标（文字左侧，随文字大小，次要色） */
+.settings-link-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-right: 4px;
+  color: var(--text-secondary);
 }
 
 .settings-card-head h4 {

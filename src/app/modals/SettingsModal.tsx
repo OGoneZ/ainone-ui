@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Adapter, AdapterState, BridgeInfo, CliInstallInfo, AuthInfo } from "@/ipc/adapters";
 import { installBridge, installCli, refreshAdapterStatus, harnessConfigRead, harnessConfigSave, permissionModeRead, permissionModeSave } from "@/ipc/adapters";
 import { runtimeDiagnostics, runtimeSummaryLine } from "@/ipc/runtime";
-import { checkForUpdate, downloadAndInstall, isMacOS, openDownloadPage } from "@/ipc/updater";
+import { checkForUpdate, downloadAndInstall, isMacOS, openDownloadPage, openWebsite, openChangelog } from "@/ipc/updater";
 import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
 import { quickAskConfigGet, quickAskConfigSave, QUICK_ASK_DEFAULT_PROMPT, type QuickAskConfigView } from "@/ipc/quickask";
@@ -22,7 +22,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { ThemeAutoIcon, ThemeLightIcon, ThemeDarkIcon, ChevronDownIcon, CheckIcon } from "@/components/ui/icons";
+import { ThemeAutoIcon, ThemeLightIcon, ThemeDarkIcon, ChevronDownIcon, CheckIcon, WebsiteIcon, ChangelogIcon, RefreshIcon } from "@/components/ui/icons";
 import { Switch } from "@/components/ui/switch";
 
 interface Props {
@@ -814,22 +814,35 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
             <div className="settings-card">
               <div className="settings-card-head">
                 <h4>当前版本 {__APP_VERSION__}</h4>
-                {updateState.kind === "idle" && (
-                  <button
-                    data-testid="check-update"
-                    onClick={() => {
-                      setUpdateState({ kind: "checking" });
-                      void checkForUpdate().then((r) => {
-                        if (r.kind === "up-to-date") setUpdateState({ kind: "up-to-date" });
-                        else if (r.kind === "available")
-                          setUpdateState({ kind: "available", version: r.version ?? "", notes: r.notes ?? "", downloading: false, received: 0, total: null });
-                        else setUpdateState({ kind: "error", message: r.message ?? "未知错误" });
-                      });
-                    }}
-                  >
-                    检查更新
+                <span className="settings-card-actions">
+                  {/* P38 F-8-3：检查按钮恒显（error 态不再消失，可重试；仅下载中隐藏） */}
+                  {!(updateState.kind === "available" && updateState.downloading) && (
+                    <button
+                      data-testid="check-update"
+                      onClick={() => {
+                        setUpdateState({ kind: "checking" });
+                        void checkForUpdate().then((r) => {
+                          if (r.kind === "up-to-date") setUpdateState({ kind: "up-to-date" });
+                          else if (r.kind === "available")
+                            setUpdateState({ kind: "available", version: r.version ?? "", notes: r.notes ?? "", downloading: false, received: 0, total: null });
+                          else setUpdateState({ kind: "error", message: r.message ?? "未知错误" });
+                        });
+                      }}
+                    >
+                      <RefreshIcon className="settings-link-icon" />
+                      检查更新
+                    </button>
+                  )}
+                  {/* P38 官网 / 更新日志外链入口（与检查更新同排，样式同卡片文字按钮） */}
+                  <button data-testid="open-website" onClick={() => void openWebsite()}>
+                    <WebsiteIcon className="settings-link-icon" />
+                    官方网站
                   </button>
-                )}
+                  <button data-testid="open-changelog" onClick={() => void openChangelog()}>
+                    <ChangelogIcon className="settings-link-icon" />
+                    更新日志
+                  </button>
+                </span>
               </div>
               {updateState.kind === "checking" && <p className="settings-hint">正在检查…</p>}
               {updateState.kind === "up-to-date" && <p className="settings-hint">已是最新版本 ✓</p>}

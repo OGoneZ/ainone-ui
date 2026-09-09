@@ -45,7 +45,9 @@ import {
   PanelLeftOpen,
   Pencil,
   Plus,
+  RefreshCw,
   Repeat,
+  ScrollText,
   Search,
   Settings,
   Square,
@@ -114,6 +116,9 @@ export const ExpandIcon = Maximize2; // F-18-2 输入框全屏编辑
 export const ShrinkIcon = Minimize2; // F-18-2 退出全屏编辑
 export const DonateIcon = Coffee; // P22 打赏作者入口
 export const HelpIcon = CircleHelp; // P25 快捷键帮助入口
+export const WebsiteIcon = Globe; // P38 官网入口
+export const ChangelogIcon = ScrollText; // P38 更新日志入口
+export const RefreshIcon = RefreshCw; // P38 检查更新（重新刷新语义）
 export const ThemeAutoIcon = Monitor; // 主题·跟随系统
 export const ThemeLightIcon = Sun; // 主题·浅色
 export const ThemeDarkIcon = Moon; // 主题·深色

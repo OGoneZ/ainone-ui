@@ -32,6 +32,8 @@ vi.mock("@/ipc/quickask", async (importOriginal) => {
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+// P38：外链打开走 plugin-opener（jsdom 无 Tauri 运行时），mock 掉以断言调用
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/lib/logger", () => ({
   logger: { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -224,6 +226,39 @@ describe("SettingsModal", () => {
     expect(calls.some((c) => c.cmd === "adapters_save")).toBe(true);
     expect(onSaved).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("P38 官网 / 更新日志入口", () => {
+  it("版本卡渲染两个外链按钮，点击分别打开官网首页与更新日志页", async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    const websiteBtn = await screen.findByTestId("open-website");
+    const changelogBtn = screen.getByTestId("open-changelog");
+    expect(websiteBtn).toHaveTextContent("官方网站");
+    expect(changelogBtn).toHaveTextContent("更新日志");
+
+    await userEvent.setup().click(websiteBtn);
+    await userEvent.setup().click(changelogBtn);
+    // updater 封装层拼 URL：官网首页与 devlog hash 路由
+    expect(openUrl).toHaveBeenCalledWith("https://agent.zhubaoduo.com/");
+    expect(openUrl).toHaveBeenCalledWith("https://agent.zhubaoduo.com/#/devlog");
+  });
+
+  it("检查更新后按钮与外链均常驻（按钮不再因状态离开 idle 而消失）", async () => {
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    await screen.findByTestId("open-website");
+    // 触发检查更新（mock IPC 无 updater 命令 → check() 得 null = 最新）→
+    // 检查按钮恒显可重查，官网/更新日志入口不受检查状态影响
+    await userEvent.setup().click(screen.getByTestId("check-update"));
+    expect(await screen.findByText("已是最新版本 ✓")).toBeInTheDocument();
+    expect(screen.getByTestId("check-update")).toBeInTheDocument();
+    expect(screen.getByTestId("open-website")).toBeInTheDocument();
+    expect(screen.getByTestId("open-changelog")).toBeInTheDocument();
   });
 });
 

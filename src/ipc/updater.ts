@@ -52,7 +52,20 @@ export function isMacOS(): boolean {
   return navigator.userAgent.includes("Macintosh");
 }
 
-/** 打开下载页（macOS 降级路径 + 「前往 Release」入口）；官网门户站 */
+/** 官网门户站（官网 / 更新日志 / 下载页同域） */
+const WEBSITE_URL = "https://agent.zhubaoduo.com";
+
+/** 官网首页（设置页「官方网站」入口） */
+export async function openWebsite(): Promise<void> {
+  await openUrl(`${WEBSITE_URL}/`);
+}
+
+/** 更新日志（官网 devlog 页，hash 路由） */
+export async function openChangelog(): Promise<void> {
+  await openUrl(`${WEBSITE_URL}/#/devlog`);
+}
+
+/** 打开下载页（macOS 降级路径 + 「前往 Release」入口） */
 export async function openDownloadPage(): Promise<void> {
-  await openUrl("https://agent.zhubaoduo.com/");
+  await openUrl(`${WEBSITE_URL}/`);
 }
