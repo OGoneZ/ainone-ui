@@ -3,6 +3,12 @@
 
 import { invoke, Channel } from "@tauri-apps/api/core";
 
+/** 内置默认解释提示词（P35 R2 修订）：设置页「解释提示词」框无自定义值时
+ *  预填此全文，用户可逐字编辑或整段重写。运行时事实源是 Rust
+ *  quickask::QUICK_ASK_SYSTEM_PROMPT——两侧文本需保持同步，改动须同改。 */
+export const QUICK_ASK_DEFAULT_PROMPT =
+  "你是一个简洁的解释助手。用户会选中一段术语、代码、报错或句子。请用与选中内容相同的语言，简短清晰地解释：先用一句话给出定义或结论，再用 markdown 列表给出 2-4 个要点，必要时给一个简短示例。使用 markdown 格式。不要开场白，不要复述问题。";
+
 export interface QuickAskConfigView {
   base_url: string;
   model: string;
