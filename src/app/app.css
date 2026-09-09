@@ -470,14 +470,16 @@ select {
 
 /* —— P30 欢迎页动效：logo 悬浮呼吸 + 橙格扫视眨眼 + 气泡尾摆 + 宣传语打字机光标 ——
  * 图形 path 不动，只挂 transform/opacity/fill 动画；节奏刻意错开（呼吸 4.4s /
- * 扫视 8.6s / 尾摆 3.4s）避免整体机械感。
+ * 扫视 6s / 尾摆 3.4s）避免整体机械感。
  * 灵动感参照动画十二法则（社区通识）：
  *  - 移动为主、压扁为辅：整体平移扛「看」的语义，斜眼 squash 只做次信号；
  *  - 平移与压缩必须同向叠加（挤过去），不能反向补偿——反向补偿会吃掉
  *    净位移，实测读作「原地哆嗦、两边收缩」（两轮翻车根因）；
- *  - 眨眼与扫视同周期（8.6s）：一轮「看左→看右→回中」只眨一次，落在
- *    末段回中停留段，绝不砸在弹射/压扁半路上（实测随机相位会撞出
+ *  - 眨眼与扫视同周期（6s）：一轮「看左→看右→回中」只眨一次，落在
+ *    回中后的居中停留段，绝不砸在弹射/压扁半路上（实测随机相位会撞出
  *    双重形变的怪异感）；
+ *  - 扫视要快（弹道式 dart ~0.2~0.4s）、注视要长，左→右换向不回中
+ *    直接跨——匀速慢移 + 中途停顿读作木讷（bloop animation 眼动教程）；
  *  - 换向弹射 + overshoot 回弹，注视期轻微游移；
  *  - 身体跟随用呼吸（缩放）替代僵硬的左右倾。
  * 打字机 JS 侧在 useHeadlineTypewriter（打完停住），光标闪烁交给 CSS。 */
@@ -506,64 +508,65 @@ select {
    * g 的坐标系即 viewBox 原坐标系，橙格几何范围 256~398 x 112~232 → 中心 327,172 */
   transform-origin: 327px 172px;
   transform-box: view-box;
-  animation: welcome-logo-look 8.6s ease-in-out infinite;
+  animation: welcome-logo-look 6s ease-in-out infinite;
 }
 
 /* 眨眼（scaleY 压扁）挂内层 .welcome-logo-lid——与扫视分离成两条时间线。
- * 周期 8.6s = 扫视同周期：一轮「看左→看右→回中」只眨一次，眨眼相位锁定
- * 在扫视**末段居中停留**（look 87%~100% ↔ 眨眼 85%~98%），绝不砸在
+ * 周期 6s = 扫视同周期：一轮「看左→看右→回中」只眨一次，眨眼相位锁定
+ * 在回中后的居中停留段（look 44%~100% ↔ 眨眼 50%~60%），绝不砸在
  * 弹射/形变半路上——上一版互质随机相位实测会撞出「形变进行到一半又叠
  * 一次闭合」的怪异双重形变。 */
 .welcome-logo-lid {
   transform-origin: 327px 172px;
   transform-box: view-box;
-  animation: welcome-logo-blink 8.6s ease-in-out infinite;
+  animation: welcome-logo-blink 6s ease-in-out infinite;
 }
 
-/* 扫视循环（8.6s）：大步幅平移（±26px）+ 斜眼 squash。
- * 关键教训（两轮实测）：平移与压缩必须**同向叠加**——看左时 translate
- * -26px、scaleX 0.76 挤过去，两侧收缩的同时整体确实「挪走」了；此前
- * 两版把 translate 反向来补偿压缩（+5px/+7px），净位移被吃掉，观感是
- * 「原地哆嗦、两边收缩、挪了一点点」。
- * 现在看左：左缘 256-26-17≈213、右缘 398-26-17≈355（整体左探 ~43px，
- * 同时变窄 34px）；斜眼感来自「朝向侧探出 + 收窄」，不再追求单侧钉住。
- * 换向弹射 + overshoot（先冲 0.68 / ±30px 再回落），注视期游移 ±1px。 */
+/* 扫视循环（6s）：大步幅平移（±26px）+ 斜眼 squash。
+ * 灵动节奏（社区通识，bloop animation 眼动教程 + 十二法则 timing）：
+ *  - 扫视是弹道式的——dart 只占 2~4 帧，灵动来自「快甩 vs 长注视」的反差，
+ *    匀速慢移读作木讷。故弹射段收紧到 ~0.36s，注视段放长。
+ *  - 左→右换向不回中、一帧过渡直接跨（eye dart left-to-right 惯例），
+ *    中间停顿会把「打量」读成「迟疑」。
+ *  - 平移与压缩必须**同向叠加**——看左时 translate -26px、scaleX 0.76
+ *    挤过去，两侧收缩的同时整体确实「挪走」了；此前两版把 translate
+ *    反向来补偿压缩（+5px/+7px），净位移被吃掉，观感是
+ *    「原地哆嗦、两边收缩、挪了一点点」。
+ *  - 换向弹射 + overshoot（先冲 0.68 / ±31px 再回落），注视期游移 ±1px；
+ *    回中后进入居中停留段，眨眼就落在这里。 */
 @keyframes welcome-logo-look {
-  /* 看左：快速弹射（平移与压缩同向，整体挤过去） */
+  /* 看左：快速弹射（0→6% ≈ 0.36s，平移与压缩同向，整体挤过去） */
   0% { transform: translate(0, 0) scale(1, 1); }
-  4% { transform: translate(-10px, 0) scale(0.94, 1); }
-  8% { transform: translate(-30px, 0) scale(0.68, 1.02); }
-  13% { transform: translate(-26px, 0) scale(0.76, 1.03); }
+  2% { transform: translate(-10px, 0) scale(0.94, 1); }
+  4% { transform: translate(-31px, 0) scale(0.66, 1.02); }
+  6% { transform: translate(-26px, 0) scale(0.76, 1.03); }
   /* 注视左：斜眼保持 + 轻微游移 */
-  22% { transform: translate(-26px, 0) scale(0.76, 1.03); }
-  26% { transform: translate(-25px, 0.6px) scale(0.78, 1); }
-  /* 回中：恢复方眼 */
-  32% { transform: translate(2px, 0) scale(1.01, 1); }
-  37% { transform: translate(0, 0) scale(1, 1); }
-  46% { transform: translate(0, 0) scale(1, 1); }
-  /* 看右：平移与压缩同向（挤过去） */
-  50% { transform: translate(10px, 0) scale(0.94, 1); }
-  54% { transform: translate(30px, 0) scale(0.68, 1.02); }
-  58% { transform: translate(26px, 0) scale(0.76, 1.03); }
+  15% { transform: translate(-26px, 0) scale(0.76, 1.03); }
+  18% { transform: translate(-25px, 0.6px) scale(0.78, 1); }
+  /* 不回中：直接甩到右（18%→21% 仅 0.18s，中途无停顿） */
+  21% { transform: translate(31px, 0) scale(0.66, 1.02); }
+  24% { transform: translate(26px, 0) scale(0.76, 1.03); }
   /* 注视右：斜眼保持 + 轻微游移 */
-  68% { transform: translate(26px, 0) scale(0.76, 1.03); }
-  72% { transform: translate(25px, -0.6px) scale(0.78, 1); }
-  /* 回中 + 余韵微晃 */
-  78% { transform: translate(-2px, 0) scale(1.01, 1); }
-  83% { transform: translate(-0.5px, 0) scale(1, 1); }
-  87% { transform: translate(0, 0) scale(1, 1); }
+  33% { transform: translate(26px, 0) scale(0.76, 1.03); }
+  36% { transform: translate(25px, -0.6px) scale(0.78, 1); }
+  /* 快速回中 + 反向 overshoot */
+  40% { transform: translate(-3px, 0) scale(1.01, 1); }
+  44% { transform: translate(0, 0) scale(1, 1); }
+  /* 居中停留到循环末（眨眼发生在此段），无缝衔接下一轮看左 */
   100% { transform: translate(0, 0) scale(1, 1); }
 }
 
-/* 眨眼循环（8.6s，与扫视同周期）：微眯预告 → 闭合 → 快速弹回 → 过开回落。
- * 一轮只眨一次，落在扫视末段回中停留段（look 87% 起）。横向 1.03 微鼓是
- * squash-and-stretch（体积守恒），比单段压扁更有弹性。 */
+/* 眨眼循环（6s，与扫视同周期）：微眯预告 → 闭合 → 快速弹回 → 过开回落。
+ * 一轮只眨一次，落在回中后的居中停留段（look 44% 起）。全程 ~0.5s——
+ * 社区惯例眨眼约 6 帧（0.25s），要点就是「快」，慢眨眼是木讷感来源；
+ * logo 体积大，取惯例的两倍时长避免抖动感。
+ * 横向 1.03 微鼓是 squash-and-stretch（体积守恒），比单段压扁更有弹性。 */
 @keyframes welcome-logo-blink {
-  0%, 85% { transform: scale(1, 1); }
-  89% { transform: scale(1.01, 0.85); }
-  93% { transform: scale(1.03, 0.08); }
-  96% { transform: scale(1.02, 1.07); }
-  98%, 100% { transform: scale(1, 1); }
+  0%, 50% { transform: scale(1, 1); }
+  52.5% { transform: scale(1.01, 0.85); }
+  55% { transform: scale(1.03, 0.08); }
+  58% { transform: scale(1.02, 1.07); }
+  60%, 100% { transform: scale(1, 1); }
 }
 
 .welcome-logo-tail {
