@@ -46,7 +46,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { resolveHistoryOpen, TERMINAL_ADAPTER_ID, type Tab } from "@/app/logic/tabs";
+import { resolveHistoryOpen, resolveTerminalCwd, TERMINAL_ADAPTER_ID, type Tab } from "@/app/logic/tabs";
 import {
   setExternalDragPayload,
   takeExternalDragPayload,
@@ -289,8 +289,10 @@ function App() {
     const key = `tab-${nextKey.current++}`;
     const dir = axis === "row" ? DockLocation.RIGHT : DockLocation.BOTTOM;
     if (src.kind === "terminal") {
+      // P36 R4：分屏派生终端同样走 cwd 兜底（workspaceId 反查）
+      const splitCwd = resolveTerminalCwd(src.cwd, src.workspaceId, workspaces);
       addTabToModel(
-        { key, adapterId: TERMINAL_ADAPTER_ID, title: "终端", workspaceId: src.workspaceId, cwd: src.cwd, kind: "terminal" },
+        { key, adapterId: TERMINAL_ADAPTER_ID, title: "终端", workspaceId: src.workspaceId, cwd: splitCwd, kind: "terminal" },
         dir,
         activeKey,
       );
@@ -943,8 +945,14 @@ function App() {
   }
 
   /** 新建终端 tab（P23 F-23-1）：与 harness session 同级；落会话索引供侧栏恢复
-   *  （终端无「首条消息」时机，创建即落；adapter_id 固定 terminal） */
+   *  （终端无「首条消息」时机，创建即落；adapter_id 固定 terminal）
+   *  P36 R4：cwd 空时按 workspaceId 反查 workspaces.cwd 兜底；仍无 → toast
+   *  fail loud（文件树不可用显式告知），不静默产出「无工作区」终端。 */
   function newTerminalTab(workspaceId?: string | null, cwd?: string) {
+    const resolvedCwd = resolveTerminalCwd(cwd, workspaceId, workspaces);
+    if (resolvedCwd === undefined) {
+      toast.warning("终端未绑定工作目录：文件树不可用（可右键工作区→新建终端绑定目录）");
+    }
     const key = `tab-${nextKey.current++}`;
     const sessionId = `term-${key}`;
     addTabToModel(
@@ -954,7 +962,7 @@ function App() {
         sessionId,
         title: "终端",
         workspaceId: workspaceId ?? null,
-        cwd,
+        cwd: resolvedCwd,
         kind: "terminal",
       },
       DockLocation.CENTER,
@@ -964,7 +972,7 @@ function App() {
       session_id: sessionId,
       adapter_id: TERMINAL_ADAPTER_ID,
       title: "终端",
-      cwd: cwd ?? "",
+      cwd: resolvedCwd ?? "",
       workspace_id: workspaceId ?? null,
       kind: "terminal",
       mtime_ms: Date.now(),
@@ -972,7 +980,8 @@ function App() {
   }
 
   function openFromHistory(entry: SessionEntry) {
-    const r = resolveHistoryOpen(tabs, entry, `tab-${nextKey.current}`);
+    // P36 R4：历史终端条目 cwd 空 → 按 workspace_id 反查兜底（resolveHistoryOpen 内）
+    const r = resolveHistoryOpen(tabs, entry, `tab-${nextKey.current}`, workspaces);
     if (r.newTab) {
       nextKey.current++;
       addTabToModel(r.newTab, DockLocation.CENTER, activeKey);

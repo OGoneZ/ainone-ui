@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findTabBySession, resolveHistoryOpen, type Tab } from "./tabs";
+import { findTabBySession, resolveHistoryOpen, resolveTerminalCwd, type Tab } from "./tabs";
 
 function tab(key: string, sessionId?: string): Tab {
   return { key, adapterId: "omp", sessionId, title: "t" };
@@ -86,5 +86,46 @@ describe("终端 Tab（P23）", () => {
     const r = resolveHistoryOpen([], entry("s-9", "omp", "x"), "k-new");
     expect(r.newTab?.kind).toBeUndefined();
     expect(r.newTab?.adapterId).toBe("omp");
+  });
+});
+
+// —— P36 R4：resolveTerminalCwd 兜底解析 ——
+describe("resolveTerminalCwd（P36 R4）", () => {
+  const workspaces = [
+    { id: "ws-1", cwd: "/home/u/proj" },
+    { id: "ws-2", cwd: "/home/u/other" },
+  ];
+
+  it("cwd 非空直用（优先级最高）", () => {
+    expect(resolveTerminalCwd("/x", "ws-1", workspaces)).toBe("/x");
+    expect(resolveTerminalCwd("/x", null, workspaces)).toBe("/x");
+  });
+
+  it("cwd 空串/undefined → workspaceId 反查 workspaces.cwd", () => {
+    expect(resolveTerminalCwd("", "ws-2", workspaces)).toBe("/home/u/other");
+    expect(resolveTerminalCwd(undefined, "ws-1", workspaces)).toBe("/home/u/proj");
+  });
+
+  it("cwd 与 workspaceId 都无效 → undefined（调用方 fail loud）", () => {
+    expect(resolveTerminalCwd("", null, workspaces)).toBeUndefined();
+    expect(resolveTerminalCwd("", "ws-missing", workspaces)).toBeUndefined();
+    expect(resolveTerminalCwd("", "ws-1", undefined)).toBeUndefined();
+  });
+
+  it("AC-4.3 resolveHistoryOpen 历史终端条目 cwd 空串 + workspace_id → 反查兜底", () => {
+    const r = resolveHistoryOpen(
+      [],
+      {
+        session_id: "term-tab-1",
+        adapter_id: "terminal",
+        title: "终端",
+        cwd: "",
+        workspace_id: "ws-1",
+        kind: "terminal",
+      },
+      "k-new",
+      workspaces,
+    );
+    expect(r.newTab?.cwd).toBe("/home/u/proj");
   });
 });
