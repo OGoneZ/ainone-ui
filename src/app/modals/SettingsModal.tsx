@@ -134,6 +134,11 @@ function sourceBadge(source: string): { text: string; auto: boolean } | null {
   return null; // manual / 空 = 自定义
 }
 
+/** P35 R2：解释提示词占位（内置默认语义说明；运行时事实源是 Rust QUICK_ASK_SYSTEM_PROMPT，
+ *  此处为同义摘要——用户清空输入即恢复该默认行为） */
+const QUICK_ASK_PROMPT_PLACEHOLDER =
+  "（默认）简洁解释助手：一句话定义 + 2-4 个要点 + 简短示例，跟随选中内容语言，markdown 输出。可在此自定义你的提示词，清空即恢复默认。";
+
 /** P29：四态 × 认证态 → 状态行文案与颜色 class（卡片状态徽标的唯一渲染点） */
 function statusLine(a: EditableAdapter): { text: string; cls: string } {
   if (a.state === null) return { text: "探测中…", cls: "" };
@@ -260,9 +265,12 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     has_api_key: false,
     protocol: "openai",
     source: "",
+    system_prompt: "",
   });
   const [qaKey, setQaKey] = useState("");
   const [qaMsg, setQaMsg] = useState<string | null>(null);
+  // P35 R2：解释提示词草稿（打开设置时从配置回显；空 = 内置默认）
+  const [qaPrompt, setQaPrompt] = useState("");
   // P22 语音服务配置
   const [asr, setAsr] = useState<AsrConfigView>({ base_url: "", model: "", has_api_key: false });
   const [asrKey, setAsrKey] = useState("");
@@ -276,12 +284,17 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     setAsrMsg(null);
     setQaKey("");
     setAsrKey("");
+    setQaPrompt("");
     invoke<Adapter[]>("adapters_list")
       .then((list) => setItems(list.map(toEditable)))
       .catch((e) => setError(`读取适配器失败：${String(e)}`))
       .finally(() => setLoading(false));
     quickAskConfigGet()
-      .then((v) => setQa(v ?? { base_url: "", model: "", timeout_ms: 30000, has_api_key: false, protocol: "openai", source: "" }))
+      .then((v) => {
+        setQa(v ?? { base_url: "", model: "", timeout_ms: 30000, has_api_key: false, protocol: "openai", source: "", system_prompt: "" });
+        // P35 R2：提示词草稿随配置回显（空 = 内置默认占位）
+        setQaPrompt(v?.system_prompt ?? "");
+      })
       .catch(() => {});
     asrConfigGet()
       .then((v) => setAsr(v ?? { base_url: "", model: "", has_api_key: false }))
@@ -571,6 +584,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
         model: qa.model,
         timeout_ms: qa.timeout_ms,
         api_key: qaKey,
+        system_prompt: qaPrompt,
       });
       setQaKey("");
       setQaMsg("快问模型已保存");
@@ -929,6 +943,18 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                       placeholder={qa.has_api_key ? "已配置（留空不改）" : "sk-…"}
                       value={qaKey}
                       onChange={(e) => setQaKey(e.target.value)}
+                    />
+                  </label>
+                  {/* P35 R2：解释提示词——回显当前自定义值，空 = 内置默认（placeholder 展示语义）；
+                      保存随「保存」按钮走 quickask_config_save，下一次快速解释即生效 */}
+                  <label className="ns-label">
+                    解释提示词（清空 = 恢复默认）
+                    <textarea
+                      rows={3}
+                      data-testid="qa-prompt"
+                      placeholder={QUICK_ASK_PROMPT_PLACEHOLDER}
+                      value={qaPrompt}
+                      onChange={(e) => setQaPrompt(e.target.value)}
                     />
                   </label>
                   {qaMsg && <p className="ok" style={{ color: "var(--success)" }}>{qaMsg}</p>}

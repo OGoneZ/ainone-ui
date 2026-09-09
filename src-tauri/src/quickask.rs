@@ -71,6 +71,9 @@ pub struct QuickAskConfig {
     /// 来源标记（空/“manual” = 手动；auto:claude-code / auto:codex = 自动探测）
     #[serde(default)]
     pub source: QaSource,
+    /// P35 R2：自定义解释提示词（空/缺失 = 用 QUICK_ASK_SYSTEM_PROMPT 内置默认）
+    #[serde(default)]
+    pub system_prompt: String,
 }
 
 impl QuickAskConfig {
@@ -82,6 +85,16 @@ impl QuickAskConfig {
             timeout_ms: default_timeout_ms(),
             protocol: QaProtocol::default(),
             source: QaSource::default(),
+            system_prompt: String::new(),
+        }
+    }
+
+    /// 生效提示词：自定义非空用自定义，否则内置默认（R2.1 回退语义唯一出口）
+    pub fn effective_system_prompt(&self) -> &str {
+        if self.system_prompt.trim().is_empty() {
+            QUICK_ASK_SYSTEM_PROMPT
+        } else {
+            &self.system_prompt
         }
     }
 }
@@ -96,6 +109,8 @@ pub struct QuickAskConfigView {
     pub protocol: String,
     /// "" = 手动配置；"auto:claude-code" / "auto:codex" = 自动探测来源
     pub source: String,
+    /// P35 R2：当前生效提示词（自定义值；空 = 前端按内置默认回显占位）
+    pub system_prompt: String,
 }
 
 /// 前端保存的配置（api_key 为 Option：None/空串 = 保留既有密钥）
@@ -109,6 +124,9 @@ pub struct QuickAskConfigInput {
     pub timeout_ms: u64,
     #[serde(default)]
     pub api_key: String,
+    /// P35 R2：空 = 恢复内置默认
+    #[serde(default)]
+    pub system_prompt: String,
 }
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -195,6 +213,7 @@ pub fn quickask_config_get(app: tauri::AppHandle) -> Result<QuickAskConfigView, 
         has_api_key: !c.api_key.is_empty(),
         protocol: c.protocol.as_str().to_string(),
         source: c.source.0,
+        system_prompt: c.system_prompt,
     })
 }
 
@@ -210,6 +229,8 @@ pub fn quickask_config_save(app: tauri::AppHandle, input: QuickAskConfigInput) -
     };
     // 用户显式保存 → 手动来源（自动探测不再覆盖）
     c.source = QaSource("manual".to_string());
+    // P35 R2：提示词——显式保存即全量覆盖（清空 = 恢复内置默认，trim 后为空）
+    c.system_prompt = input.system_prompt.trim().to_string();
     // apiKey：仅显式填入时覆盖（留空 = 保留既有密钥）
     let key = input.api_key.trim().to_string();
     if !key.is_empty() {
@@ -233,12 +254,23 @@ pub fn chat_completions_url(base_url: &str) -> String {
 /// 保持简短，用选中内容的语言回答。
 pub const QUICK_ASK_SYSTEM_PROMPT: &str = "你是一个简洁的解释助手。用户会选中一段术语、代码、报错或句子。请用与选中内容相同的语言，简短清晰地解释：先用一句话给出定义或结论，再用 markdown 列表给出 2-4 个要点，必要时给一个简短示例。使用 markdown 格式。不要开场白，不要复述问题。";
 
-/// 纯函数：拼 OpenAI 兼容请求体。
+/// 纯函数：拼 OpenAI 兼容请求体（P35 R2：system 用配置生效提示词，缺省回落内置）。
 pub fn build_chat_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
         "messages": [
             { "role": "system", "content": QUICK_ASK_SYSTEM_PROMPT },
+            { "role": "user", "content": text },
+        ],
+    })
+}
+
+/// 纯函数：拼 OpenAI 兼容请求体（带配置上下文版——quick_ask 实际调用）。
+pub fn build_chat_body_with(cfg: &QuickAskConfig, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": cfg.model,
+        "messages": [
+            { "role": "system", "content": cfg.effective_system_prompt() },
             { "role": "user", "content": text },
         ],
     })
@@ -259,9 +291,19 @@ pub fn classify_response(status: u16, body: &str) -> Result<String, String> {
     }
 }
 
-/// 纯函数：拼 anthropic /v1/messages 请求体。
+/// 纯函数：拼 anthropic /v1/messages 请求体（P35 R2：system 用配置生效提示词）。
 /// max_tokens 16384：给思考块留足预算（实测 glm-5.3-flash 思考消耗可达数百块），
 /// 解释类回答本身很短，上限仅防极端跑飞；OpenAI 协议则不带该字段（服务端默认）。
+pub fn build_anthropic_body_with(cfg: &QuickAskConfig, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": cfg.model,
+        "max_tokens": 16384,
+        "system": cfg.effective_system_prompt(),
+        "messages": [{ "role": "user", "content": text }],
+    })
+}
+
+/// 纯函数：拼 anthropic /v1/messages 请求体（无配置版，内置默认提示词）。
 pub fn build_anthropic_body(model: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
         "model": model,
@@ -330,11 +372,11 @@ pub async fn call_quick_ask(
     let (url, body) = match cfg.protocol {
         QaProtocol::Anthropic => (
             harness_probe::anthropic_messages_url(&cfg.base_url),
-            build_anthropic_body(&cfg.model, text),
+            build_anthropic_body_with(cfg, text),
         ),
         QaProtocol::Openai => (
             chat_completions_url(&cfg.base_url),
-            build_chat_body(&cfg.model, text),
+            build_chat_body_with(cfg, text),
         ),
     };
     let mut body = body;
@@ -496,6 +538,45 @@ mod tests {
         assert!(classify_anthropic_response(502, "x").unwrap_err().contains("502"));
     }
 
+    // —— P35 R2 自定义提示词 ——
+
+    fn qa_cfg(prompt: &str) -> QuickAskConfig {
+        QuickAskConfig {
+            base_url: "https://x.com/v1".into(),
+            api_key: String::new(),
+            model: "m1".into(),
+            timeout_ms: default_timeout_ms(),
+            protocol: QaProtocol::Openai,
+            source: QaSource::default(),
+            system_prompt: prompt.into(),
+        }
+    }
+
+    #[test]
+    fn custom_prompt_used_in_both_protocols() {
+        // AC2.1：配置了自定义提示词 → 两协议请求体的 system 均为自定义值
+        let cfg = qa_cfg("用诗歌解释");
+        let o = build_chat_body_with(&cfg, "hi");
+        assert_eq!(o["messages"][0]["content"], "用诗歌解释");
+        let a = build_anthropic_body_with(&cfg, "hi");
+        assert_eq!(a["system"], "用诗歌解释");
+    }
+
+    #[test]
+    fn empty_prompt_falls_back_to_builtin() {
+        // AC2.1/2.2：缺失/空白 → 回落内置默认（trim 空白也算空）
+        let blank = qa_cfg("   ");
+        assert_eq!(build_chat_body_with(&blank, "hi")["messages"][0]["content"], QUICK_ASK_SYSTEM_PROMPT);
+        assert_eq!(build_anthropic_body_with(&blank, "hi")["system"], QUICK_ASK_SYSTEM_PROMPT);
+    }
+
+    #[test]
+    fn deserializes_legacy_config_without_prompt_field() {
+        // 旧 quickask.json 无 system_prompt 字段 → serde default 兜底不炸
+        let cfg: QuickAskConfig = serde_json::from_str(r#"{"base_url":"https://x","model":"m"}"#).unwrap();
+        assert_eq!(cfg.effective_system_prompt(), QUICK_ASK_SYSTEM_PROMPT);
+    }
+
     // 超时：本地起一个「永不应答」的 socket，用 200ms 短超时验证 is_timeout 分支。
     #[tokio::test]
     async fn call_quick_ask_times_out() {
@@ -516,6 +597,7 @@ mod tests {
             timeout_ms: 200,
             protocol: QaProtocol::default(),
             source: QaSource::default(),
+            system_prompt: String::new(),
         };
         let channel = tauri::ipc::Channel::new(|_| Ok(()));
         let err = call_quick_ask(&cfg, "hi", &channel).await.unwrap_err();

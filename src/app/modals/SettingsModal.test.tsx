@@ -18,6 +18,7 @@ vi.mock("@/ipc/quickask", () => ({
     has_api_key: false,
     protocol: "openai",
     source: "",
+    system_prompt: "",
   }),
   quickAskConfigSave: vi.fn().mockResolvedValue(undefined),
 }));
@@ -102,6 +103,7 @@ describe("SettingsModal", () => {
       has_api_key: true,
       protocol: "anthropic",
       source: "auto:claude-code",
+      system_prompt: "",
     });
     mockTauriIpc({ handlers: defaultHandlers() });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
@@ -137,6 +139,49 @@ describe("SettingsModal", () => {
 
     expect(await screen.findByText(/id 与 program/)).toBeInTheDocument();
     expect(calls.some((c) => c.cmd === "adapters_save")).toBe(false);
+  });
+
+  it("P35 R2 解释提示词：渲染 textarea，编辑后保存随 quickAskConfigSave 携带 prompt（AC2.3）", async () => {
+    const { quickAskConfigSave } = await import("@/ipc/quickask");
+    const saved: unknown[] = [];
+    vi.mocked(quickAskConfigSave).mockImplementation(async (input) => {
+      saved.push(input);
+    });
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("more-toggle"));
+    // 回显：自定义提示词为空 → textarea 值为空、placeholder 展示默认语义
+    const promptBox = screen.getByTestId("qa-prompt") as HTMLTextAreaElement;
+    expect(promptBox.value).toBe("");
+    expect(promptBox.placeholder).toContain("默认");
+
+    // 编辑提示词并保存 → quickAskConfigSave 收到该提示词
+    await user.type(promptBox, "用面试官口吻解释");
+    await user.click(await screen.findByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect((saved[0] as { system_prompt: string }).system_prompt).toBe("用面试官口吻解释");
+  });
+
+  it("P35 R2 解释提示词：配置已有自定义值 → 打开设置回显该值（AC2.3 回显）", async () => {
+    const { quickAskConfigGet } = await import("@/ipc/quickask");
+    vi.mocked(quickAskConfigGet).mockResolvedValueOnce({
+      base_url: "https://gw.example.com",
+      model: "m",
+      timeout_ms: 30000,
+      has_api_key: true,
+      protocol: "openai",
+      source: "manual",
+      system_prompt: "已保存的提示词",
+    });
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("more-toggle"));
+    const promptBox = (await screen.findByTestId("qa-prompt")) as HTMLTextAreaElement;
+    expect(promptBox.value).toBe("已保存的提示词");
   });
 
   it("保存成功 → 调 adapters_save 并回调 onSaved/onClose", async () => {
