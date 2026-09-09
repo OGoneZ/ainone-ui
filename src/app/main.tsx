@@ -18,7 +18,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { DemoApp } from "@/demo/DemoApp";
-import { attach, installConsoleForward } from "@/lib/logger";
+import { attach, installConsoleForward, formatReactError, logger } from "@/lib/logger";
 import "@/index.css"; // Tailwind v4 + 设计令牌层（P7 F-7-1/F-7-2）
 // P11：katex 公式字体样式（Streamdown math 插件要求）
 import "flexlayout-react/style/light.css"; // P10 分屏基础样式（主题色映射见 index.css）
@@ -33,6 +33,16 @@ if (isTauri) {
 
 const demoMode = new URLSearchParams(window.location.search).has("demo");
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>{demoMode ? <DemoApp /> : <App />}</React.StrictMode>,
-);
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
+  // React 19 错误钩子：渲染期异常（onCaughtError，含 ErrorBoundary 捕获的）与
+  // 未捕获异常都带完整 Error 落盘。默认实现把 Error 打成 {}，日志无从排查
+  // （2026-09-09 预览崩溃事故：日志只见 {}，根因定位花了一小时）。
+  onCaughtError: (error, info) => {
+    if (isTauri) logger.error("react", formatReactError(error, info?.componentStack));
+    else console.error(formatReactError(error, info?.componentStack));
+  },
+  onUncaughtError: (error, info) => {
+    if (isTauri) logger.error("react", formatReactError(error, info?.componentStack));
+    else console.error(formatReactError(error, info?.componentStack));
+  },
+}).render(<React.StrictMode>{demoMode ? <DemoApp /> : <App />}</React.StrictMode>);

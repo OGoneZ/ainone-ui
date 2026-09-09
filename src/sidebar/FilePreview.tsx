@@ -5,7 +5,8 @@
 // 关闭：× / Esc；非模态（左侧消息区仍可滚动）。
 // P16a：右上角全屏切换；左缘拖拽手柄调宽（280px~80% 窗宽，非全屏态生效）。
 
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, Component } from "react";
+import type { ErrorInfo, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -17,7 +18,7 @@ import { math } from "@streamdown/math";
 import { XIcon, FileTextIcon } from "lucide-react";
 import { MaximizeIcon as FlexMaximizeIcon, RestoreIcon as FlexRestoreIcon } from "flexlayout-react";
 import { resolvePreviewKind, shikiLangFor, PREVIEW_TEXT_LIMIT, type PreviewKind } from "./previewKind";
-import { logger } from "@/lib/logger";
+import { logger, fmtValue } from "@/lib/logger";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -348,4 +349,54 @@ function previewDefaultWidth(): number {
   return Math.min(Math.floor(window.innerWidth / 2), 720);
 }
 
-export const FilePreview = memo(FilePreviewImpl);
+// P36 修复（2026-09-09 崩溃事故）：预览渲染树内的异常此前直接炸到 flexlayout 的
+// ErrorBoundary——整块 ChatPanel 被「recreate from scratch」卸载 → ACP 会话 dispose →
+// 正在流式中的回复全丢（爆炸半径失控）。预览是锦上添花功能，失败必须被圈在浮层内：
+// 显示错误 + 关闭按钮，父树毫发无伤。Error 同步落盘（fmtValue 带 stack，日志可定位）。
+class PreviewErrorBoundary extends Component<
+  { onClose: () => void; children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    logger.error("preview", `渲染异常: ${fmtValue(error)}\n${info.componentStack ?? ""}`);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="filepreview" data-testid="file-preview-error">
+          <div className="filepreview-head">
+            <span className="filepreview-title">预览失败</span>
+            <span className="filepreview-actions">
+              <button
+                type="button"
+                className="filepreview-close"
+                aria-label="关闭预览"
+                onClick={this.props.onClose}
+              >
+                <XIcon style={{ width: 14, height: 14 }} />
+              </button>
+            </span>
+          </div>
+          <div className="filepreview-body">
+            <div className="hint" role="alert">
+              该文件预览渲染出错：{this.state.error.message}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export const FilePreview = memo(function FilePreview(props: Props) {
+  return (
+    <PreviewErrorBoundary onClose={props.onClose}>
+      <FilePreviewImpl {...props} />
+    </PreviewErrorBoundary>
+  );
+});

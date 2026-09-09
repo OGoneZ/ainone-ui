@@ -9,9 +9,17 @@ import { attachConsole, debug, info, warn, error, trace } from "@tauri-apps/plug
 
 // 结构化可视化：对象用 JSON 序列化，避免 [object Object]
 function fmt(...args: unknown[]): string {
-  return args
-    .map((a) => (typeof a === "string" ? a : safeStringify(a)))
-    .join(" ");
+  return args.map((a) => (typeof a === "string" ? a : safeStringify(a))).join(" ");
+}
+
+// Error/对象分轨：JSON.stringify(new Error("x")) 恒为 "{}"（message/stack 不可枚举），
+// React onCaughtError 转发的错误对象曾全被序列化成空串，崩溃无从排查。
+// Error 优先 name: message + stack；普通对象仍走 JSON。
+export function fmtValue(v: unknown): string {
+  if (v instanceof Error) {
+    return v.stack || `${v.name}: ${v.message}`;
+  }
+  return safeStringify(v);
 }
 
 function safeStringify(v: unknown): string {
@@ -47,7 +55,7 @@ export function installConsoleForward(): void {
     const original = console[fn].bind(console);
     console[fn] = (...args: unknown[]) => {
       original(...args);
-      void sink(fmt(...args));
+      void sink(args.map((a) => (typeof a === "string" ? a : fmtValue(a))).join(" "));
     };
   }
 }
@@ -59,4 +67,14 @@ export async function attach(): Promise<void> {
   } catch {
     // attachConsole 失败（如非 Tauri 环境）不致命
   }
+}
+
+/** React 19 root 级 onCaughtError/onUncaughtError 接线（main.tsx 调用）：
+ *  渲染期/未捕获异常带完整 Error（message+stack）落盘——ErrorBoundary 兜住后
+ *  不能只在 UI 显示一句「出错了」，日志必须能定位根因。 */
+
+/** 统一的 React 错误格式化（main.tsx 的 onCaughtError/onUncaughtError 复用） */
+export function formatReactError(error: unknown, info?: unknown): string {
+  const where = typeof info === "string" ? info : fmtValue(info);
+  return `React ${error instanceof Error ? "caught" : "uncaught"}: ${fmtValue(error)}${where ? `\n${where}` : ""}`;
 }
