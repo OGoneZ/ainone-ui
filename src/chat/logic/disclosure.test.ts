@@ -74,4 +74,15 @@ describe("groupDefaultOpen（AC-2.6 组级策略）", () => {
     expect(groupDefaultOpen([{ kind: "thought", text: "t", ms: 1 }])).toBe(false);
     expect(groupDefaultOpen([tool({ toolCallId: "a", content: [] })])).toBe(false);
   });
+
+  it("P36 反馈：组内块携带危险命令 → 组默认展开（收组后红色警示不藏）", () => {
+    const blocks = [
+      { kind: "thought" as const, text: "t", ms: 100 },
+      tool({ toolCallId: "a", content: [], rawInput: { command: "bun run build" } }),
+      tool({ toolCallId: "b", content: [], rawInput: { command: "rm -rf tmp" } }),
+    ];
+    expect(groupDefaultOpen(blocks)).toBe(true);
+    // 对照：普通命令不触发
+    expect(groupDefaultOpen([tool({ toolCallId: "c", content: [], rawInput: { command: "ls" } })])).toBe(false);
+  });
 });
