@@ -9,19 +9,24 @@ import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "./SettingsModal";
 import { mockTauriIpc } from "@/test/mockIpc";
 
-// F-8-7：快问配置走独立 Rust 命令，组件测试里 mock 掉（不依赖 Tauri 后端）
-vi.mock("@/ipc/quickask", () => ({
-  quickAskConfigGet: vi.fn().mockResolvedValue({
-    base_url: "",
-    model: "",
-    timeout_ms: 30000,
-    has_api_key: false,
-    protocol: "openai",
-    source: "",
-    system_prompt: "",
-  }),
-  quickAskConfigSave: vi.fn().mockResolvedValue(undefined),
-}));
+// F-8-7：快问配置走独立 Rust 命令，组件测试里 mock 掉（不依赖 Tauri 后端）。
+// QUICK_ASK_DEFAULT_PROMPT 是纯常量，用 importOriginal 保留真实导出（组件预填依赖它）。
+vi.mock("@/ipc/quickask", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/ipc/quickask")>();
+  return {
+    ...actual,
+    quickAskConfigGet: vi.fn().mockResolvedValue({
+      base_url: "",
+      model: "",
+      timeout_ms: 30000,
+      has_api_key: false,
+      protocol: "openai",
+      source: "",
+      system_prompt: "",
+    }),
+    quickAskConfigSave: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 // P29 S6：ModelSwitchPanel 依赖 sonner toast 与 logger（jsdom 无 Tauri 运行时）
 vi.mock("sonner", () => ({
@@ -141,8 +146,8 @@ describe("SettingsModal", () => {
     expect(calls.some((c) => c.cmd === "adapters_save")).toBe(false);
   });
 
-  it("P35 R2 解释提示词：渲染 textarea，编辑后保存随 quickAskConfigSave 携带 prompt（AC2.3）", async () => {
-    const { quickAskConfigSave } = await import("@/ipc/quickask");
+  it("P35 R2 修订 解释提示词：框内预填内置默认全文，编辑后保存随 quickAskConfigSave 携带 prompt（AC2.3）", async () => {
+    const { quickAskConfigSave, QUICK_ASK_DEFAULT_PROMPT } = await import("@/ipc/quickask");
     const saved: unknown[] = [];
     vi.mocked(quickAskConfigSave).mockImplementation(async (input) => {
       saved.push(input);
@@ -152,20 +157,41 @@ describe("SettingsModal", () => {
 
     const user = userEvent.setup();
     await user.click(await screen.findByTestId("more-toggle"));
-    // 回显：自定义提示词为空 → textarea 值为空、placeholder 展示默认语义
+    // 无自定义值 → textarea 预填内置默认提示词全文（所见即所存，非 placeholder）
     const promptBox = screen.getByTestId("qa-prompt") as HTMLTextAreaElement;
-    expect(promptBox.value).toBe("");
-    expect(promptBox.placeholder).toContain("默认");
+    expect(promptBox.value).toBe(QUICK_ASK_DEFAULT_PROMPT);
 
-    // 编辑提示词并保存 → quickAskConfigSave 收到该提示词
-    await user.type(promptBox, "用面试官口吻解释");
+    // 在默认全文基础上追加一句并保存 → quickAskConfigSave 收到改后全文
+    await user.type(promptBox, "加一句。");
     await user.click(await screen.findByRole("button", { name: "保存" }));
     await waitFor(() => expect(saved).toHaveLength(1));
-    expect((saved[0] as { system_prompt: string }).system_prompt).toBe("用面试官口吻解释");
+    expect((saved[0] as { system_prompt: string }).system_prompt).toBe(QUICK_ASK_DEFAULT_PROMPT + "加一句。");
+  });
+
+  it("P35 R2 修订 解释提示词：整段重写覆盖默认全文 → 保存即保存重写值（AC2.3）", async () => {
+    const { quickAskConfigSave, QUICK_ASK_DEFAULT_PROMPT } = await import("@/ipc/quickask");
+    const saved: unknown[] = [];
+    vi.mocked(quickAskConfigSave).mockImplementation(async (input) => {
+      saved.push(input);
+    });
+    mockTauriIpc({ handlers: defaultHandlers() });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("more-toggle"));
+    const promptBox = screen.getByTestId("qa-prompt") as HTMLTextAreaElement;
+    // 整段重写（先清空默认全文再输入）
+    await user.clear(promptBox);
+    await user.type(promptBox, "全新提示词");
+    await user.click(await screen.findByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect((saved[0] as { system_prompt: string }).system_prompt).toBe("全新提示词");
+    // 保存的值 ≠ 默认全文（确实重写了）
+    expect((saved[0] as { system_prompt: string }).system_prompt).not.toBe(QUICK_ASK_DEFAULT_PROMPT);
   });
 
   it("P35 R2 解释提示词：配置已有自定义值 → 打开设置回显该值（AC2.3 回显）", async () => {
-    const { quickAskConfigGet } = await import("@/ipc/quickask");
+    const { quickAskConfigGet, QUICK_ASK_DEFAULT_PROMPT } = await import("@/ipc/quickask");
     vi.mocked(quickAskConfigGet).mockResolvedValueOnce({
       base_url: "https://gw.example.com",
       model: "m",
@@ -182,6 +208,8 @@ describe("SettingsModal", () => {
     await user.click(await screen.findByTestId("more-toggle"));
     const promptBox = (await screen.findByTestId("qa-prompt")) as HTMLTextAreaElement;
     expect(promptBox.value).toBe("已保存的提示词");
+    // 回显值不是默认全文（确实优先自定义）
+    expect(promptBox.value).not.toBe(QUICK_ASK_DEFAULT_PROMPT);
   });
 
   it("保存成功 → 调 adapters_save 并回调 onSaved/onClose", async () => {

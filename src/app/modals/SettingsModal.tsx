@@ -12,7 +12,7 @@ import { runtimeDiagnostics, runtimeSummaryLine } from "@/ipc/runtime";
 import { checkForUpdate, downloadAndInstall, isMacOS, openDownloadPage } from "@/ipc/updater";
 import { probeAdapter } from "@/acp/probe";
 import type { ProbeResult } from "@/acp/probe-core";
-import { quickAskConfigGet, quickAskConfigSave, type QuickAskConfigView } from "@/ipc/quickask";
+import { quickAskConfigGet, quickAskConfigSave, QUICK_ASK_DEFAULT_PROMPT, type QuickAskConfigView } from "@/ipc/quickask";
 import { asrConfigGet, asrConfigSave, type AsrConfigView } from "@/ipc/asr";
 import { ModelSwitchPanel } from "@/sidebar/ModelSwitchPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -133,11 +133,6 @@ function sourceBadge(source: string): { text: string; auto: boolean } | null {
   }
   return null; // manual / 空 = 自定义
 }
-
-/** P35 R2：解释提示词占位（内置默认语义说明；运行时事实源是 Rust QUICK_ASK_SYSTEM_PROMPT，
- *  此处为同义摘要——用户清空输入即恢复该默认行为） */
-const QUICK_ASK_PROMPT_PLACEHOLDER =
-  "（默认）简洁解释助手：一句话定义 + 2-4 个要点 + 简短示例，跟随选中内容语言，markdown 输出。可在此自定义你的提示词，清空即恢复默认。";
 
 /** P29：四态 × 认证态 → 状态行文案与颜色 class（卡片状态徽标的唯一渲染点） */
 function statusLine(a: EditableAdapter): { text: string; cls: string } {
@@ -269,8 +264,9 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
   });
   const [qaKey, setQaKey] = useState("");
   const [qaMsg, setQaMsg] = useState<string | null>(null);
-  // P35 R2：解释提示词草稿（打开设置时从配置回显；空 = 内置默认）
-  const [qaPrompt, setQaPrompt] = useState("");
+  // P35 R2 修订：解释提示词草稿——框内始终有完整提示词文本（无自定义值时预填
+  // 内置默认全文），用户可逐字编辑或整段重写；保存即所见即所得落盘。
+  const [qaPrompt, setQaPrompt] = useState(QUICK_ASK_DEFAULT_PROMPT);
   // P22 语音服务配置
   const [asr, setAsr] = useState<AsrConfigView>({ base_url: "", model: "", has_api_key: false });
   const [asrKey, setAsrKey] = useState("");
@@ -284,7 +280,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     setAsrMsg(null);
     setQaKey("");
     setAsrKey("");
-    setQaPrompt("");
+    setQaPrompt(QUICK_ASK_DEFAULT_PROMPT);
     invoke<Adapter[]>("adapters_list")
       .then((list) => setItems(list.map(toEditable)))
       .catch((e) => setError(`读取适配器失败：${String(e)}`))
@@ -292,8 +288,8 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
     quickAskConfigGet()
       .then((v) => {
         setQa(v ?? { base_url: "", model: "", timeout_ms: 30000, has_api_key: false, protocol: "openai", source: "", system_prompt: "" });
-        // P35 R2：提示词草稿随配置回显（空 = 内置默认占位）
-        setQaPrompt(v?.system_prompt ?? "");
+        // P35 R2 修订：框内始终有完整文本——无自定义值时预填内置默认全文
+        setQaPrompt(v?.system_prompt?.trim() ? v.system_prompt : QUICK_ASK_DEFAULT_PROMPT);
       })
       .catch(() => {});
     asrConfigGet()
@@ -945,14 +941,14 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                       onChange={(e) => setQaKey(e.target.value)}
                     />
                   </label>
-                  {/* P35 R2：解释提示词——回显当前自定义值，空 = 内置默认（placeholder 展示语义）；
-                      保存随「保存」按钮走 quickask_config_save，下一次快速解释即生效 */}
+                  {/* P35 R2 修订：解释提示词——框内默认即内置提示词全文，所见即所存：
+                      用户可改一个字也可整段重写；保存随「保存」按钮走 quickask_config_save，
+                      下一次快速解释即生效。删除「清空=恢复默认」语义（框内文本就是将保存的值）。 */}
                   <label className="ns-label">
-                    解释提示词（清空 = 恢复默认）
+                    解释提示词
                     <textarea
                       rows={3}
                       data-testid="qa-prompt"
-                      placeholder={QUICK_ASK_PROMPT_PLACEHOLDER}
                       value={qaPrompt}
                       onChange={(e) => setQaPrompt(e.target.value)}
                     />
