@@ -145,7 +145,7 @@ describe("P36 反馈：危险命令红色警示", () => {
     renderMsg([
       toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: "rm /x/helloworld.ts" } }),
     ]);
-    fireEvent.click(screen.getByText("Terminal"));
+    // 危险卡默认展开（P36 反馈），无需点击
     expect(screen.getByTestId("tool-command").closest(".tool")?.getAttribute("data-risk")).toBe("danger");
     cleanup();
 
@@ -154,6 +154,24 @@ describe("P36 反馈：危险命令红色警示", () => {
     ]);
     fireEvent.click(screen.getByText("Terminal"));
     expect(screen.getByTestId("tool-command").closest(".tool")?.getAttribute("data-risk")).toBeNull();
+  });
+});
+
+describe("P36 反馈：危险命令自动展开", () => {
+  it("rm 命令卡默认展开（命令段直接可见，无需点击）", () => {
+    renderMsg([
+      toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: "rm /x/hello.ts" } }),
+    ]);
+    // 不点击折叠头，命令段即渲染
+    expect(screen.getByTestId("tool-command")).toBeTruthy();
+    expect(screen.getByTestId("tool-command").querySelector("pre")?.textContent).toBe("rm /x/hello.ts");
+    cleanup();
+
+    // 对照组：普通命令卡默认折叠
+    renderMsg([
+      toolBlock({ status: "in_progress", toolKind: "execute", rawInput: { command: "ls -la" } }),
+    ]);
+    expect(screen.queryByTestId("tool-command")).toBeNull();
   });
 });
 

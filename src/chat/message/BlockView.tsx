@@ -178,8 +178,14 @@ function ToolBlock({
   // 有 diff」边沿自动展开、用户手动操作后永不自动干预。P32 S2：组件实例跨分组迁移
   // 存活（MessageLine 稳定键），open/userToggledRef 不再被重挂重置——「手动收起后
   // 被强开」的复发路径已从根上消除。
+  // P36 R1：execute 类两段式展开——命令段（rawInput.command 全文）。上移到 open
+  // 判定之前：危险命令自动展开需要它。
+  const command = toolCommand(toolKind, rawInput);
   const isDiff = content.some((c) => c.kind === "diff");
-  const [localOpen, setLocalOpen] = useState(isDiff);
+  // P36 反馈：危险命令（rm 等）与写操作同属「改用户数据」——自动展开让用户
+  // 立刻看到命令全文，不再折叠。与 diff 同待遇（用户手动收起后不干预）。
+  const isRisky = command !== null && isRiskyCommand(command);
+  const [localOpen, setLocalOpen] = useState(isDiff || isRisky);
   const userToggledRef = useRef(false);
   const prevHasDiffRef = useRef(isDiff);
   useEffect(() => {
@@ -203,10 +209,8 @@ function ToolBlock({
   // P30 AC-2.3：kind 驱动图标（缺省回退扳手）+ rawInput 提炼参数副标题
   const KindIcon = kindIcon(toolKind);
   const subtitle = toolSubtitle(rawInput, title);
-  // P36 R1：execute 类两段式展开——命令段（rawInput.command 全文）+ 输出段。
   // 输出优先级：content text（ToolTextView 原路径）→ rawOutput 兜底（omp 实测
   // update 帧只有 rawOutput）→ 两者皆无时只显示命令段。
-  const command = toolCommand(toolKind, rawInput);
   const hasTextContent = content.some((c) => c.kind === "text");
   const outputFallback = !hasTextContent ? toolOutputFallback(rawOutput) : null;
   // P36 R3：写操作「预览文件」目标（diff path → rawInput file_path/path）；null 不渲染按钮
