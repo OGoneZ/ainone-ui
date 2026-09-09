@@ -65,6 +65,22 @@ describe("DiffView 行内评论（P36 Dialog 修复）", () => {
     });
   });
 
+  it("长评论换行显示（textarea 多行）+ Shift+Enter 换行不提交", () => {
+    const onAdd = vi.fn();
+    renderDiff(onAdd);
+    fireEvent.click(screen.getByRole("button", { name: "评论 /a/b.ts:1" }));
+    const area = screen.getByPlaceholderText("输入评论，随消息发给模型…");
+    expect(area.tagName).toBe("TEXTAREA");
+    const long = "很长的评论".repeat(50);
+    fireEvent.change(area, { target: { value: long } });
+    fireEvent.keyDown(area, { key: "Enter", shiftKey: true });
+    expect(onAdd).not.toHaveBeenCalled(); // Shift+Enter 换行不提交
+    fireEvent.keyDown(area, { key: "Enter" });
+    expect(onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ comment: long }),
+    );
+  });
+
   it("无 onAddDiffComment → 不渲染任何评论入口（评论能力缺省关闭）", () => {
     render(<DiffView path="/a.ts" oldText="old" newText="new" />);
     expect(screen.queryByRole("button", { name: /评论 / })).toBeNull();

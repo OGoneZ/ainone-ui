@@ -82,21 +82,26 @@ export function DiffView({
                 side="left"
                 align="end"
                 sideOffset={6}
-                className="w-72 p-2.5"
+                className="w-80 p-2.5"
                 onOpenAutoFocus={(e) => e.preventDefault()}
               >
                 <div className="text-[11px] mb-1.5" style={{ color: "var(--text-secondary)" }}>
                   评论 {path}:{r.newLine}
                   <span className="ml-1.5" style={{ opacity: 0.7 }}>{r.line}</span>
                 </div>
-                <input
+                <textarea
                   autoFocus
-                  className="w-full rounded-md border border-[var(--bg-3)] bg-[var(--bg-1)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--primary)]"
+                  rows={2}
+                  className="w-full resize-none rounded-md border border-[var(--bg-3)] bg-[var(--bg-1)] px-2.5 py-1.5 text-sm leading-relaxed outline-none focus:border-[var(--primary)]"
                   placeholder="输入评论，随消息发给模型…"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") submit(r.newLine, r.line);
+                    // Enter 提交、Shift+Enter 换行（与主流输入框一致）
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      submit(r.newLine, r.line);
+                    }
                   }}
                 />
                 <div className="mt-2 flex justify-end gap-1.5">
