@@ -616,9 +616,13 @@ pub fn omp_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str
         serde_yaml_ng::Value::String("baseUrl".into()),
         serde_yaml_ng::Value::String(base_out),
     );
+    // anthropic-messages 协议（P32g 实测）：OMP 对 openai-completions 自定义
+    // provider 不发思考参数且流式解析与网关 reasoning_content 前缀形态兼容性差
+    // （glm-5.3-flash 实测 empty stop）；anthropic-messages 是 OMP 官方 glm 家族
+    // 声明（zai 缓存 model_cache 同款 api），思考参数与解析全链路验证可用。
     p.insert(
         serde_yaml_ng::Value::String("api".into()),
-        serde_yaml_ng::Value::String("openai-completions".into()),
+        serde_yaml_ng::Value::String("anthropic-messages".into()),
     );
     if !key_out.trim().is_empty() {
         p.insert(
@@ -626,16 +630,45 @@ pub fn omp_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str
             serde_yaml_ng::Value::String(key_out),
         );
     }
+    // 模型条目完整声明（社区文档 omp.sh/docs/custom-models：省略元数据 = 无思考
+    // 配置 + 16K 输出上限——思考模型因此被网关拒/截断）。anthropic-messages 下
+    // OMP 按 anthropic budget/effort 形态发思考参数，glm-5.3-flash 实测 OK。
+    let thinking = serde_yaml_ng::Value::Mapping(serde_yaml_ng::mapping::Mapping::from_iter([
+        (serde_yaml_ng::Value::String("mode".into()), serde_yaml_ng::Value::String("effort".into())),
+        (
+            serde_yaml_ng::Value::String("efforts".into()),
+            serde_yaml_ng::Value::Sequence(vec![
+                serde_yaml_ng::Value::String("low".into()),
+                serde_yaml_ng::Value::String("high".into()),
+                serde_yaml_ng::Value::String("max".into()),
+            ]),
+        ),
+        (serde_yaml_ng::Value::String("defaultLevel".into()), serde_yaml_ng::Value::String("high".into())),
+    ]));
     let model_item = serde_yaml_ng::Value::Mapping(serde_yaml_ng::mapping::Mapping::from_iter([
         (
             serde_yaml_ng::Value::String("id".into()),
             serde_yaml_ng::Value::String(model.to_string()),
         ),
         (
+            serde_yaml_ng::Value::String("name".into()),
+            serde_yaml_ng::Value::String(model.to_string()),
+        ),
+        (serde_yaml_ng::Value::String("reasoning".into()), serde_yaml_ng::Value::Bool(true)),
+        (serde_yaml_ng::Value::String("thinking".into()), thinking),
+        (
             serde_yaml_ng::Value::String("input".into()),
             serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("text".into())]),
         ),
         (serde_yaml_ng::Value::String("tool_use".into()), serde_yaml_ng::Value::Bool(true)),
+        (
+            serde_yaml_ng::Value::String("contextWindow".into()),
+            serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(1_000_000u64)),
+        ),
+        (
+            serde_yaml_ng::Value::String("maxTokens".into()),
+            serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(131_072u64)),
+        ),
     ]));
     p.insert(serde_yaml_ng::Value::String("models".into()), serde_yaml_ng::Value::Sequence(vec![model_item]));
     serde_yaml_ng::to_string(&v).map_err(|e| format!("models.yml 序列化失败: {e}"))
@@ -926,6 +959,30 @@ base_url = "https://old/v1"
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
         assert!(v["providers"]["ainone"].get("apiKey").is_none());
         assert!(out.contains("baseUrl: https://x"));
+    }
+
+    #[test]
+    fn omp_merge_declares_anthropic_protocol_and_thinking() {
+        // P32g 实测回归：openai-completions 自定义 provider 下 OMP 思考模型
+        // empty stop（glm-5.3-flash@aiapi 实测）；anthropic-messages + thinking
+        // 声明（efforts 含 max、defaultLevel 高档）后 OMP 端到端回复正常。
+        //OMP 官方 glm 家族声明（zai 缓存）同为 anthropic 协议 + low/high/max。
+        let out = omp_merge_write(None, "https://gw.example.com", "sk", "saver/glm-5.3-flash").unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let ainone = &v["providers"]["ainone"];
+        assert_eq!(ainone["api"].as_str(), Some("anthropic-messages"), "必须用 anthropic 协议");
+        let model = &ainone["models"][0];
+        assert_eq!(model["reasoning"].as_bool(), Some(true), "必须声明 reasoning");
+        let efforts: Vec<&str> = model["thinking"]["efforts"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(|x| x.as_str())
+            .collect();
+        assert_eq!(efforts, vec!["low", "high", "max"], "efforts 必须含网关接受的三档");
+        assert_eq!(model["thinking"]["defaultLevel"].as_str(), Some("high"));
+        assert!(model["contextWindow"].as_u64().unwrap() >= 1_000_000);
+        assert!(model["maxTokens"].as_u64().unwrap() >= 131_072, "思考需要充足 maxTokens 预算");
     }
 
     #[test]
