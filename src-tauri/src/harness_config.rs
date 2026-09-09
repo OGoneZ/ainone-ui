@@ -402,24 +402,60 @@ pub fn codex_merge_write(raw: Option<&str>, endpoint: &str, model: &str) -> Resu
 }
 
 /// 纯函数：Pi models.json 合并写。
+/// P32g：key 留空的继承源扩为「ainone 既有 → 首个带 apiKey 的 provider」——用户自配
+/// provider（非 ainone 名）时旧实现新建/覆盖 ainone 会把自配 key 丢掉（与 omp 同根因）。
 pub fn pi_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str) -> Result<String, String> {
     let base_raw = raw.unwrap_or("{}");
     let mut v: serde_json::Value = serde_json::from_str(base_raw).map_err(|e| format!("JSON 解析失败: {e}"))?;
-    let provider = v
+    let providers = v
         .as_object_mut()
         .ok_or("顶层不是对象")?
         .entry("providers")
         .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
-        .ok_or("providers 不是对象")?
-        .entry("ainone")
+        .ok_or("providers 不是对象")?;
+    let existing_ainone_key = providers
+        .get("ainone")
+        .and_then(|p| p.get("apiKey"))
+        .and_then(|k| k.as_str())
+        .map(String::from)
+        .filter(|k| !k.trim().is_empty());
+    let inherited_key = existing_ainone_key.or_else(|| {
+        providers
+            .values()
+            .find_map(|p| {
+                p.get("apiKey")
+                    .and_then(|k| k.as_str())
+                    .map(String::from)
+                    .filter(|k| !k.trim().is_empty())
+            })
+    });
+    // ainone 不存在时继承首个带 baseUrl 的 provider 的 endpoint（与 read_provider_fallback 同语义）
+    let first_base = providers.values().find_map(|p| {
+        p.get("baseUrl")
+            .and_then(|b| b.as_str())
+            .map(String::from)
+            .filter(|b| !b.trim().is_empty())
+    });
+    let base_out = if endpoint.trim().is_empty() {
+        first_base.unwrap_or_default()
+    } else {
+        endpoint.to_string()
+    };
+    let provider = providers
+        .entry("ainone".to_string())
         .or_insert_with(|| serde_json::json!({}))
         .take();
     let mut provider = provider.as_object().cloned().unwrap_or_default();
-    provider.insert("baseUrl".into(), serde_json::Value::String(endpoint.into()));
+    provider.insert("baseUrl".into(), serde_json::Value::String(base_out));
     provider.insert("api".into(), serde_json::Value::String("openai-completions".into()));
-    if !key.trim().is_empty() {
-        provider.insert("apiKey".into(), serde_json::Value::String(key.into()));
+    let key_out = if key.trim().is_empty() {
+        inherited_key.unwrap_or_default()
+    } else {
+        key.to_string()
+    };
+    if !key_out.trim().is_empty() {
+        provider.insert("apiKey".into(), serde_json::Value::String(key_out));
     }
     provider.insert(
         "models".into(),
@@ -436,18 +472,55 @@ pub fn pi_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str)
 }
 
 /// 纯函数：OpenCode opencode.json 合并写。
+/// P32g：key 留空的继承源扩为「ainone 既有 → 首个带 options.apiKey 的 provider」；
+/// endpoint 留空时回落首个带 options.baseURL 的 provider（用户自配 provider 不换网关）。
 pub fn opencode_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str) -> Result<String, String> {
     let base_raw = raw.unwrap_or("{}");
     let mut v: serde_json::Value = serde_json::from_str(base_raw).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    // 继承源探测要在借走 provider.ainone 之前做（借用冲突）
+    let inherited = v
+        .get("provider")
+        .and_then(|p| p.as_object())
+        .and_then(|map| {
+            let ainone = map.get("ainone");
+            let ainone_key = ainone
+                .and_then(|p| p.get("options"))
+                .and_then(|o| o.get("apiKey"))
+                .and_then(|k| k.as_str())
+                .map(String::from)
+                .filter(|k| !k.trim().is_empty());
+            let first = map.values().find_map(|p| {
+                let opts = p.get("options")?;
+                let k = opts.get("apiKey").and_then(|k| k.as_str())?;
+                (!k.trim().is_empty()).then(|| k.to_string())
+            });
+            let first_base = map.values().find_map(|p| {
+                let opts = p.get("options")?;
+                let b = opts.get("baseURL").and_then(|b| b.as_str())?;
+                (!b.trim().is_empty()).then(|| b.to_string())
+            });
+            Some((ainone_key, first, first_base))
+        })
+        .unwrap_or((None, None, None));
     let mut provider = serde_json::json!({
         "npm": "@ai-sdk/openai-compatible",
         "name": "ainone",
         "options": {},
         "models": { model.clone(): { "name": model.clone() } },
     });
-    provider["options"]["baseURL"] = serde_json::Value::String(endpoint.into());
-    if !key.trim().is_empty() {
-        provider["options"]["apiKey"] = serde_json::Value::String(key.into());
+    let base_out = if endpoint.trim().is_empty() {
+        inherited.2.unwrap_or_default()
+    } else {
+        endpoint.to_string()
+    };
+    provider["options"]["baseURL"] = serde_json::Value::String(base_out);
+    let key_out = if key.trim().is_empty() {
+        inherited.0.or(inherited.1).unwrap_or_default()
+    } else {
+        key.to_string()
+    };
+    if !key_out.trim().is_empty() {
+        provider["options"]["apiKey"] = serde_json::Value::String(key_out);
     }
     let obj = v.as_object_mut().ok_or("顶层不是对象")?;
     obj.entry("provider")
@@ -459,17 +532,113 @@ pub fn opencode_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model:
     serde_json::to_string_pretty(&v).map_err(|e| format!("序列化失败: {e}"))
 }
 
-/// 纯函数：omp models.yml 同构生成（YAML 无注释保留承诺；结构对齐 pi）。
+/// 纯函数：omp models.yml 合并写（serde_yaml_ng 解析 → 只改 ainone provider → 重新序列化）。
+///
+/// P32g 缺陷根因修复：旧实现「key 留空 = 全量重生成无 apiKey 行」，用户本机自配
+/// provider（zhubaoduo）的 apiKey 被蒸发——OMP 后续调用该 provider 全链 401（实测事故
+/// 2026-09-09）。且旧实现把用户自配 provider 整体丢弃换成 ainone，endpoint 语义也变。
+///
+/// 现语义（与 claude_merge_write「key 留空 = 保留既有」同一纪律）：
+///   - ainone provider 存在：只改 baseUrl/apiKey(显式时)/models 首项，其余字段保留；
+///     key 留空 = 继承 ainone 既有 apiKey。
+///   - ainone 不存在但其他 provider 有：保留该 provider 原样，新建 ainone 继承其
+///     endpoint/key（用户「在现网关上切模型」的语义，不给网关换地址）。
+///   - 全新文件：最小 ainone 结构。
 pub fn omp_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str) -> Result<String, String> {
-    let _ = raw; // YAML 全量重生成（结构受控、非用户手工注释区）
-    let mut s = String::from("providers:\n  ainone:\n");
-    s.push_str(&format!("    baseUrl: {endpoint}\n"));
-    s.push_str("    api: openai-completions\n");
-    if !key.trim().is_empty() {
-        s.push_str(&format!("    apiKey: \"{key}\"\n"));
+    let mut v: serde_yaml_ng::Value = match raw {
+        Some(r) if !r.trim().is_empty() => serde_yaml_ng::from_str(r)
+            .map_err(|e| format!("models.yml 解析失败: {e}"))?,
+        _ => serde_yaml_ng::Value::Mapping(Default::default()),
+    };
+    if !v.is_mapping() {
+        return Err("models.yml 顶层不是映射".into());
     }
-    s.push_str(&format!("    models:\n      - id: {model}\n        input:\n          - text\n        tool_use: true\n"));
-    Ok(s)
+    let providers = match v.get_mut("providers") {
+        None => {
+            // 全新/无 providers 段 → 创建（等效旧实现的同构生成）
+            if let Some(map) = v.as_mapping_mut() {
+                map.insert(
+                    serde_yaml_ng::Value::String("providers".into()),
+                    serde_yaml_ng::Value::Mapping(Default::default()),
+                );
+            }
+            v.get_mut("providers").ok_or("models.yml providers 创建失败")?
+        }
+        Some(p) if !p.is_mapping() => return Err("models.yml providers 不是映射".into()),
+        Some(p) => p,
+    };
+    let map = providers.as_mapping_mut().unwrap();
+    // 既有 key 继承源：ainone 自己的 → 首个带 apiKey 的 provider（key 留空场景）
+    let existing_ainone_key = map
+        .get(serde_yaml_ng::Value::String("ainone".into()))
+        .and_then(|p| p.get("apiKey"))
+        .and_then(|k| k.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty());
+    let inherited_key = existing_ainone_key.or_else(|| {
+        map.iter().find_map(|(_, p)| {
+            p.get("apiKey")
+                .and_then(|k| k.as_str())
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty())
+        })
+    });
+    // ainone 不存在时继承首个带 baseUrl 的 provider 的 endpoint/key（同 read_provider_fallback 语义）
+    let first_provider = map.iter().find_map(|(_, p)| {
+        let base = p.get("baseUrl").and_then(|b| b.as_str())?;
+        let k = p.get("apiKey").and_then(|k| k.as_str()).unwrap_or("");
+        Some((base.to_string(), k.to_string()))
+    });
+    let (base_out, key_out) = if endpoint.trim().is_empty() {
+        (
+            first_provider.clone().map(|(b, _)| b).unwrap_or_default(),
+            if key.trim().is_empty() {
+                inherited_key.clone().unwrap_or_default()
+            } else {
+                key.to_string()
+            },
+        )
+    } else {
+        (
+            endpoint.to_string(),
+            if key.trim().is_empty() {
+                inherited_key.clone().or_else(|| first_provider.map(|(_, k)| k)).unwrap_or_default()
+            } else {
+                key.to_string()
+            },
+        )
+    };
+    let entry = map
+        .entry(serde_yaml_ng::Value::String("ainone".into()))
+        .or_insert(serde_yaml_ng::Value::Mapping(Default::default()));
+    let p = entry.as_mapping_mut().ok_or("provider.ainone 不是映射")?;
+    p.insert(
+        serde_yaml_ng::Value::String("baseUrl".into()),
+        serde_yaml_ng::Value::String(base_out),
+    );
+    p.insert(
+        serde_yaml_ng::Value::String("api".into()),
+        serde_yaml_ng::Value::String("openai-completions".into()),
+    );
+    if !key_out.trim().is_empty() {
+        p.insert(
+            serde_yaml_ng::Value::String("apiKey".into()),
+            serde_yaml_ng::Value::String(key_out),
+        );
+    }
+    let model_item = serde_yaml_ng::Value::Mapping(serde_yaml_ng::mapping::Mapping::from_iter([
+        (
+            serde_yaml_ng::Value::String("id".into()),
+            serde_yaml_ng::Value::String(model.to_string()),
+        ),
+        (
+            serde_yaml_ng::Value::String("input".into()),
+            serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("text".into())]),
+        ),
+        (serde_yaml_ng::Value::String("tool_use".into()), serde_yaml_ng::Value::Bool(true)),
+    ]));
+    p.insert(serde_yaml_ng::Value::String("models".into()), serde_yaml_ng::Value::Sequence(vec![model_item]));
+    serde_yaml_ng::to_string(&v).map_err(|e| format!("models.yml 序列化失败: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -720,16 +889,80 @@ base_url = "https://old/v1"
         assert_eq!(doc["model_providers"]["ainone"]["base_url"].as_str(), Some("https://x/v1"));
     }
 
-    // ---------------- 验收 3.6：key 留空保留（pi/opencode） ----------------
+    // ---------------- P32g：key 留空 = 继承既有（omp/pi/opencode 真实事故回归） ----------------
+
+    // 真实事故样例：用户本机 models.yml 自配 zhubaoduo provider（duo-king-6.6），
+    // 旧 omp_merge_write 全量重生成把 apiKey 蒸发 → OMP 调用全链 401（2026-09-09）。
+    #[test]
+    fn omp_merge_inherits_key_from_user_provider_when_blank() {
+        let existing = "providers:\n  zhubaoduo:\n    type: openai\n    api: openai-completions\n    baseUrl: https://token.zhubaoduo.com/v1\n    apiKey: sk-keep\n    models:\n      - id: duo-king-6.6\n        context: 128000\n        maxTokens: 8192\n";
+        // 场景：设置页在现网关上切模型（endpoint 不变、key 留空）→ key 必须继承
+        let out = omp_merge_write(Some(existing), "https://token.zhubaoduo.com/v1", "", "claude-opus-4-7").unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let ainone = &v["providers"]["ainone"];
+        assert_eq!(ainone["apiKey"].as_str(), Some("sk-keep"), "key 留空必须继承自配 provider 的 apiKey");
+        assert_eq!(ainone["baseUrl"].as_str(), Some("https://token.zhubaoduo.com/v1"));
+        assert_eq!(ainone["models"][0]["id"].as_str(), Some("claude-opus-4-7"));
+        // 用户自配 provider 原样保留（旧实现整体丢弃——语义突变）
+        let z = &v["providers"]["zhubaoduo"];
+        assert_eq!(z["apiKey"].as_str(), Some("sk-keep"), "自配 provider 不能被丢弃");
+        assert_eq!(z["models"][0]["id"].as_str(), Some("duo-king-6.6"));
+    }
 
     #[test]
-    fn pi_merge_keeps_existing_key_when_blank() {
-        let existing = r#"{"providers":{"ainone":{"baseUrl":"https://old","api":"openai-completions","apiKey":"sk-keep","models":[{"id":"old"}]}}}"#;
-        let out = pi_merge_write(Some(existing), "https://new", "", "new-m").unwrap();
+    fn omp_merge_blank_key_no_inherit_source_omits_key() {
+        // 无任何既有 key（全新/无 key 文件）+ 留空 → 不写 apiKey 行（与 UI 提示一致）
+        let out = omp_merge_write(None, "https://x", "", "m1").unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        assert!(v["providers"]["ainone"].get("apiKey").is_none());
+        assert!(out.contains("baseUrl: https://x"));
+    }
+
+    #[test]
+    fn omp_merge_explicit_key_overrides_and_corrupt_rejected() {
+        // 显式填 key → 覆盖既有（不改继承语义）
+        let existing = "providers:\n  ainone:\n    baseUrl: https://old\n    apiKey: sk-old\n    models:\n      - id: old\n";
+        let out = omp_merge_write(Some(existing), "https://new", "sk-new", "m").unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        assert_eq!(v["providers"]["ainone"]["apiKey"].as_str(), Some("sk-new"));
+        // 损坏 YAML → Err 不写盘（与 claude/codex 同纪律）
+        assert!(omp_merge_write(Some("{broken: ["), "https://x", "", "m").is_err());
+    }
+
+    #[test]
+    fn pi_merge_inherits_key_from_user_provider_when_blank() {
+        // pi 同根因回归：自配 provider（myprov）+ 新建 ainone + key 留空 → key 继承
+        let existing = r#"{"providers":{"myprov":{"baseUrl":"https://p.example","apiKey":"sk-pi-keep","models":[{"id":"old"}]}}}"#;
+        let out = pi_merge_write(Some(existing), "https://p.example", "", "new-m").unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["providers"]["ainone"]["apiKey"], "sk-keep");
-        assert_eq!(v["providers"]["ainone"]["baseUrl"], "https://new");
-        assert_eq!(v["providers"]["ainone"]["models"][0]["id"], "new-m");
+        assert_eq!(v["providers"]["ainone"]["apiKey"].as_str(), Some("sk-pi-keep"), "key 留空必须继承自配 provider");
+        assert_eq!(v["providers"]["ainone"]["baseUrl"].as_str(), Some("https://p.example"));
+        // 自配 provider 原样保留
+        assert_eq!(v["providers"]["myprov"]["apiKey"].as_str(), Some("sk-pi-keep"));
+    }
+
+    #[test]
+    fn opencode_merge_inherits_key_from_user_provider_when_blank() {
+        let existing = r#"{"provider":{"myprov":{"options":{"baseURL":"https://oc.example/v1","apiKey":"sk-oc-keep"}}},"theme":"dark"}"#;
+        let out = opencode_merge_write(Some(existing), "https://oc.example/v1", "", "m1").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["provider"]["ainone"]["options"]["apiKey"].as_str(), Some("sk-oc-keep"), "key 留空必须继承自配 provider");
+        assert_eq!(v["provider"]["ainone"]["options"]["baseURL"].as_str(), Some("https://oc.example/v1"));
+        assert_eq!(v["theme"].as_str(), Some("dark"), "无关键保留");
+        // 自配 provider 原样保留
+        assert_eq!(v["provider"]["myprov"]["options"]["apiKey"].as_str(), Some("sk-oc-keep"));
+    }
+
+    // ---------------- 旧语义测试（保留部分，收敛到新实现） ----------------
+
+    #[test]
+    fn omp_merge_generates_yaml() {
+        let out = omp_merge_write(None, "https://x", "sk", "m1").unwrap();
+        assert!(out.contains("ainone:"));
+        assert!(out.contains("baseUrl: https://x"));
+        assert!(out.contains("id: m1"));
+        // 显式 key → 写 apiKey 行
+        assert!(out.contains("apiKey"));
     }
 
     #[test]
@@ -749,17 +982,6 @@ base_url = "https://old/v1"
         assert_eq!(v["provider"]["ainone"]["npm"], "@ai-sdk/openai-compatible");
         assert_eq!(v["model"], "ainone/m1");
         assert!(v["provider"]["ainone"]["models"]["m1"].is_object());
-    }
-
-    #[test]
-    fn omp_merge_generates_yaml() {
-        let out = omp_merge_write(None, "https://x", "sk", "m1").unwrap();
-        assert!(out.contains("ainone:"));
-        assert!(out.contains("baseUrl: https://x"));
-        assert!(out.contains("id: m1"));
-        // 无 key 时不写 apiKey 行
-        let out2 = omp_merge_write(None, "https://x", "", "m1").unwrap();
-        assert!(!out2.contains("apiKey"));
     }
 
     // ---------------- 验收：读回显 ----------------
