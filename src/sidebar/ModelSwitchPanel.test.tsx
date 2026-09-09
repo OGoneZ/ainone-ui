@@ -208,4 +208,38 @@ describe("ModelSwitchPanel", () => {
     expect(writeHarnessSettings).not.toHaveBeenCalled();
     await waitFor(() => expect(props.onWritten).toHaveBeenCalled());
   });
+
+  it("P35 R3.2 表单链路 + 无定点写回（pi，present=true）：点选仍走 harnessConfigSave 全量三格，不再报「无配置写回」", async () => {
+    const { harnessConfigSave } = await import("@/ipc/adapters");
+    vi.mocked(harnessConfigSave).mockResolvedValue("/home/x/.pi/agent/models.json");
+    const props = setup({
+      adapterId: "pi",
+      adapterName: "Pi",
+      formContext: { endpoint: "https://form.example.com/v1", apiKey: "sk-form", present: true },
+    });
+    await screen.findByText("m-b");
+    await userEvent.click(screen.getByRole("option", { name: /m-b/ }));
+    await waitFor(() =>
+      expect(harnessConfigSave).toHaveBeenCalledWith({
+        program: "pi",
+        endpoint: "https://form.example.com/v1",
+        apiKey: "sk-form",
+        model: "m-b",
+      }),
+    );
+    expect(writeHarnessSettings).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalled();
+    await waitFor(() => expect(props.onWritten).toHaveBeenCalled());
+    await waitFor(() => expect(props.onClose).toHaveBeenCalled());
+  });
+
+  it("P35 R3.4 回归：点选只调 onSessionModelChange 一次（旧实现重复调用两次）", async () => {
+    const onSessionModelChange = vi.fn().mockResolvedValue(true);
+    const props = setup({ onSessionModelChange });
+    await screen.findByText("m-b");
+    await userEvent.click(screen.getByRole("option", { name: /m-b/ }));
+    await waitFor(() => expect(props.onWritten).toHaveBeenCalled());
+    expect(onSessionModelChange).toHaveBeenCalledTimes(1);
+  });
 });

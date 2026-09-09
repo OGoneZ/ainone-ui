@@ -322,10 +322,13 @@ pub(crate) fn harness_settings_write_inner(
     let updated = match kind {
         HarnessConfigKind::Claude => write_claude(&raw, model, base_url)?,
         HarnessConfigKind::Codex => write_codex(&raw, model, base_url)?,
-        HarnessConfigKind::Omp => write_omp(&raw, base_url)?,
-        // pi 无验证过的定点替换语义 → 引导走配置代写（三格齐落盘）
+        HarnessConfigKind::Omp => write_omp(&raw, base_url, model)?,
+        // pi 无验证过的定点替换语义 → 引导走配置代写（三格齐落盘；错误含 adapter id
+        // 与可操作指引，避免裸报错让用户以为功能缺失——P35 R3.1）
         HarnessConfigKind::Pi => {
-            return Err("{adapter_id} 不支持定点替换，请走设置页配置保存".replace("{adapter_id}", adapter_id))
+            return Err(format!(
+                "{adapter_id} 配置文件结构未验证，不支持在此定点替换；请在设置页「{adapter_id}」卡片展开配置后保存（endpoint/key/模型三格齐写）"
+            ))
         }
         // P32b：opencode 走 JSON 定点改写（provider.ainone 结构，与配置代写同构）
         HarnessConfigKind::OpenCode => write_opencode(&raw, model, base_url)?,
@@ -468,20 +471,33 @@ pub(crate) fn write_codex(raw: &str, model: Option<&str>, base_url: Option<&str>
 }
 
 /// Omp models.yml：行级替换首个 `baseUrl:` 行（providers 段内；本仓只此一处 baseUrl 行的场景）。
-pub(crate) fn write_omp(raw: &str, base_url: Option<&str>) -> Result<String, String> {
-    let b = base_url.ok_or("omp 仅支持写回 baseUrl")?;
-    let mut out: Vec<String> = Vec::new();
-    let mut done = false;
-    for line in raw.lines() {
-        if !done && line.trim_start().starts_with("baseUrl:") {
-            out.push(format!("    baseUrl: {b}"));
-            done = true;
-        } else {
-            out.push(line.to_string());
-        }
+/// P35 R3.1：补齐 model 写回——行级替换 providers 段 models 列表首个 `- id:` 行
+/// （omp 模型目录 = provider.models[].id，fuzzy match 生效即改）；无 models 列表时
+/// 报错（bare provider 无模型条目属配置代写链路的职责，不在此凭空造结构）。
+pub(crate) fn write_omp(raw: &str, base_url: Option<&str>, model: Option<&str>) -> Result<String, String> {
+    if base_url.is_none() && model.is_none() {
+        return Err("没有要写回的内容".into());
     }
-    if !done {
+    let mut out: Vec<String> = Vec::new();
+    let mut base_done = base_url.is_none();
+    let mut model_done = model.is_none();
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        let mut replaced = line.to_string();
+        if !base_done && trimmed.starts_with("baseUrl:") {
+            replaced = format!("    baseUrl: {}", base_url.unwrap());
+            base_done = true;
+        } else if !model_done && trimmed.starts_with("- id:") {
+            replaced = format!("    - id: {}", model.unwrap());
+            model_done = true;
+        }
+        out.push(replaced);
+    }
+    if !base_done {
         return Err("models.yml 未找到 baseUrl 行".into());
+    }
+    if !model_done {
+        return Err("models.yml 未找到 models 列表（- id: 行），模型写回需走设置页配置保存".into());
     }
     let mut s = out.join("\n");
     if raw.ends_with('\n') {
@@ -1059,12 +1075,44 @@ wire_api = "responses"
 
     #[test]
     fn write_omp_replaces_base_url_line() {
-        let out = write_omp(OMP, Some("https://token.new.com/v1")).unwrap();
+        let out = write_omp(OMP, Some("https://token.new.com/v1"), None).unwrap();
         assert!(out.contains("baseUrl: https://token.new.com/v1"));
         assert!(!out.contains("token.old.com"));
         // 无关行保留
         assert!(out.contains("apiKey: sk-xxx"));
         assert!(out.contains("- id: duo-king-6.6"));
+    }
+
+    #[test]
+    fn write_omp_replaces_model_id_line() {
+        // P35 R3.1：omp 模型定点写回（providers.models[].id 行级替换；baseUrl/key 不动）
+        let out = write_omp(OMP, None, Some("m-new")).unwrap();
+        assert!(out.contains("- id: m-new"));
+        assert!(!out.contains("duo-king-6.6"));
+        assert!(out.contains("baseUrl: https://token.old.com/v1"));
+        assert!(out.contains("apiKey: sk-xxx"));
+    }
+
+    #[test]
+    fn write_omp_replaces_both_and_keeps_structure() {
+        let out = write_omp(OMP, Some("https://n.com/v1"), Some("m2")).unwrap();
+        assert!(out.contains("baseUrl: https://n.com/v1"));
+        assert!(out.contains("- id: m2"));
+        assert!(out.contains("type: openai"), "结构行不动");
+        // 有 models 列表时不再要求 baseUrl 行必换——两键各自独立完成
+        let both = write_omp(OMP, Some("https://n.com/v1"), Some("m2")).unwrap();
+        assert_eq!(out, both, "同参数幂等");
+    }
+
+    #[test]
+    fn write_omp_no_model_list_errors_operably() {
+        // AC-R3.1：无 models 列表（bare provider）→ 可操作错误（指引设置页配置保存）。
+        // URL-only 写回合法（bare provider 场景用户只改 URL 不报错）。
+        let bare = "providers:\n  zhubaoduo:\n    baseUrl: https://x/v1\n    apiKey: sk\n";
+        let out = write_omp(bare, Some("https://n/v1"), None).unwrap();
+        assert!(out.contains("baseUrl: https://n/v1"));
+        let e2 = write_omp(bare, None, Some("m")).unwrap_err();
+        assert!(e2.contains("models"), "错误须指引 models 列表缺失: {e2}");
     }
 
     #[test]
