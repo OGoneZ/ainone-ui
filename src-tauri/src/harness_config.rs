@@ -34,6 +34,7 @@ pub struct HarnessConfigView {
 
 /// 保存输入
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HarnessConfigInput {
     /// 按预置 adapter id 分派：claude-code / codex / pi / omp / opencode
     pub program: String,
