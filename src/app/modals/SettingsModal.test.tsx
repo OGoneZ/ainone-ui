@@ -338,7 +338,8 @@ describe("Dialog 点遮罩关闭（P26 WKWebView mousedown 兜底）", () => {
   });
 });
 
-// —— P30 权限模式开关（仅 claude-code）：读回显 + 切换写 settings.json 单键 ——
+// —— P30 权限模式开关（claude-code）：读回显 + 切换写 settings.json 单键 ——
+// P36 起 read 返回布尔（true=bypass / false=auto / null=未配置），mock 同步更新。
 
 const CLAUDE_ADAPTER = [
   { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: "#d97706" },
@@ -360,7 +361,7 @@ describe("P30 权限模式开关", () => {
   afterEach(cleanup);
 
   it("claude-code 卡片渲染开关；settings 已是 auto → 开关为关", async () => {
-    mockTauriIpc({ handlers: permHandlers("auto") });
+    mockTauriIpc({ handlers: permHandlers(false) });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
     const sw = await screen.findByTestId("perm-switch-claude-code");
     expect(sw).toHaveAttribute("data-state", "unchecked");
@@ -375,7 +376,7 @@ describe("P30 权限模式开关", () => {
   });
 
   it("切换开 → permission_mode_save(bypassPermissions)；切回关 → save(auto)", async () => {
-    const calls = mockTauriIpc({ handlers: permHandlers("auto") });
+    const calls = mockTauriIpc({ handlers: permHandlers(false) });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
     const sw = await screen.findByTestId("perm-switch-claude-code");
     expect(sw).toHaveAttribute("data-state", "unchecked");
@@ -390,18 +391,98 @@ describe("P30 权限模式开关", () => {
     expect(saves[1].args.mode).toBe("auto");
   });
 
-  it("非 claude-code 卡片不渲染开关", async () => {
+  it("P36 后 omp/codex 也渲染开关（读失败 reject → 禁用态而非隐藏）", async () => {
     mockTauriIpc({
       handlers: {
         ...defaultHandlers(),
-        permission_mode_read: () => null,
+        // P36 Rust 侧四家 read 均返回 Some(bool)；null/reject 只在读取异常时出现
+        permission_mode_read: () => Promise.reject("读取失败"),
       },
     });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
     await screen.findByText("Oh My Pi");
     await screen.findByText("Codex");
-    expect(screen.queryByTestId("perm-switch-omp")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("perm-switch-codex")).not.toBeInTheDocument();
+    // 读失败 → 开关仍渲染但禁用（disabled 属性），不是隐藏
+    const omp = await screen.findByTestId("perm-switch-omp");
+    expect(omp).toHaveAttribute("data-disabled");
+    expect(await screen.findByTestId("perm-switch-codex")).toHaveAttribute("data-disabled");
+  });
+});
+
+// —— P36 权限开关扩展到四家（omp/codex/opencode 开关 + pi 不支持态）——
+// 回归目标：P30 只渲染 claude-code 的现状是错的——四家都有原生权限机制；
+// pi 是唯一无机制的（README「No permission popups」），如实呈现不支持而非隐藏。
+
+const FOUR_ADAPTERS = [
+  { id: "omp", name: "Oh My Pi", program: "omp", args: ["acp"], cwd: ".", logo: "#7c3aed" },
+  { id: "claude-code", name: "Claude Code", program: "claude-agent-acp", args: [], cwd: ".", logo: "#d97706" },
+  { id: "codex", name: "Codex", program: "codex-acp", args: [], cwd: ".", logo: "#16a34a" },
+  { id: "opencode", name: "OpenCode", program: "opencode", args: ["acp"], cwd: ".", logo: "#dc2626" },
+  { id: "pi", name: "Pi", program: "pi-acp", args: [], cwd: ".", logo: "#2563eb" },
+];
+
+function perm4Handlers(returns: Record<string, unknown>) {
+  return {
+    adapters_list: () => FOUR_ADAPTERS,
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/bin/x", source: "Home", bridge: null, cli: null, auth: { state: "none", detail: "" } }),
+    permission_mode_read: (a: { adapterId: string }) => {
+      // pi：Rust 侧 Err（无权限机制）→ reject 触发不支持态
+      if (a.adapterId === "pi") return Promise.reject("pi 无权限确认机制");
+      return returns[a.adapterId] ?? null;
+    },
+    permission_mode_save: (a: { adapterId: string; mode: string }) => `/fake/${a.adapterId} (mode=${a.mode})`,
+  };
+}
+
+describe("P36 权限开关四家扩展", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(cleanup);
+
+  it("omp/codex/opencode 渲染开关（含各家文案）；pi 渲染不支持说明而非开关", async () => {
+    mockTauriIpc({
+      handlers: perm4Handlers({ omp: true, "claude-code": null, codex: false, opencode: null, pi: null }),
+    });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    // omp：读到 true → 开（yolo 文案）
+    const omp = await screen.findByTestId("perm-switch-omp");
+    expect(omp).toHaveAttribute("data-state", "checked");
+    expect(screen.getByText(/approvalMode=yolo/)).toBeInTheDocument();
+    // codex：读到 false → 关（默认审批模式文案）
+    const codex = await screen.findByTestId("perm-switch-codex");
+    expect(codex).toHaveAttribute("data-state", "unchecked");
+    expect(screen.getByText(/默认审批模式/)).toBeInTheDocument();
+    // opencode：未配置(null) → 开（默认放行）
+    const oc = await screen.findByTestId("perm-switch-opencode");
+    expect(oc).toHaveAttribute("data-state", "checked");
+    // pi：不支持态文案，无开关
+    expect(screen.queryByTestId("perm-switch-pi")).not.toBeInTheDocument();
+    expect(await screen.findByText(/Pi 无权限确认机制/)).toBeInTheDocument();
+  });
+
+  it("omp 切换 → save(bypassPermissions|auto) 语义保留（Rust 侧映射 yolo/always-ask）", async () => {
+    const calls = mockTauriIpc({
+      handlers: perm4Handlers({ omp: false }),
+    });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const omp = await screen.findByTestId("perm-switch-omp");
+    expect(omp).toHaveAttribute("data-state", "unchecked");
+    await userEvent.setup().click(omp);
+    expect(calls.find((c) => c.cmd === "permission_mode_save")?.args.adapterId).toBe("omp");
+    expect(calls.find((c) => c.cmd === "permission_mode_save")?.args.mode).toBe("bypassPermissions");
+    expect(await screen.findByText(/已写入/)).toBeInTheDocument();
+  });
+
+  it("codex 切换写 app 托管键（对新会话生效文案）", async () => {
+    const calls = mockTauriIpc({
+      handlers: perm4Handlers({ codex: false }),
+    });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const codex = await screen.findByTestId("perm-switch-codex");
+    await userEvent.setup().click(codex);
+    expect(calls.find((c) => c.cmd === "permission_mode_save")?.args.adapterId).toBe("codex");
+    expect(await screen.findByText(/已写入/)).toBeInTheDocument();
   });
 });
 

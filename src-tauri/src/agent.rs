@@ -258,6 +258,11 @@ fn bridge_env_inject(program: &str) -> Vec<(String, String)> {
             if let Some(pair) = crate::harness_keys::codex_key_env(Some(&dir)) {
                 env.push(pair);
             }
+            // P36 权限开关：bypass=true 时注入 INITIAL_AGENT_MODE=agent-full-access
+            //（codex-acp 每 turn 覆盖 approval_policy，此 env 是唯一持久入口）
+            if let Some(pair) = crate::harness_keys::codex_perm_env(Some(&dir)) {
+                env.push(pair);
+            }
         }
     }
     if program == "claude-agent-acp" {
