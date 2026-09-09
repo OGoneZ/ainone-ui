@@ -1016,6 +1016,38 @@ base_url = "https://old/v1"
     }
 
     #[test]
+    fn omp_write_then_read_roundtrip_real_shape() {
+        // P32g 流程回归：写回后的 models.yml 必须能被读回显正确还原
+        // （endpoint/key/模型名三格一致）——用户「探测→点选→保存→再打开设置」
+        // 全流程的闭环保障，防「写成功但回显错乱」类回归。
+        let existing = "providers:\n  zhubaoduo:\n    type: openai\n    api: openai-completions\n    baseUrl: https://token.zhubaoduo.com/v1\n    apiKey: sk-real\n    models:\n      - id: duo-king-6.6\n        context: 128000\n        maxTokens: 8192\n";
+        let written = omp_merge_write(Some(existing), "https://token.zhubaoduo.com/v1", "", "claude-opus-4-7").unwrap();
+        let (ep, has_key, model) = read_view_text("omp", Some(&written));
+        assert_eq!(ep, "https://token.zhubaoduo.com/v1", "写后回显 endpoint 一致");
+        assert!(has_key, "写后（key 继承）回显 has_key=true");
+        assert_eq!(model, "claude-opus-4-7", "写后回显模型名一致（读首个 provider 模型）");
+        // 二次保存（用户再点选一次模型，仍留空 key）→ key 仍在（连续操作不蒸发）
+        let written2 = omp_merge_write(Some(&written), "https://token.zhubaoduo.com/v1", "", "glm-5.3-flash").unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&written2).unwrap();
+        assert_eq!(v["providers"]["ainone"]["apiKey"].as_str(), Some("sk-real"), "二次保存 key 不蒸发");
+        let (ep2, has_key2, model2) = read_view_text("omp", Some(&written2));
+        assert_eq!(ep2, "https://token.zhubaoduo.com/v1");
+        assert!(has_key2);
+        assert_eq!(model2, "glm-5.3-flash");
+    }
+
+    #[test]
+    fn pi_write_then_read_roundtrip_user_provider() {
+        // pi 同流程闭环：自配 provider + 新建 ainone → 回显应取 ainone（应用代写值最可信）
+        let existing = r#"{"providers":{"myprov":{"baseUrl":"https://p.example","apiKey":"sk-pi","models":[{"id":"old"}]}}}"#;
+        let written = pi_merge_write(Some(existing), "https://p.example", "", "m-new").unwrap();
+        let (ep, has_key, model) = read_view_text("pi", Some(&written));
+        assert_eq!(ep, "https://p.example");
+        assert!(has_key);
+        assert_eq!(model, "m-new");
+    }
+
+    #[test]
     fn read_view_falls_back_to_user_provider() {
         // S6 反馈缺陷回归：用户自配 provider 名各异（omp 配的是 "zhubaoduo"），
         // 只认 ainone 会让回显全空 → 应回落到首个含 baseUrl 的 provider
