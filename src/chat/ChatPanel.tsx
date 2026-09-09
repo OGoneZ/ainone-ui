@@ -14,6 +14,7 @@ import { type AskAnswer, answersToContent, fieldsToQuestions, parseSchemaFields 
 import { PlanBar } from "@/chat/components/PlanBar";
 import { FilePreview } from "@/sidebar/FilePreview";
 import { QueueDock } from "@/chat/components/QueueDock";
+import { BuildLoadingOverlay } from "@/chat/components/BuildLoadingOverlay";
 import { QuotePanel, AttachList, DiffCommentsBar, EditBanner } from "@/chat/components/PanelStrips";
 import { Composer } from "@/chat/composer/Composer";
 import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
@@ -1668,6 +1669,15 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     >
       {/* P16 F-16-1 文件预览浮层（DEC-48）：窗格内右侧 overlay，非模态 */}
       {previewPath && <FilePreview path={previewPath} onClose={closePreview} />}
+      {/* P38 R4：建链加载悬浮层——ensureSession 全程（首条消息/fork/回收重建）。
+          窗格内 absolute 遮罩：分屏只盖本窗格；场景文案按 resumeId 判定。
+          resumeId 与 ensureSession 内部同口径（prop + store 回收重建）。 */}
+      {starting && (
+        <BuildLoadingOverlay
+          resume={Boolean(resumeSessionId ?? rt?.sessionId)}
+          adapterName={adapter.name}
+        />
+      )}
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}
@@ -1684,7 +1694,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             ↑
           </button>
         )}
-        {starting && <div className="hint">正在启动 {adapter.name}…</div>}
+        {/* P38：starting 提示升级为窗格中央悬浮层（BuildLoadingOverlay），底部 hint 退役 */}
         {startError && !starting && (
           <div className="hint degraded" role="alert">
             ⚠️ {adapter.name} 启动失败：{startError}
