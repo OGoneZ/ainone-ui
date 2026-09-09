@@ -90,7 +90,7 @@ function basename(p: string): string {
  * 从 rawInput 提关键参数做副标题；命中不了返回 null。
  * 字段名参考主流桥的真实透传（P0 报文 + 今日会话 JSONL 双源）：
  *   Bash→{command}；Read/Write/Edit→{file_path|path}；Glob/Grep→{pattern, path|glob}；
- *   WebFetch→{url}；Agent/Task→{prompt}
+ *   WebFetch→{url}；Agent/Task→{prompt}；Skill→{skill}（claude-agent-acp）
  */
 export function toolSubtitle(rawInput: unknown): string | null {
   if (rawInput === null || typeof rawInput !== "object" || Array.isArray(rawInput)) return null;
@@ -99,6 +99,10 @@ export function toolSubtitle(rawInput: unknown): string | null {
   // 命令优先（execute 最常见）；pattern 是搜索的独有字段，需在 path 分支前判定
   if (typeof input.command === "string" && input.command.trim()) {
     return truncate(input.command.replace(/\s+/g, " ").trim());
+  }
+  // skill 加载（claude-agent-acp：rawInput {skill: "<name>"}）
+  if (typeof input.skill === "string" && input.skill.trim()) {
+    return truncate(input.skill.trim());
   }
   // 搜索模式（含 in path/glob 后缀）——先于文件路径分支（pattern+path 常同现）
   if (typeof input.pattern === "string" && input.pattern.trim()) {

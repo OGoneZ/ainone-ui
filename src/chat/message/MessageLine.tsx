@@ -19,6 +19,7 @@ import { formatBinding } from "@/app/logic/keymap";
 import { useKeymapStore } from "@/store/keymapStore";
 import {
   ChevronRightIcon,
+  ClockIcon,
   CopyIcon,
   EditIcon,
   ForkIcon,
@@ -42,6 +43,8 @@ export const MessageLine = memo(function MessageLine({
   busy,
   isLast,
   lastEventAt,
+  turnStartedAt,
+  turnEndedAt,
   onSelect,
   onFork,
   onRewind,
@@ -57,6 +60,10 @@ export const MessageLine = memo(function MessageLine({
   isLast: boolean;
   /** P30：当前 turn 最近一次协议事件时间戳（store）——静默感知数据源 */
   lastEventAt?: number;
+  /** turn 总计时起点（store）——运行中轮次的墙钟计时数据源 */
+  turnStartedAt?: number;
+  /** turn 总耗时常驻：正常结束时的终点时间戳——结束后冻结为起点→终点墙钟差 */
+  turnEndedAt?: number;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
   onRewind?: () => void;
@@ -78,6 +85,20 @@ export const MessageLine = memo(function MessageLine({
         </div>
         {/* F-15-4：编辑/回溯移到气泡下方 hover 浮现的 icon-only 小钮行（DEC-44） */}
         <div className="mt-0.5 mr-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            type="button"
+            aria-label="复制消息"
+            title="复制消息"
+            className="msg-action-btn"
+            onClick={() => {
+              navigator.clipboard?.writeText(msg.text).then(
+                () => toast.success("已复制"),
+                () => toast.error("复制失败"),
+              );
+            }}
+          >
+            <CopyIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
+          </button>
           {onEdit && (
             <button
               type="button"
@@ -154,8 +175,14 @@ export const MessageLine = memo(function MessageLine({
         {/* p22e：turn 总耗时并入活动组卡实时走秒；纯 text 轮次不显示计时。
             P30：纯 text 轮次的静默感知也随 TurnElapsed 一并移除——文本轮事件密集，
             静默提示仅在工具轮有意义；工具轮静默由 p22e 活动卡 + lastEventAt 的
-            TurnElapsed（下方保留）承担。 */}
-        {busy && isLast && lastEventAt ? <TurnElapsed lastEventAt={lastEventAt} /> : null}
+            TurnElapsed（下方保留）承担。
+            turn 总耗时常驻：运行中从 turnStartedAt 走秒；正常结束后冻结为
+            turnEndedAt - turnStartedAt（下个 turn 开始时归零重走）。 */}
+        {busy && isLast && lastEventAt ? (
+          <TurnElapsed lastEventAt={lastEventAt} turnStartedAt={turnStartedAt} turnEndedAt={turnEndedAt} />
+        ) : !busy && turnEndedAt && turnStartedAt ? (
+          <TurnElapsedTurnEnded startedAt={turnStartedAt} endedAt={turnEndedAt} />
+        ) : null}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {onFork && (
@@ -370,15 +397,51 @@ function FileChangeRow({
  *  p22e 已把总耗时并入活动组卡实时走秒，本组件只承担静默提示，不重复显示总耗时。 */
 const SILENT_THRESHOLD_S = 30;
 
-function TurnElapsed({ lastEventAt }: { lastEventAt: number }) {
+/** 秒数 → h/m/s 自适应格式：不足 1 分钟「42 秒」，不足 1 小时「3 分 5 秒」，更长「1 时 2 分 3 秒」 */
+function formatElapsed(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h} 时`);
+  if (h > 0 || m > 0) parts.push(`${m} 分`);
+  parts.push(`${s} 秒`);
+  return parts.join(" ");
+}
+
+function TurnElapsed({ lastEventAt, turnStartedAt, turnEndedAt }: { lastEventAt: number; turnStartedAt?: number; turnEndedAt?: number }) {
   const silent = useElapsedTicker(lastEventAt);
+  // turn 总耗时：从 turn 发出时刻起走秒（墙钟）；已封口（turnEndedAt）则冻结终点不再走
+  const ticking = useElapsedTicker(turnStartedAt && !turnEndedAt ? turnStartedAt : undefined);
+  const frozen =
+    turnStartedAt && turnEndedAt ? Math.max(0, Math.round((turnEndedAt - turnStartedAt) / 1000)) : null;
+  const total = ticking || (frozen ?? 0);
   return (
-    <div className="turn-elapsed" data-testid="turn-elapsed" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+    <div className="turn-elapsed" data-testid="turn-elapsed" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px", display: "flex", alignItems: "center", gap: 4 }}>
+      {turnStartedAt ? (
+        <span data-testid="turn-total" className="inline-flex items-center gap-1">
+          <ClockIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+          用时 {formatElapsed(total)}
+        </span>
+      ) : null}
       {silent >= SILENT_THRESHOLD_S && (
         <span data-testid="silent-hint" style={{ color: "var(--warning)" }}>
           · 静默 {silent} 秒（可能在运行长任务或子代理）
         </span>
       )}
+    </div>
+  );
+}
+
+/** turn 结束后的常驻总耗时（冻结值，不走秒不消失）——末条消息 busy=false 时显示 */
+function TurnElapsedTurnEnded({ startedAt, endedAt }: { startedAt: number; endedAt: number }) {
+  const seconds = Math.max(0, Math.round((endedAt - startedAt) / 1000));
+  return (
+    <div className="turn-elapsed" data-testid="turn-elapsed-ended" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+      <span data-testid="turn-total" className="inline-flex items-center gap-1">
+        <ClockIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+        用时 {formatElapsed(seconds)}
+      </span>
     </div>
   );
 }

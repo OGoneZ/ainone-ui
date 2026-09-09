@@ -77,7 +77,7 @@ export function applyEvent(
       };
     }
     case "tool_update":
-      // now 注入：status 到终态时封口工具耗时 ms；P30：toolKind/rawInput 合并（缺省保留旧值）
+      // now 注入：status 到终态时封口工具耗时 ms；title/kind/rawInput upsert（缺省保留旧值）
       return {
         ...withStart,
         blocks: updateTool(
@@ -87,6 +87,7 @@ export function applyEvent(
           e.content,
           now,
           {
+            ...(e.title !== undefined ? { title: e.title } : {}),
             ...(e.kind !== undefined ? { toolKind: e.kind } : {}),
             ...(e.rawInput !== undefined ? { rawInput: e.rawInput } : {}),
           },

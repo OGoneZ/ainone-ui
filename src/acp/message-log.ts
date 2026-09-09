@@ -138,9 +138,10 @@ export function appendTool(blocks: BlockMsg[], tool: BlockMsg & { kind: "tool" }
   return [...blocks, tool];
 }
 
-/** 按 toolCallId 更新 tool block 的 status/toolKind/rawInput/content（找不到则原样返回）。
+/** 按 toolCallId 更新 tool block 的 status/title/toolKind/rawInput/content（找不到则原样返回）。
  *  F-16-2（DEC-49）：status 进入终态（completed/failed，error 为本地历史值）且块带
  *  startTs 时封口 ms = now - startTs。P30：toolKind/rawInput 仅在事件携带时覆盖（缺省保留旧值）。
+ *  title upsert：协议 update 可带更完整标题（skill 流式补全场景），缺省保留旧值。
  *  注：协议 kind 落块级字段名 toolKind（块 kind 是块类型判别符，不能覆盖）。 */
 export function updateTool(
   blocks: BlockMsg[],
@@ -148,7 +149,7 @@ export function updateTool(
   status: string | null,
   content: ToolContent[],
   now?: () => number,
-  patch?: { toolKind?: string; rawInput?: unknown },
+  patch?: { title?: string; toolKind?: string; rawInput?: unknown },
 ): BlockMsg[] {
   const idx = blocks.findIndex(
     (b) => b.kind === "tool" && b.toolCallId === toolCallId,
@@ -166,6 +167,7 @@ export function updateTool(
       ...b,
       status: nextStatus,
       content: content.length > 0 ? content : b.content,
+      ...(patch?.title !== undefined ? { title: patch.title } : {}),
       ...(patch?.toolKind !== undefined ? { toolKind: patch.toolKind } : {}),
       ...(patch && "rawInput" in patch ? { rawInput: patch.rawInput } : {}),
       ...(finished && now ? { ms: Math.max(0, now() - b.startTs!) } : {}),

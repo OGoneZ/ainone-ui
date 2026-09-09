@@ -970,7 +970,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     // F-8-1：刷新最近交互时间戳（回收判定的数据源）
     lastActivityRef.current = Date.now();
     // P30：lastEventAt 同步落定——首事件前静默时长以 prompt 发出时刻起算
-    patch(tabKey, { busy: true, turnStartedAt: Date.now(), lastEventAt: Date.now() });
+    patch(tabKey, { busy: true, turnStartedAt: Date.now(), lastEventAt: Date.now(), turnEndedAt: undefined });
     turnRef.current = newTurn();
     // P31 流式提交节流：applyEvent 仍逐条累积到 turnRef（不丢事件），但
     // 「累积结果 → store」按渲染帧合并提交。实测 8 条/s 的 update 频率 ×
@@ -1069,6 +1069,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         if (turnRef.current.blocks.length > 0) {
           useSessionStore.getState().updateLastAssistant(tabKey, () => turnRef.current.blocks);
         }
+        // turn 总耗时常驻：终点时刻在 turn 结束时封口（endTurnAt），UI 侧冻结为
+        // 「起点→终点」墙钟差，不再随 busy 清除消失。下个 turn 开始时 runPrompt
+        // 会重置 turnStartedAt 并清 endTurnAt，计时归零重走。
+        useSessionStore.getState().patch(tabKey, { turnEndedAt: Date.now() });
         // P33 F-32-1：窗口失焦时通知「任务完成」（用户自己取消不发——shouldNotify 决策）
         {
           const reason = stopReasonRef.current ?? "end_turn";
@@ -1110,7 +1114,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           toast.warning("该任务执行失败，已放回队列首位");
         }
       } finally {
-        patch(tabKey, { busy: false, turnStartedAt: undefined, lastEventAt: undefined });
+        // turnStartedAt 不在此清除：正常结束时它作为常驻计时的冻结起点保留
+        //（turnEndedAt 封口后 UI 用两点差值显示；下轮 runPrompt 重置归零）。
+        // 异常结束 turnEndedAt 恒为 undefined，常驻分支不满足，残留值无消费点。
+        patch(tabKey, { busy: false, lastEventAt: undefined });
         runRef.current = null;
         // H10：turn 结束时未决的权限请求/提问卡一并收口（turn 已中止，
         // harness 不会再消费答案；resolver 悬挂会让 Dialog/AskCard 卡在界面上）。
@@ -1588,6 +1595,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   // P32 R1：lastEventAt 只传末条——消费点（TurnElapsed）仅
                   // busy && isLast 需要；传所有行会让每次提交击穿全部 MessageLine 的 memo
                   lastEventAt={vi.index === messages.length - 1 ? rt?.lastEventAt : undefined}
+                  // turn 总计时：同 lastEventAt 口径只传末条（TurnElapsed 消费）
+                  turnStartedAt={vi.index === messages.length - 1 ? rt?.turnStartedAt : undefined}
+                  turnEndedAt={vi.index === messages.length - 1 ? rt?.turnEndedAt : undefined}
                   onSelect={onSelectText}
                   onFork={forkEnabled && onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}

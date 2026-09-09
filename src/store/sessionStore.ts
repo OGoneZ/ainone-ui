@@ -58,6 +58,10 @@ export interface RuntimeState {
   /** P30 AC-3.4：当前 turn 最近一次协议事件的时间戳（静默感知）。
    *  turn 结束随 turnStartedAt 一并清除；runtime 不持久化。 */
   lastEventAt?: number;
+  /** turn 总耗时常驻：正常结束时的终点时间戳（封口冻结计时）；undefined = 无可显示的总耗时。
+   *  与 turnStartedAt 配对：runPrompt 开始时清零、turn 正常结束时落定（异常路径清除）。
+   *  runtime 不持久化（恢复会话后历史轮不显示总耗时，同 busy 语义）。 */
+  turnEndedAt?: number;
   /** initialize 握手存档的 agent 能力（capability gate 数据源；未声明 → null） */
   capabilities: AgentCapabilities | null;
   /** P32d：capability snapshot 五布尔（capabilitySnapshot 派生存档——UI/恢复链只读布尔） */

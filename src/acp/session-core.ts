@@ -42,6 +42,9 @@ export type Outgoing =
       type: "tool_update";
       toolCallId: string;
       status?: string | null;
+      /** 协议 upsert 语义：update 可携带更完整的 title（如 claude 流式补全后的
+       *  "Load skill: X"、opencode completed 的 `Skill "x"`），缺省 = 保留旧值 */
+      title?: string;
       kind?: string;
       rawInput?: unknown;
       content: ToolContent[];
@@ -610,6 +613,9 @@ export function dispatchUpdate(u: acp.SessionNotification, onOutgoing: (e: Outgo
         type: "tool_update",
         toolCallId: u.update.toolCallId,
         status: u.update.status ?? null,
+        // title upsert：协议 update 可带更完整标题（claude 流式补全 "Load skill: X"、
+        // opencode completed `Skill "x"`）——此前直接丢弃导致 skill 名不可见
+        ...(u.update.title ? { title: u.update.title } : {}),
         ...(u.update.kind ? { kind: u.update.kind } : {}),
         ...("rawInput" in u.update ? { rawInput: u.update.rawInput } : {}),
         content: toToolContent(u.update.content),
