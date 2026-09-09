@@ -55,7 +55,10 @@ import {
 } from "@/app/logic/externalDrag";
 import { equalizeSplitFor } from "@/app/logic/splitEqualize";
 import { groupSessions } from "@/sidebar/logic/workspaceGroup";
-import { useSessionStore } from "@/store/sessionStore";
+import { useSessionStore, type AcpSessionConfigOption } from "@/store/sessionStore";
+import { ModelSwitchPanel } from "@/sidebar/ModelSwitchPanel";
+import { fetchHarnessMeta, type HarnessMeta } from "@/ipc/harnessMeta";
+import { extractModel, extractSessionModel, stripModelSuffix } from "@/acp/metadata";
 import { useShallow } from "zustand/react/shallow";
 import { collectSignals, deriveStatus, type SessionStatus } from "@/sidebar/logic/sessionStatus";
 import { splitShortcut, closeTabShortcut, resolveSplitTab, extractTabsFromModel, activeKeyOf, visibleKeysOf, focusArrowShortcut, pickFocusTarget, tabCycleShortcut, nextTabIndex, layoutBindings, type TabsetRectLike } from "@/app/logic/layout";
@@ -155,6 +158,9 @@ function App() {
   const [activeSession, setActiveSession] = useState<{ setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null>(null);
   // P32d：活跃 tab 的 session/list 句柄（null = 未声明 list 能力；仅 active tab 上抛）
   const [activeListSessions, setActiveListSessions] = useState<(() => Promise<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>>) | null>(null);
+  // P39 R3：Ctrl+P 呼出的模型切换面板（App 级，右栏模型行的键盘等效）。
+  // open 与 activeTab 存在性解耦——tab 切走/关闭时 open 条件自然失效自动关。
+  const [modelPanelOpen, setModelPanelOpen] = useState(false);
   // F-21-6 左侧栏宽度（拖宽把手，持久化；clamp 200~min(520,40vw)）
   const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-sidebar-width")) || 240, 200, sidebarMaxWidth()),
@@ -195,6 +201,48 @@ function App() {
 
   const activeTab = tabs.find((t) => t.key === activeKey) ?? tabs[0];
   const activeAdapter = activeTab ? adapters.find((a) => a.id === activeTab.adapterId) : undefined;
+
+  // —— P39 R3：App 级模型切换面板数据合成（右栏 MetadataPanel 同口径） ——
+  // 会话级 configOptions / 静态 harness 配置 / adapter.args 三级模型优先级；
+  // probeBaseUrl 用静态配置优先（同 MetadataPanel：会话值可能谎报官方地址）。
+  const activeConfigOptions = useSessionStore((s) => (activeTab ? s.runtime[activeTab.key]?.configOptions ?? null : null));
+  const [activeStaticMeta, setActiveStaticMeta] = useState<HarnessMeta | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setActiveStaticMeta(null);
+    if (!activeAdapter) return;
+    fetchHarnessMeta(activeAdapter.id)
+      .then((m) => {
+        if (alive) setActiveStaticMeta(m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [activeAdapter?.id]);
+  const activeModel = activeTab
+    ? extractSessionModel(activeConfigOptions) ??
+      stripModelSuffix(activeStaticMeta?.model ?? null) ??
+      stripModelSuffix(activeAdapter ? extractModel(activeAdapter.args) : null)
+    : null;
+  const activeProbeBaseUrl = activeStaticMeta?.base_url ?? null;
+  /** 会话级切模型回调（与 MetadataPanel.sessionModelChange 同构：找到 model
+   *  select 项 → set_config_option → 写回 store → boolean 告知真实生效） */
+  const activeSessionModelChange = useCallback(
+    async (m: string): Promise<boolean> => {
+      const tabKey = activeTab?.key;
+      if (!tabKey) return false;
+      const opts = useSessionStore.getState().runtime[tabKey]?.configOptions ?? null;
+      const opt = opts?.find((o) => o.category === "model" && o.type === "select");
+      const fn = activeSession?.setConfigOption;
+      if (!opt || !fn) return false;
+      const next = (await fn(opt.id, m)) as AcpSessionConfigOption[] | null;
+      if (next) useSessionStore.getState().setConfigOptions(tabKey, next);
+      return next !== null;
+    },
+    [activeTab?.key, activeSession],
+  );
+
 
   function getModel(): Model {
     if (!modelRef.current) {
@@ -375,6 +423,17 @@ function App() {
       if (matchShortcut(e, useKeymapStore.getState().defs, "app.new-terminal", keymapOverrides)) {
         e.preventDefault();
         newTerminalTab(activeTab?.workspaceId ?? null, activeTab?.cwd);
+        return;
+      }
+      // P39：Ctrl+P 呼出模型切换面板（右栏模型行的键盘等效）。会话 tab 才有
+      // 模型语义——欢迎页（无 tab）/终端 tab 不动作；模态浮层开着时让位
+      //（同 pane.temp-maximize 先例，事件 target 落在浮层内不响应）。
+      if (matchShortcut(e, useKeymapStore.getState().defs, "app.switch-model", keymapOverrides)) {
+        const t = e.target as Element | null;
+        if (t?.closest?.("[role='dialog'], [cmdk-root]")) return;
+        if (!activeTab || activeTab.kind === "terminal" || !activeAdapter) return;
+        e.preventDefault();
+        setModelPanelOpen(true);
         return;
       }
       // P26e：Ctrl+Shift+Space 临时全屏当前聚焦窗格（flexlayout maximizeToggle），
@@ -935,6 +994,10 @@ function App() {
       .catch(() => toast.error("恢复失败"));
   }
 
+  /** P39 R5：新建会话后焦点锁定输入框——addTabToModel 的 syncFromModel 已让
+   *  activeKey 指向新 tab，activateTabsetAndComposer 复用重试式聚焦器等 textarea
+   *  就绪（新建会话无建链阻塞，立即可打字）。入口：Ctrl+N 弹窗确认 / 侧栏「+」 /
+   *  EmptyState（单点收口于 newTab；分屏/拖拽开 tab 不在此语义内）。 */
   function newTab(adapterId: string, workspaceId?: string | null, cwd?: string) {
     const key = `tab-${nextKey.current++}`;
     addTabToModel(
@@ -942,6 +1005,10 @@ function App() {
       DockLocation.CENTER,
       activeKey,
     );
+    const m = getModel();
+    const node = m.getNodeById(key);
+    const tabsetId = node?.getParent()?.getType() === "tabset" ? node.getParent()!.getId() : m.getActiveTabset()?.getId();
+    if (tabsetId) activateTabsetAndComposer(tabsetId);
   }
 
   /** 新建终端 tab（P23 F-23-1）：与 harness session 同级；落会话索引供侧栏恢复
@@ -1430,6 +1497,23 @@ function App() {
       <DonateModal open={donateOpen} onClose={() => setDonateOpen(false)} />
 
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+      {/* P39 R3：Ctrl+P 呼出的模型切换面板（仅会话 tab；sessionOnly 语义同右栏）。
+          activeTab 切走/关闭 → 渲染条件失效自动关闭；数据口径与 MetadataPanel 一致 */}
+      {modelPanelOpen && activeTab && activeTab.kind !== "terminal" && activeAdapter && (
+        <ModelSwitchPanel
+          open={true}
+          onClose={() => setModelPanelOpen(false)}
+          adapterId={activeAdapter.id}
+          adapterName={activeAdapter.name}
+          baseUrl={activeProbeBaseUrl}
+          currentModel={activeModel}
+          configOptions={activeConfigOptions}
+          onSessionModelChange={activeSessionModelChange}
+          onWritten={() => {}}
+          sessionOnly
+        />
+      )}
 
       <NewSessionModal
         open={newSession.open}

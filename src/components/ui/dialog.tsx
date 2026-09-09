@@ -90,6 +90,15 @@ function DialogContent({
       <DialogPrimitive.Content
         ref={contentRef}
         data-slot="dialog-content"
+        onOpenAutoFocus={(e) => {
+          // P39：内容内已显式标注 autoFocus 的控件（如模型面板过滤框）优先获得
+          // 初始焦点——Radix 默认把首个焦点给 Content 本体，会抢在子控件前。
+          const target = contentRef.current?.querySelector<HTMLElement>("[data-autofocus='true']");
+          if (target) {
+            e.preventDefault();
+            target.focus();
+          }
+        }}
         className={cn(
           "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className

@@ -27,6 +27,7 @@ export type ShortcutId =
   | "app.new-session"
   | "app.new-terminal"
   | "app.global-search"
+  | "app.switch-model"
   | "pane.split-row"
   | "pane.split-col"
   | "pane.close-tab"
@@ -77,6 +78,7 @@ export const DEFAULT_DEFS: ShortcutDef[] = [
   { id: "app.new-session", scope: "global", label: "新建会话", defaults: [{ code: "KeyN", ctrl: true }] },
   { id: "app.new-terminal", scope: "global", label: "新建终端", defaults: [{ code: "KeyT", ctrl: true }] },
   { id: "app.global-search", scope: "global", label: "搜索会话", defaults: [{ code: "KeyF", ctrl: true }] },
+  { id: "app.switch-model", scope: "global", label: "切换模型（当前会话）", defaults: [{ code: "KeyP", ctrl: true }] },
   { id: "pane.split-row", scope: "global", label: "左右分屏", defaults: [{ code: "KeyD", ctrl: true, shift: true }] },
   { id: "pane.split-col", scope: "global", label: "上下分屏", defaults: [{ code: "KeyE", ctrl: true, shift: true }] },
   { id: "pane.close-tab", scope: "global", label: "关闭当前窗格", defaults: [{ code: "KeyD", ctrl: true }] },

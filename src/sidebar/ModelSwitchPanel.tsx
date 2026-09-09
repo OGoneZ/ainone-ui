@@ -330,7 +330,8 @@ export function ModelSwitchPanel({
           </DialogTitle>
         </DialogHeader>
 
-        {/* P39 R4：打开即聚焦（autoFocus），直接打字过滤；↑↓/Enter 键盘导航 */}
+        {/* P39 R4：打开即聚焦（data-autofocus 标记 + Dialog onOpenAutoFocus 引导；
+            直接打字过滤），↑↓/Enter 键盘导航 */}
         <input
           ref={filterRef}
           className="msm-filter"
@@ -339,7 +340,7 @@ export function ModelSwitchPanel({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={onFilterKeyDown}
-          autoFocus
+          data-autofocus="true"
           aria-label="过滤模型"
         />
 
