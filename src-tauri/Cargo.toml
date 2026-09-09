@@ -55,6 +55,11 @@ base64 = "0.22"
 #   打包用 tauri.dist.conf.json 覆盖（features 为空）→ release 完全不含此依赖。
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 portable-pty = "0.9"
+# P35 白屏自愈：web-process-crashed 信号监听（webview_resilience.rs）。
+# 仅 Linux 有效；版本必须与 wry 内部依赖一致（Cargo.lock 已锁定 2.0.2），
+# 否则 with_webview 返回的类型会对不上——升级 tauri/wry 时同步检查。
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0.2"
 
 [features]
 webdriver = ["dep:tauri-plugin-webdriver"]

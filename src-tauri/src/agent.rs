@@ -266,25 +266,29 @@ fn bridge_env_inject(program: &str) -> Vec<(String, String)> {
     env
 }
 
-/// 从 ~/.claude/settings.json 读 env 表里的 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN
+/// 从 ~/.claude/settings.json 读 env 表全量透传给 claude-agent-acp 子进程
 /// （存在且非空才注入；读失败静默——连接器回落默认行为，与未修复前一致）。
+/// 此前白名单只透传 ANTHROPIC_BASE_URL/AUTH_TOKEN，导致终端 CLI 生效的
+/// CLAUDE_CODE_MAX_CONTEXT_TOKENS 等变量在应用内失效（模型窗口被按 200k 预算误触压缩）。
 fn claude_env_from_settings() -> Vec<(String, String)> {
     let Some(home) = dirs::home_dir() else { return Vec::new() };
     let Ok(raw) = std::fs::read_to_string(home.join(".claude/settings.json")) else {
         return Vec::new();
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else { return Vec::new() };
-    ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
-        .iter()
-        .filter_map(|k| {
-            v.get("env")
-                .and_then(|e| e.get(*k))
-                .and_then(|x| x.as_str())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .map(|s| ((*k).to_string(), s))
+    v.get("env")
+        .and_then(|e| e.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, x)| {
+                    x.as_str()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| (k.clone(), s))
+                })
+                .collect()
         })
-        .collect()
+        .unwrap_or_default()
 }
 
 /// app 配置目录（codex keys.json 的宿主；取不到返回 None 不注入）。

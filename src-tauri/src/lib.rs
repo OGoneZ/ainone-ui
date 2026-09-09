@@ -25,6 +25,7 @@ mod quickask;
 mod sessions;
 mod terminal;
 mod tray;
+mod webview_resilience;
 mod workspaces;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -71,6 +72,9 @@ pub fn run() {
                 // 托盘创建失败不阻塞应用（R-32-4：无 appindicator 的 Linux 桌面）
                 log::warn!("[tray] 托盘初始化失败（功能降级为无托盘）: {e}");
             }
+            // P35 白屏自愈：监听 WebKitWebProcess 崩溃（web-process-crashed），
+            // 取证落日志 + 自动 reload（60s 窗口内 ≥3 次停止重载防崩溃循环）
+            webview_resilience::install(app.handle());
             // 启动即后台抓取 login shell PATH（8s 超时，永不阻塞 UI）
             env_path::fetch_login_shell_path_async();
             // P29：全局 AppHandle 存档——spawn 注入 codex keys env 等非命令上下文用
