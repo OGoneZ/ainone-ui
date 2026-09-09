@@ -332,6 +332,14 @@ pub(crate) fn harness_settings_write_inner(
     };
     backup(&path)?;
     std::fs::write(&path, updated).map_err(|e| format!("写入 {} 失败: {e}", path.display()))?;
+    // omp：定点写回 model 时同步默认模型（与 harness_config_save 同一语义，见彼处注释）
+    if kind == HarnessConfigKind::Omp {
+        if let Some(m) = model {
+            if let Err(e) = omp_set_default_model(m) {
+                log::warn!("[harness_meta] omp 默认模型联动失败: {e}");
+            }
+        }
+    }
     log::info!(
         "[harness_meta] 写回 {adapter_id}: model={:?} baseUrl={:?}",
         model,
@@ -777,6 +785,44 @@ pub(crate) fn omp_api_key_present(home: Option<&Path>) -> bool {
         .is_some()
 }
 
+/// OMP 会话默认模型联动（P32g 实测 2026-09-09）：OMP 新会话的默认模型不读
+/// models.yml 的 models[0]，只认 ~/.omp/agent/agent.db settings 表的
+/// modelRoles.default（JSON，模型 ref 形态 "ainone/<id>"；yml defaultModel 字段无效）。
+/// 应用切 omp 模型时同步写它，否则 OMP 默认停在本机 ollama 自动发现值（如 bge-m3，
+/// 一个不能对话的 embedding 模型），侧栏显示与会话实际模型脱节。
+/// 失败不致命（调用方只告警）：agent.db 缺失/损坏不应阻塞模型写回。
+pub(crate) fn omp_set_default_model(model: &str) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("找不到家目录")?;
+    omp_set_default_model_at(&home.join(".omp/agent/agent.db"), model)
+}
+
+/// 注入式实现（db 路径可注入便于测试）。
+fn omp_set_default_model_at(db_path: &Path, model: &str) -> Result<(), String> {
+    if !db_path.exists() {
+        // 无 agent.db（OMP 从未运行过）→ 无默认模型概念可联动，跳过
+        return Ok(());
+    }
+    // model 仅作 JSON 字符串值（serde_json 已转义），SQL 单引号再翻倍防注入
+    let json = serde_json::json!({ "default": format!("ainone/{model}") }).to_string();
+    let literal = json.replace('\'', "''");
+    let sql = format!(
+        "insert or replace into settings(key, value, updated_at) values ('modelRoles', '{literal}', strftime('%s','now'));"
+    );
+    let out = std::process::Command::new("sqlite3")
+        .arg(db_path)
+        .arg(&sql)
+        .output()
+        .map_err(|e| format!("调用 sqlite3 失败: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "sqlite3 写入失败: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    log::info!("[harness_meta] omp 默认模型已联动 → ainone/{model}");
+    Ok(())
+}
+
 /// OpenCode opencode.json 的 provider.<ainone|首个含 baseURL>.options.apiKey
 /// （与 meta_opencode 同一 provider 优先级）。
 fn opencode_api_key(home: Option<&Path>) -> Option<String> {
@@ -826,6 +872,54 @@ pub async fn models_probe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn omp_default_model_sync_writes_settings_table() {
+        // P32g 联动回归：OMP 新会话默认模型只认 agent.db settings.modelRoles.default
+        //（不认 yml models[0]）。切模型后必须同步写入，否则 OMP 停在本机 ollama
+        // 自动发现值（bge-m3，不能对话）——侧栏/设置页显示脱节的根因。
+        let dir = std::env::temp_dir().join(format!("omp-sync-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("agent.db");
+        // 建表（模拟 OMP 生成的 schema）
+        std::process::Command::new("sqlite3")
+            .arg(&db)
+            .arg("create table settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0)")
+            .output()
+            .expect("sqlite3 可用");
+        omp_set_default_model_at(&db, "saver/glm-5.3-flash").unwrap();
+        let out = std::process::Command::new("sqlite3")
+            .arg(&db)
+            .arg("select value from settings where key='modelRoles'")
+            .output()
+            .unwrap();
+        let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert_eq!(value, r#"{"default":"ainone/saver/glm-5.3-flash"}"#);
+        // 二次写入 = 覆盖（幂等）
+        omp_set_default_model_at(&db, "claude-opus-4.7").unwrap();
+        let out = std::process::Command::new("sqlite3")
+            .arg(&db)
+            .arg("select value from settings where key='modelRoles'")
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            r#"{"default":"ainone/claude-opus-4.7"}"#
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn omp_default_model_sync_skips_missing_db() {
+        // OMP 从未运行（无 agent.db）→ 静默跳过不报错（无默认模型概念可联动）
+        let dir = std::env::temp_dir().join(format!("omp-sync-miss-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let result = omp_set_default_model_at(&dir.join("agent.db"), "m1");
+        assert!(result.is_ok(), "缺失 db 应跳过而非报错: {result:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     const CLAUDE: &str = r#"{
   "cleanupPeriodDays": 36500,
