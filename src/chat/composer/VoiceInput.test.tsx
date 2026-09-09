@@ -73,13 +73,35 @@ describe("VoiceInput", () => {
     expect(onTranscribed).toHaveBeenCalledWith("这是转写文本");
   });
 
-  it("麦克风权限被拒 → 明确提示，不崩溃（AC-P9-21）", async () => {
-    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new Error("denied"));
+  it("麦克风权限被拒 → 提示去系统设置，不崩溃（AC-P9-21）", async () => {
+    navigator.mediaDevices.getUserMedia = vi
+      .fn()
+      .mockRejectedValue(new DOMException("denied", "NotAllowedError"));
     render(<VoiceInput onTranscribed={() => {}} />);
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "语音输入" }));
     // 仍回到 idle 态（不崩溃），无录音开始
+    expect(await screen.findByRole("button", { name: "语音输入" })).toBeInTheDocument();
+  });
+
+  it("无麦克风设备 → 提示未检测到设备，不崩溃", async () => {
+    navigator.mediaDevices.getUserMedia = vi
+      .fn()
+      .mockRejectedValue(new DOMException("no device", "NotFoundError"));
+    render(<VoiceInput onTranscribed={() => {}} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "语音输入" }));
+    expect(await screen.findByRole("button", { name: "语音输入" })).toBeInTheDocument();
+  });
+
+  it("未知 getUserMedia 错误 → 兜底提示，不崩溃", async () => {
+    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new Error("boom"));
+    render(<VoiceInput onTranscribed={() => {}} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "语音输入" }));
     expect(await screen.findByRole("button", { name: "语音输入" })).toBeInTheDocument();
   });
 

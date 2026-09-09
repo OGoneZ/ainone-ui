@@ -6,8 +6,14 @@
 import { useEffect, useRef, useState } from "react";
 import { asrTranscribe } from "@/ipc/asr";
 import { logger } from "@/lib/logger";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { MicIcon, StopIcon } from "@/components/ui/icons";
 import { toast } from "sonner";
+
+/** 跳转系统设置「隐私与安全性 → 麦克风」页（打开失败静默，toast 已给出手动路径）。 */
+function openMicrophoneSettings(): Promise<void> {
+  return openUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+}
 
 interface Props {
   /** 转写文本回填（不自动发送，可编辑确认） */
@@ -47,9 +53,22 @@ export function VoiceInput({ onTranscribed, registerToggle }: Props) {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      toast.error("未授权麦克风，请在系统设置允许麦克风权限");
-      logger.warn("asr", "record-start 失败：麦克风权限被拒");
+    } catch (e) {
+      // 区分被拒（引导去系统设置，Tauri 打包版需 Info.plist 声明才会弹授权框）
+      // 与无设备（纯提示）；其余按未知错误兜底。
+      const name = e instanceof DOMException ? e.name : "";
+      if (name === "NotAllowedError") {
+        toast.error("麦克风权限被拒，请在系统设置 → 隐私与安全性 → 麦克风 中允许本应用", {
+          action: { label: "打开系统设置", onClick: () => void openMicrophoneSettings() },
+        });
+        logger.warn("asr", "record-start 失败：麦克风权限被拒");
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        toast.error("未检测到可用的麦克风设备");
+        logger.warn("asr", "record-start 失败：无麦克风设备");
+      } else {
+        toast.error(`无法开始录音：${String(e)}`);
+        logger.warn("asr", "record-start 失败", { err: String(e) });
+      }
       return;
     }
     logger.info("asr", "record-start");
