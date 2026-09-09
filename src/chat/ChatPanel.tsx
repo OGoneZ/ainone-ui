@@ -1167,9 +1167,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
           // P35 R2：text 增量喂 pacer（揭示节奏的输入流）；tool/thought 不喂
           //（即时状态语义）。喂后 kick 排帧——自持循环会在积压清空前的每个
           // 帧里 tick + 提交，空窗期揭示不停滞。
-          if (e.type === "agent_text") {
-            pacer.onChunk(e.text);
-            rate.onChunk(e.text, Date.now()); // P37：到达侧字符增量（同点位输入流）
+          if (e.type === "agent_text" || e.type === "agent_thought") {
+            if (e.type === "agent_text") pacer.onChunk(e.text);
+            // P37：到达侧字符增量（同点位输入流）——thought 也是模型真实输出的
+            // token（claude thinking_delta / codex reasoning delta / pi
+            // thinking_delta 实证均为 content.text），计入才能覆盖「纯工具轮」
+            // （agent 任务常态）的速率显示。空 text（claude omitted 签名块）在
+            // rate.onChunk 内被丢弃。
+            rate.onChunk(e.text, Date.now());
           }
           // P30 AC-3.4：每个 turn 内容事件刷新「最近事件」时刻（静默感知数据源）。
           // P32 R1：不再逐事件 patch store（事件率写库击穿 memo），记到局部变量
