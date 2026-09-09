@@ -56,7 +56,7 @@ import { canFork, capabilitySnapshot } from "../chat/logic/capabilities";
 import { clampQuickAnchor } from "../chat/logic/quickPopClamp";
 import { composeDiffComments, type DiffComment } from "../chat/logic/diffComments";
 import { typewriterHint } from "../chat/logic/welcome";
-import { shouldRecycleSession, RECYCLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
+import { shouldRecycleSession, RECYCLE_THRESHOLD_MS, VISIBLE_THRESHOLD_MS } from "../sidebar/logic/recycle";
 import { logger } from "@/lib/logger";
 import { quickAsk, quickAskConfigGet } from "@/ipc/quickask";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -238,6 +238,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // M5：active prop 镜像——window 级监听闭包来自挂载帧，读 ref 取最新活跃态
   const activeRef = useRef(active);
   activeRef.current = active ?? true;
+  // P38：visible prop 镜像（同 activeRef 动机）——回收定时器闭包来自挂载帧，
+  // 读 ref 取最新可见态（分屏选中集变化时阈值随之切换）
+  const visibleRefProp = useRef(visible);
+  visibleRefProp.current = visible;
   // P31 多 tab 模型独立切换：active 变为 true 时重抛当前会话句柄。
   // App 只给 activeKey 的 ChatPanel 传 setter，但句柄仅在会话绑定时上抛——
   // 切 tab 后 App.activeSession 可能仍持旧 tab 的句柄，侧栏切模型会打到
@@ -493,12 +497,16 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     };
     document.addEventListener("mousedown", onDocMouseDown);
     // F-8-1 空闲超时回收：周期检查，空闲超阈值且无运行中 turn → 回收子进程
+    // P38：可见 tab（分屏上正显示）阈值放宽到 30 分钟——用户可能在阅读回复；
+    // 后台 tab 照旧 5 分钟。busy 检查在 shouldRecycleSession 内（忙时绝不回收）。
     recycleTimerRef.current = setInterval(() => {
       const s = sessionRef.current;
       if (!s) return;
       // 读 store 快照的 busy（闭包里的 busy 是挂载时的旧值）
       const isBusy = useSessionStore.getState().runtime[tabKey]?.busy ?? false;
-      if (shouldRecycleSession(lastActivityRef.current, Date.now(), RECYCLE_THRESHOLD_MS, isBusy)) {
+      const visibleRef = visibleRefProp.current;
+      const threshold = visibleRef ? Math.max(RECYCLE_THRESHOLD_MS, VISIBLE_THRESHOLD_MS) : RECYCLE_THRESHOLD_MS;
+      if (shouldRecycleSession(lastActivityRef.current, Date.now(), threshold, isBusy)) {
         sessionRef.current = null;
         // P29：回收后活跃会话句柄失效
         onActiveSession?.(null);
@@ -1218,6 +1226,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         //（turnEndedAt 封口后 UI 用两点差值显示；下轮 runPrompt 重置归零）。
         // 异常结束 turnEndedAt 恒为 undefined，常驻分支不满足，残留值无消费点。
         patch(tabKey, { busy: false, lastEventAt: undefined });
+        // P38：turn 收口刷新活动时间戳——空闲计时从「回复完毕」起算而非
+        // 「发起提问」，长回复后阅读窗口不被旧时间戳提前耗尽
+        lastActivityRef.current = Date.now();
         runRef.current = null;
         // P35 R2：turn 收口必须撤销揭示帧——自持帧若跨 turn 存活，会把旧 turn
         // 的揭示提交打进后续 runtime（测试实证：跨测试污染新起空气泡）
