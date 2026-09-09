@@ -690,9 +690,11 @@ tree-row:hover .filetree-ref {
   background: var(--bg-2);
 }
 
-/* P39 R4：键盘高亮（瞬态）——与「当前模型」.active（持久状态）正交叠加 */
+/* P39 R4：键盘高亮（瞬态）——与「当前模型」.active（持久状态）正交叠加。
+   描边 + 底色双通道保证可见（--brand 变量不存在，主题只有 --primary） */
 .model-switch-modal .msm-row.msm-row-kb {
-  outline: 1px solid var(--brand);
+  background: var(--bg-hover);
+  outline: 1px solid var(--primary);
   outline-offset: -1px;
 }
 
