@@ -38,6 +38,46 @@ jobs:
             exit 1
           fi
 
+      - name: Verify signing key configured
+        # P32 引入的必此前置：conf 已开 createUpdaterArtifacts=true，签名密钥缺失
+        # 会让 build 四腿在 ta(uri-action 处全部失败（20 分钟后才炸）。这里把
+        # 前置校验提前到门禁期：secret 未配/为空 → 30 秒内直接红，省下四腿构建费。
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY 未配置——发版前先在 Settings→Secrets 配置（值为 ~/.tauri/ainone-ui.key 文件内容，须以 = 结尾的 base64 全量粘贴），否则 build 四腿签名步骤必失败"
+            exit 1
+          fi
+          echo "✓ 签名密钥已配置（前 8 字符: ${KEY:0:8}…）"
+
+      # P32：updater 版本严格递增门禁。原放 publish(构建后)——版本没递增要烧 4×20
+      # 分钟才报错，位置不对称；上提到 preflight。R2 上现存 latest-updater.json 的
+      # version 必须 < 本次（sort -V 严格大于；同版重发亦拒绝——客户端对同版本号
+      # 判定混乱）。首次发布 R2 无清单则跳过。
+      - name: Verify updater version strictly increases
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -e
+          if aws s3api get-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
+              --key latest-updater.json prev-latest.json 2>/dev/null; then
+            PREV=$(jq -r .version prev-latest.json)
+            echo "previous: $PREV / this: $VERSION"
+            HIGHER=$(printf '%s\n%s\n' "$PREV" "$VERSION" | sort -V | tail -1)
+            if [ "$HIGHER" != "$VERSION" ] || [ "$PREV" = "$VERSION" ]; then
+              echo "::error::updater 版本号未严格递增（R2 现存 $PREV，本次 $VERSION）——先 bump package.json + tauri.conf.json 再打 tag"
+              exit 1
+            fi
+          else
+            echo "R2 无现存 updater 清单（首次发布），跳过递增校验"
+          fi
+
   build:
     needs: preflight
     strategy:
@@ -271,34 +311,6 @@ jobs:
               }
             }' > latest-updater.json
           cat latest-updater.json
-
-      - name: Verify version strictly increases (downgrade guard)
-        # R-32 门禁：updater 语义要求版本严格递增（客户端插件拒绝降级/同版重复发布
-        # 会让「已是最新」判定错乱）。R2 上已有 latest-updater.json 且版本 >= 本次
-        # → 直接失败，打回重新 bump（tag == conf 门禁保证 conf 已改，故必是漏 bump）。
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          BUCKET: ${{ secrets.R2_BUCKET }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          set -e
-          # 首发容忍 404（aws s3api 对不存在 key 返回 255/404 错误）
-          if aws s3api get-object --endpoint-url "$ENDPOINT" --bucket "$BUCKET" \
-              --key latest-updater.json prev-latest.json 2>/dev/null; then
-            PREV=$(jq -r .version prev-latest.json)
-            echo "previous: $PREV / this: $VERSION"
-            HIGHER=$(printf '%s\n%s\n' "$PREV" "$VERSION" | sort -V | tail -1)
-            # 严格大于（同版重发也拒绝——updater 客户端对同版本号判定混乱）
-            if [ "$HIGHER" != "$VERSION" ] || [ "$PREV" = "$VERSION" ]; then
-              echo "::error::版本号未严格递增（R2 现存 $PREV，本次 $VERSION）——updater 要求严格递增，先 bump package.json + tauri.conf.json"
-              exit 1
-            fi
-          else
-            echo "R2 无现存清单（首次发布 updater），跳过降级校验"
-          fi
 
       - name: Upload installers to R2
         env:
