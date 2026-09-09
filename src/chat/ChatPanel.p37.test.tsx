@@ -162,11 +162,12 @@ describe("P37：输出速率徽标", () => {
       );
     render(<ChatPanel tabKey="k1" adapter={adapter} />);
     await send("第一问");
+    // P38：每条 assistant 消息各自带冻结徽标 → 多个 stream-rate 并存取末条
     const first = await screen.findByTestId("stream-rate");
     const firstText = first.textContent;
 
     await send("第二问");
-    const second = await screen.findByTestId("stream-rate");
+    const second = screen.getAllByTestId("stream-rate").slice(-1)[0]!;
     expect(second.textContent).toMatch(/\d+(\.\d+)? tok\/s/); // 仍正常显示
     // rate 对象每轮重建——这里主要锁定第二轮徽标存在且格式正确（值可能巧合相近）
     expect(second).not.toBe(first);

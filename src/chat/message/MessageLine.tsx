@@ -186,12 +186,13 @@ export const MessageLine = memo(function MessageLine({
             P30：纯 text 轮次的静默感知也随 TurnElapsed 一并移除——文本轮事件密集，
             静默提示仅在工具轮有意义；工具轮静默由 p22e 活动卡 + lastEventAt 的
             TurnElapsed（下方保留）承担。
-            turn 总耗时常驻：运行中从 turnStartedAt 走秒；正常结束后冻结为
-            turnEndedAt - turnStartedAt（下个 turn 开始时归零重走）。 */}
+            turn 总耗时：运行中从 turnStartedAt 走秒（runtime 实时值，仅末条）。
+            P38：结束后读消息级 turnMs/rateTokPerS（随 JSONL 持久化）——每条
+            assistant 消息独立判断，历史轮重开照常显示冻结值。 */}
         {busy && isLast && lastEventAt ? (
           <TurnElapsed lastEventAt={lastEventAt} turnStartedAt={turnStartedAt} turnEndedAt={turnEndedAt} rateRef={rateRef} />
-        ) : !busy && turnEndedAt && turnStartedAt ? (
-          <TurnElapsedTurnEnded startedAt={turnStartedAt} endedAt={turnEndedAt} rateRef={rateRef} />
+        ) : !busy && msg.role === "assistant" && msg.turnMs !== undefined ? (
+          <TurnElapsedTurnEnded turnMs={msg.turnMs} rateTokPerS={msg.rateTokPerS} />
         ) : null}
         {/* hover 浮现操作行（F-8-5 分叉 + F-7-4 复制；F-15-4 icon-only 小圆钮） */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -469,17 +470,25 @@ function TurnElapsed({ lastEventAt, turnStartedAt, turnEndedAt, rateRef }: { las
   );
 }
 
-/** turn 结束后的常驻总耗时（冻结值，不走秒不消失）——末条消息 busy=false 时显示 */
-function TurnElapsedTurnEnded({ startedAt, endedAt, rateRef }: { startedAt: number; endedAt: number; rateRef?: { current: StreamRate | null } }) {
-  const seconds = Math.max(0, Math.round((endedAt - startedAt) / 1000));
+/** turn 结束后的常驻总耗时（冻结值，不走秒不消失）。
+ *  P38：数据源改为消息级 turnMs/rateTokPerS（随 JSONL 持久化）——每条 assistant
+ *  消息独立渲染，历史会话重开照常显示；rateTokPerS 缺省（纯 tool turn/旧日志）不显示徽标。 */
+function TurnElapsedTurnEnded({ turnMs, rateTokPerS }: { turnMs: number; rateTokPerS?: number }) {
+  const seconds = Math.max(0, Math.round(turnMs / 1000));
+  const color = rateTokPerS !== undefined ? (rateTokPerS < 15 ? "var(--danger)" : rateTokPerS < 30 ? "var(--warning)" : "var(--success)") : undefined;
   return (
     <div className="turn-elapsed" data-testid="turn-elapsed-ended" style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px", display: "flex", alignItems: "center", gap: 4 }}>
       <span data-testid="turn-total" className="inline-flex items-center gap-1">
         <ClockIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
         用时 {formatElapsed(seconds)}
       </span>
-      {/* P37 R3：收口后冻结的平均速率（与总耗时常驻语义对齐） */}
-      <StreamRateBadge rateRef={rateRef} live={false} />
+      {/* P37 R3：收口后冻结的平均速率（与总耗时常驻语义对齐）；P38：消息级持久值 */}
+      {rateTokPerS !== undefined && (
+        <span data-testid="stream-rate" data-live="false" className="inline-flex items-center gap-1" style={{ color }}>
+          <RateIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
+          {rateTokPerS < 10 ? rateTokPerS.toFixed(1) : Math.round(rateTokPerS)} tok/s
+        </span>
+      )}
     </div>
   );
 }

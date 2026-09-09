@@ -14,6 +14,7 @@ import { type AskAnswer, answersToContent, fieldsToQuestions, parseSchemaFields 
 import { PlanBar } from "@/chat/components/PlanBar";
 import { FilePreview } from "@/sidebar/FilePreview";
 import { QueueDock } from "@/chat/components/QueueDock";
+import { BuildLoadingOverlay } from "@/chat/components/BuildLoadingOverlay";
 import { QuotePanel, AttachList, DiffCommentsBar, EditBanner } from "@/chat/components/PanelStrips";
 import { Composer } from "@/chat/composer/Composer";
 import { QuickAskPopup } from "@/chat/composer/QuickAskPopup";
@@ -545,8 +546,22 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function ensureSession() {
-    if (sessionRef.current) return sessionRef.current;
+  // P38：建链去重——ensureSession 进行中的重复调用复用同一 promise。
+  // 触发面：首条消息 / fork 点击 / 空闲回收重建。遮罩已阻断交互（R4），此为
+  // 第二道保险：双击 fork 等竞态下不会 spawn 两个子进程。
+  const ensurePromiseRef = useRef<Promise<AcpSession> | null>(null);
+
+  function ensureSession(): Promise<AcpSession> {
+    if (sessionRef.current) return Promise.resolve(sessionRef.current);
+    if (ensurePromiseRef.current) return ensurePromiseRef.current;
+    const p = doEnsureSession().finally(() => {
+      ensurePromiseRef.current = null;
+    });
+    ensurePromiseRef.current = p;
+    return p;
+  }
+
+  async function doEnsureSession() {
     // L7：hadSession = 回收/回溯后重建链路 → 这才是 reopen 时点
     const hadSession = recycledRef.current;
     // H9（F3）：新建会话的 sessionId 只在 store 里（prop 的 resumeSessionId
@@ -868,6 +883,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   // —— F-8-5 会话分叉：从当前状态 fork，新会话落索引（标注来源）——
   // F-11-5：fork 成功后复制父日志为新会话日志 + 回调 onForkNavigate 自动跳转新 Tab
+  // P38：按钮常显（渲染期 gate 已摘）——能力判定后移到这里：ensureSession
+  // 建链（历史会话首次点击约 1~2s，期间 starting 遮罩反馈）后按真实
+  // capabilities 判定，不支持 fork 的 harness 明确报错而非隐藏入口。
   async function doFork() {
     if (busy) {
       toast.warning("当前 turn 运行中，等待结束后再分叉");
@@ -880,6 +898,10 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
     try {
       const s = await ensureSession();
+      if (!canFork(s.capabilities ?? null)) {
+        toast.error(`${adapter.name} 不支持会话分叉`);
+        return;
+      }
       const cwdAbs = cwd ?? adapter.cwd;
       const newId = await s.fork(cwdAbs);
       logger.info("session", "fork", { fromSessionId, toSessionId: newId });
@@ -1178,6 +1200,21 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
         // turn_stop 已先行捕获 outputTokens（协议前向兼容，当前 harness 不填）。
         rate.finalize(stopReasonOutputTokensRef.current, Date.now());
         stopReasonOutputTokensRef.current = null;
+        // P38：消息级 turn 元数据落盘——总耗时（墙钟）+ 冻结速率写进末条
+        // assistant 消息，persistNew（本收口链稍后调用）会把它们随 JSONL 持久化，
+        // 历史会话重开也能显示。用户取消（cancelled）同写（真实耗时）；
+        // 异常路径走 catch 不经过此处（无 turnEndedAt，同现状不显示）。
+        // 纯 tool turn（无文本输出）finalize 保持 null → rateTokPerS 不写。
+        {
+          const turnStartedAt = useSessionStore.getState().runtime[tabKey]?.turnStartedAt;
+          const rateVal = rate.display(Date.now());
+          if (turnStartedAt !== undefined) {
+            useSessionStore.getState().setLastAssistantTurnMeta(tabKey, {
+              turnMs: Math.max(0, Date.now() - turnStartedAt),
+              ...(rateVal !== null && rateVal > 0 ? { rateTokPerS: rateVal } : {}),
+            });
+          }
+        }
         // P33 F-32-1：通知「任务完成」（2026-09-09 起不看聚焦，一律发；
         // 用户自己取消不发——shouldNotify 决策）
         {
@@ -1379,9 +1416,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
 
   const perm = rt?.perm ?? null;
 
-  // P24g capability gate：fork 入口按 initialize 握手能力显隐（没能力不显示入口，
-  // 而不是点了报错）。回溯不 gate——软回溯是纯本地能力，与 harness 无关。
-  const forkEnabled = canFork(rt?.capabilities ?? null);
+  // P38：fork 渲染 gate 已摘除——按钮常显，能力判定后移到 doFork 点击时
+  // （建链后 session.capabilities）。原 P24g 渲染期 gate 在懒建链下恒 false
+  //（历史会话未握手 → capabilities=null → 按钮消失），与「保留懒加载」意图冲突。
 
   // 长会话虚拟列表（AC-P3-5 回归）：只渲染可见区消息。
   // P34 R1：enabled: visible——绑定「屏幕可见性」（本 tab 是其 tabset 的选中 tab）
@@ -1644,6 +1681,15 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     >
       {/* P16 F-16-1 文件预览浮层（DEC-48）：窗格内右侧 overlay，非模态 */}
       {previewPath && <FilePreview path={previewPath} onClose={closePreview} />}
+      {/* P38 R4：建链加载悬浮层——ensureSession 全程（首条消息/fork/回收重建）。
+          窗格内 absolute 遮罩：分屏只盖本窗格；场景文案按 resumeId 判定。
+          resumeId 与 ensureSession 内部同口径（prop + store 回收重建）。 */}
+      {starting && (
+        <BuildLoadingOverlay
+          resume={Boolean(resumeSessionId ?? rt?.sessionId)}
+          adapterName={adapter.name}
+        />
+      )}
       <div className="chat" ref={chatScrollRef}>
         {/* F-11-9 上一条指令回跳气泡（L2：sticky 于消息区顶部，显隐不再推拉内容；
             传真实阈值 64px，不再用 0/9999 伪造参数绕过纯函数语义） */}
@@ -1660,7 +1706,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
             ↑
           </button>
         )}
-        {starting && <div className="hint">正在启动 {adapter.name}…</div>}
+        {/* P38：starting 提示升级为窗格中央悬浮层（BuildLoadingOverlay），底部 hint 退役 */}
         {startError && !starting && (
           <div className="hint degraded" role="alert">
             ⚠️ {adapter.name} 启动失败：{startError}
@@ -1710,14 +1756,18 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   // P32 R1：lastEventAt 只传末条——消费点（TurnElapsed）仅
                   // busy && isLast 需要；传所有行会让每次提交击穿全部 MessageLine 的 memo
                   lastEventAt={vi.index === messages.length - 1 ? rt?.lastEventAt : undefined}
-                  // turn 总计时：同 lastEventAt 口径只传末条（TurnElapsed 消费）
+                  // turn 总计时：同 lastEventAt 口径只传末条（TurnElapsed 消费）。
+                  // P38：结束后冻结值改由消息级 turnMs/rateTokPerS 自带（MessageLine
+                  // 直接读 msg），turnEndedAt/turnStartedAt 仅剩运行中走秒消费点
                   turnStartedAt={vi.index === messages.length - 1 ? rt?.turnStartedAt : undefined}
                   turnEndedAt={vi.index === messages.length - 1 ? rt?.turnEndedAt : undefined}
                   // P37：速率器只给末条（消费点在末条下方 TurnElapsed 行右侧；
                   // 传所有行会击穿全部 MessageLine 的 memo）
                   rateRef={vi.index === messages.length - 1 ? rateStoreRef : undefined}
                   onSelect={onSelectText}
-                  onFork={forkEnabled && onFork ? doFork : undefined}
+                  // P38：fork 按钮常显（不再 gate 握手能力）——能力判定后移到
+                  // doFork 点击时（建链后 session.capabilities），历史会话免发消息即可分叉
+                  onFork={onFork ? doFork : undefined}
                   onRewind={onRewind ? () => askRewind(vi.index) : undefined}
                   onEdit={m.role === "user" ? () => startEdit(vi.index) : undefined}
                   diffComments={diffComments}
