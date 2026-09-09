@@ -77,6 +77,14 @@ describe("toolSubtitle（P30 AC-2.2）", () => {
     expect(toolSubtitle(["a"])).toBeNull();
     expect(toolSubtitle({ command: "" })).toBeNull(); // 空串不算命中
   });
+
+  it("skill：title 已含 skill 名 → null（去重）；title 缺省/不含 → 显示名", () => {
+    // claude 桥 title = "Load skill: hello-world"，rawInput.skill = "hello-world"
+    // 副标题再显示一遍就是用户实测的「skill 名重复」
+    expect(toolSubtitle({ skill: "hello-world" }, "Load skill: hello-world")).toBeNull();
+    expect(toolSubtitle({ skill: "hello-world" }, "Load skill")).toBe("hello-world");
+    expect(toolSubtitle({ skill: "hello-world" })).toBe("hello-world");
+  });
 });
 
 // —— P36 R1：toolCommand（命令段数据源）——

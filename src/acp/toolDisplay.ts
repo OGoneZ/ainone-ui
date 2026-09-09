@@ -92,7 +92,7 @@ function basename(p: string): string {
  *   Bash→{command}；Read/Write/Edit→{file_path|path}；Glob/Grep→{pattern, path|glob}；
  *   WebFetch→{url}；Agent/Task→{prompt}；Skill→{skill}（claude-agent-acp）
  */
-export function toolSubtitle(rawInput: unknown): string | null {
+export function toolSubtitle(rawInput: unknown, title?: string): string | null {
   if (rawInput === null || typeof rawInput !== "object" || Array.isArray(rawInput)) return null;
   const input = rawInput as Record<string, unknown>;
 
@@ -101,8 +101,12 @@ export function toolSubtitle(rawInput: unknown): string | null {
     return truncate(input.command.replace(/\s+/g, " ").trim());
   }
   // skill 加载（claude-agent-acp：rawInput {skill: "<name>"}）
+  // 去重：桥的 title 本就是「Load skill: <name>」（tools.js toolInfoFromToolUse），
+  // 副标题再显示一遍 skill 名会重复（用户实测）。title 已含名 → 不出副标题。
   if (typeof input.skill === "string" && input.skill.trim()) {
-    return truncate(input.skill.trim());
+    const name = input.skill.trim();
+    if (title && title.includes(name)) return null;
+    return truncate(name);
   }
   // 搜索模式（含 in path/glob 后缀）——先于文件路径分支（pattern+path 常同现）
   if (typeof input.pattern === "string" && input.pattern.trim()) {

@@ -201,7 +201,7 @@ function ToolBlock({
       : null;
   // P30 AC-2.3：kind 驱动图标（缺省回退扳手）+ rawInput 提炼参数副标题
   const KindIcon = kindIcon(toolKind);
-  const subtitle = toolSubtitle(rawInput);
+  const subtitle = toolSubtitle(rawInput, title);
   // P36 R1：execute 类两段式展开——命令段（rawInput.command 全文）+ 输出段。
   // 输出优先级：content text（ToolTextView 原路径）→ rawOutput 兜底（omp 实测
   // update 帧只有 rawOutput）→ 两者皆无时只显示命令段。
