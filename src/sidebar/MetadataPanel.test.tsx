@@ -104,11 +104,11 @@ describe("MetadataPanel", () => {
     return { setConfigOption };
   }
 
-  it("setConfigOption 返回 null（连接器拒绝）→ ModelSwitchPanel 会话级失败路径走 toast.warning", async () => {
+  it("setConfigOption 返回 null（连接器拒绝）→ ModelSwitchPanel 会话级失败路径走 toast.error（P32f sessionOnly）", async () => {
     useSessionStore.getState().ensure("k1", "omp");
     useSessionStore.getState().setConfigOptions("k1", [MODEL_OPTION]);
     // 静态配置给 base_url（探测基准）；模型展示仍走 configOptions currentValue。
-    // mock 的 supportsWrite 恒 true → omp 走「可写 + 会话拒绝」的 warning 分支。
+    // P32f：元数据面板 sessionOnly——拒绝走 error「未接受该模型」，不再有「已写入」warning。
     const { fetchHarnessMeta } = await import("@/ipc/harnessMeta");
     vi.mocked(fetchHarnessMeta).mockResolvedValue({ base_url: "https://gw.example.com/v1", model: null, api_key_present: true });
     const session = sessionOf(vi.fn().mockResolvedValue(null));
@@ -122,11 +122,12 @@ describe("MetadataPanel", () => {
     // 打开模型面板（模型行 aria-label=切换模型）；等探测成功渲染列表
     await user.click(screen.getByRole("button", { name: "切换模型" }));
     const target = await screen.findByRole("option", { name: /m-b/ });
-    // setConfigOption 被调（返回 null = 拒绝）→ 可写 harness 走 warning，不弹成功谎报
+    // setConfigOption 被调（返回 null = 拒绝）→ sessionOnly 走 error，不弹成功谎报
     const { toast } = await import("sonner");
     await user.click(target);
-    await vi.waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
     // 拒绝意味着会话内 currentValue 不变
     expect(useSessionStore.getState().runtime["k1"]?.configOptions?.[0].currentValue).toBe("m-a");
   });
