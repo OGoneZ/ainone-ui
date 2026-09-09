@@ -213,12 +213,14 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, listSessio
               modifiedPaths={modifiedPaths}
               onRefFile={(path) => {
                 logger.info("fs", "ref-file", { path });
-                window.dispatchEvent(new CustomEvent("ainone:ref-file", { detail: path }));
+                // P36 R5：detail 带 tabKey——ChatPanel 按事件归属判定，分屏下
+                // 点失焦窗格的文件树不再被活跃守卫丢弃
+                window.dispatchEvent(new CustomEvent("ainone:ref-file", { detail: { path, tabKey } }));
               }}
               onOpenFile={(path) => {
                 // P16 F-16-1：单击文件 → 软件内预览（CustomEvent 与 ChatPanel 解耦，同 ref-file 模式）
                 logger.info("preview", "open-file", { path });
-                window.dispatchEvent(new CustomEvent("ainone:open-file", { detail: path }));
+                window.dispatchEvent(new CustomEvent("ainone:open-file", { detail: { path, tabKey } }));
               }}
             />
           </div>

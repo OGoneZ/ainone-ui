@@ -28,6 +28,32 @@
   font-size: 0.8em;
 }
 
+/* P36 R3：工具卡「预览文件」按钮（头部 + 文件变更行共用）——hover 显现，不夺状态字 */
+.tool-preview-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 2px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.tool-head:hover .tool-preview-btn,
+.tool-preview-btn:focus-visible,
+.file-change-row:hover .tool-preview-btn {
+  opacity: 1;
+}
+
+.tool-preview-btn:hover {
+  color: var(--primary);
+  background: var(--bg-hover);
+}
+
 /* P30 AC-2.3：参数副标题（command/file 名/pattern…），与 title 同色弱化，超长省略 */
 .tool-head .tool-subtitle {
   overflow: hidden;

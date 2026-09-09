@@ -408,11 +408,27 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     };
     window.addEventListener("keydown", onKeyDown);
     // F-11-7 RightRail 文件树「引用」→ 注入附件（CustomEvent，与 Rail 解耦）
+    // P36 R5：守卫从「全局活跃」改「事件归属本窗格」——detail 带 tabKey 时按归属
+    // 判定（分屏下点失焦窗格的文件树，事件落回该窗格而非被活跃守卫丢弃）；
+    // 旧 string detail（无归属）按 active 兜底，保持兼容。
+    const eventOwnedByMe = (detail: unknown): detail is string =>
+      typeof detail === "string" ? Boolean(activeRef.current ?? true) : false;
     const onRefFile = (e: Event) => {
-      // M5：只接受发给自己所在 Tab 的事件（非活跃窗格忽略，防多窗格串扰）
-      if (!(activeRef.current ?? true)) return;
-      const path = (e as CustomEvent<string>).detail;
-      if (typeof path !== "string") return;
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail === "object" && detail !== null) {
+        const d = detail as { path?: unknown; tabKey?: unknown };
+        if (d.tabKey !== undefined && d.tabKey !== tabKey) return;
+        if (typeof d.path !== "string") return;
+        logger.info("fs", "ref-file", { path: d.path });
+        setFiles((prev) => {
+          const seen = new Set(prev.map((f) => f.path));
+          if (seen.has(d.path as string)) return prev;
+          return [...prev, { path: d.path as string }];
+        });
+        return;
+      }
+      if (!eventOwnedByMe(detail)) return;
+      const path = detail as string;
       logger.info("fs", "ref-file", { path });
       setFiles((prev) => {
         const seen = new Set(prev.map((f) => f.path));
@@ -421,12 +437,19 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
       });
     };
     window.addEventListener("ainone:ref-file", onRefFile);
-    // P16 F-16-1 文件预览：RightRail 单击文件 → 打开窗格内预览浮层（active 守卫同 ref-file）
+    // P16 F-16-1 文件预览：RightRail 单击文件 / 工具卡「预览」按钮 → 打开窗格内预览浮层
+    // （P36 R5：detail 带 tabKey 按归属判定；旧 string detail 按 active 兜底）
     const onOpenFile = (e: Event) => {
-      if (!(activeRef.current ?? true)) return;
-      const path = (e as CustomEvent<string>).detail;
-      if (typeof path !== "string") return;
-      setPreviewPath(path);
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail === "object" && detail !== null) {
+        const d = detail as { path?: unknown; tabKey?: unknown };
+        if (d.tabKey !== undefined && d.tabKey !== tabKey) return;
+        if (typeof d.path !== "string") return;
+        setPreviewPath(d.path);
+        return;
+      }
+      if (!eventOwnedByMe(detail)) return;
+      setPreviewPath(detail as string);
     };
     window.addEventListener("ainone:open-file", onOpenFile);
     // P16 F-16-2 历史 tab：跳转到第 N 条用户消息 / 请求回溯（CustomEvent，active 守卫同 ref-file）
@@ -1606,6 +1629,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   onAddDiffComment={addDiffComment}
                   activityOverride={activityOverride}
                   onActivityOverrideClear={clearActivityOverride}
+                  ownerTabKey={tabKey}
                 />
               </div>
             );

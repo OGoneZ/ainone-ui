@@ -31,6 +31,7 @@ import {
   GitFork,
   Globe,
   GripVertical,
+  Eye,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -103,6 +104,7 @@ export const CommentIcon = MessageSquarePlus; // F-12-5 diff 行内评论
 export const ForkIcon = GitFork; // F-15-4 分叉（icon-only 化）
 export const RewindIcon = Undo2; // F-15-4 回溯（icon-only 化）
 export const ClockIcon = Clock; // turn 总耗时计时
+export const EyeIcon = Eye; // P36 R3 工具卡「预览文件」入口
 export const MicIcon = Mic; // F-15-5 语音输入（去 emoji）
 export const SidebarCollapseIcon = PanelLeftClose; // F-15-7 左侧栏收缩
 export const SidebarExpandIcon = PanelLeftOpen; // F-15-7 左侧栏展开

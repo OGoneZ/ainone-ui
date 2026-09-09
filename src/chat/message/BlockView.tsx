@@ -8,7 +8,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import type { BlockMsg } from "@/acp/message-log";
 import type { ToolContent } from "@/acp/session-core";
-import { kindIcon, toolCommand, toolOutputFallback, toolSubtitle } from "@/acp/toolDisplay";
+import { kindIcon, previewTargetOf, toolCommand, toolOutputFallback, toolSubtitle } from "@/acp/toolDisplay";
 import type { DiffComment } from "@/chat/logic/diffComments";
 import { shouldAutoOpen } from "@/chat/logic/disclosure";
 import { MarkdownView } from "./MarkdownView";
@@ -19,6 +19,7 @@ import {
 
   ThinkingIcon,
   TerminalIcon,
+  EyeIcon,
 } from "@/components/ui/icons";
 import { useElapsedTicker } from "@/chat/hooks/useElapsedTicker";
 
@@ -150,6 +151,7 @@ function ToolBlock({
   onAddDiffComment,
   activityOverride,
   onActivityOverrideClear,
+  ownerTabKey,
 }: {
   toolCallId: string;
   title: string;
@@ -166,6 +168,8 @@ function ToolBlock({
   onAddDiffComment?: (c: DiffComment) => void;
   activityOverride?: boolean | null;
   onActivityOverrideClear?: () => void;
+  /** P36 R3：所属窗格 tabKey（预览文件事件归属） */
+  ownerTabKey?: string;
 }) {
   // P25：全局覆写优先；null 回局部态。
   // P32 AC-2.2/2.3：折叠策略收敛到 disclosure 纯函数——含 diff 默认展开、「无 diff→
@@ -203,6 +207,8 @@ function ToolBlock({
   const command = toolCommand(toolKind, rawInput);
   const hasTextContent = content.some((c) => c.kind === "text");
   const outputFallback = !hasTextContent ? toolOutputFallback(rawOutput) : null;
+  // P36 R3：写操作「预览文件」目标（diff path → rawInput file_path/path）；null 不渲染按钮
+  const previewTarget = previewTargetOf(toolKind, rawInput, content);
   return (
     // F-16-1（DEC-48）：data-status 驱动状态色点睛（CSS 按 status 着色）。
     // P36 R2：data-toolkind 驱动 kind 差异化外观（左边框/图标色，CSS 层分支）；
@@ -241,6 +247,23 @@ function ToolBlock({
           </span>
         )}
         {timeLabel && <span className="tool-elapsed">{timeLabel}</span>}
+        {previewTarget && (
+          <button
+            type="button"
+            className="tool-preview-btn"
+            aria-label={`预览 ${previewTarget}`}
+            title={`预览文件 ${previewTarget}`}
+            onClick={(e) => {
+              // 不触发折叠/展开（与文件树「引用」按钮同款 stopPropagation 纪律）
+              e.stopPropagation();
+              window.dispatchEvent(
+                new CustomEvent("ainone:open-file", { detail: { path: previewTarget, tabKey: ownerTabKey } }),
+              );
+            }}
+          >
+            <EyeIcon style={{ width: 13, height: 13, strokeWidth: 1.75 }} />
+          </button>
+        )}
         <span className="status">{TOOL_STATUS_LABEL[status] ?? status}</span>
       </div>
       {(open && command) || (open && (content.length > 0 || outputFallback)) ? (
@@ -326,6 +349,7 @@ export const BlockView = memo(function BlockView({
   onAddDiffComment,
   activityOverride,
   onActivityOverrideClear,
+  ownerTabKey,
 }: {
   block: BlockMsg;
   live: boolean;
@@ -334,6 +358,8 @@ export const BlockView = memo(function BlockView({
   onAddDiffComment?: (c: DiffComment) => void;
   activityOverride?: boolean | null;
   onActivityOverrideClear?: () => void;
+  /** P36 R3：所属窗格 tabKey——「预览文件」事件归属（缺省不带，监听侧按旧 string 兜底） */
+  ownerTabKey?: string;
 }) {
   switch (block.kind) {
     case "text":
@@ -364,6 +390,7 @@ export const BlockView = memo(function BlockView({
           onAddDiffComment={onAddDiffComment}
           activityOverride={activityOverride}
           onActivityOverrideClear={onActivityOverrideClear}
+          ownerTabKey={ownerTabKey}
         />
       );
   }

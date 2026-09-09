@@ -121,6 +121,26 @@ export function toolSubtitle(rawInput: unknown): string | null {
   return null;
 }
 
+/** P36 R3：写操作工具的「预览文件」目标路径。
+ *  优先级：① content 里 diff 的 path（写操作已展开 diff 的场景）；
+ *          ② rawInput 的 file_path / path（omp 双字段形，与 toolSubtitle 同款双认）。
+ *  kind 参数保留（调用侧语义显式），命中不了（execute/search/fetch 等）→ null。 */
+export function previewTargetOf(
+  _toolKind: string | undefined | null,
+  rawInput: unknown,
+  content: Array<{ kind: string; diff?: { path: string } }>,
+): string | null {
+  for (const c of content) {
+    if (c.kind === "diff" && c.diff?.path) return c.diff.path;
+  }
+  if (rawInput === null || typeof rawInput !== "object" || Array.isArray(rawInput)) return null;
+  const input = rawInput as Record<string, unknown>;
+  const filePath = [input.file_path, input.path].find(
+    (v): v is string => typeof v === "string" && v.trim().length > 0,
+  );
+  return filePath ?? null;
+}
+
 /** P36 R1：execute 类工具的完整命令原文（两段式展开的命令段数据源）。
  *  与 toolSubtitle 不同——不做截断/空格折叠，保留换行原样。
  *  命中条件（不依赖 kind 准确性，与 toolSubtitle 同纪律）：

@@ -22,6 +22,7 @@ import {
   ClockIcon,
   CopyIcon,
   EditIcon,
+  EyeIcon,
   ForkIcon,
   RewindIcon,
   ToolIcon,
@@ -45,6 +46,7 @@ export const MessageLine = memo(function MessageLine({
   lastEventAt,
   turnStartedAt,
   turnEndedAt,
+  ownerTabKey,
   onSelect,
   onFork,
   onRewind,
@@ -64,6 +66,8 @@ export const MessageLine = memo(function MessageLine({
   turnStartedAt?: number;
   /** turn 总耗时常驻：正常结束时的终点时间戳——结束后冻结为起点→终点墙钟差 */
   turnEndedAt?: number;
+  /** P36 R3：所属窗格 tabKey——工具卡「预览文件」事件的归属标识（缺省不带） */
+  ownerTabKey?: string;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
   onRewind?: () => void;
@@ -167,9 +171,10 @@ export const MessageLine = memo(function MessageLine({
               onAddDiffComment={onAddDiffComment}
               activityOverride={activityOverride}
               onActivityOverrideClear={onActivityOverrideClear}
+              ownerTabKey={ownerTabKey}
             />
           ) : (
-            <ActivityGroupCard key={itemKey(item, i)} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} />
+            <ActivityGroupCard key={itemKey(item, i)} item={item} live={busy && isLast} onSelect={onSelect} diffComments={diffComments} onAddDiffComment={onAddDiffComment} activityOverride={activityOverride} onActivityOverrideClear={onActivityOverrideClear} ownerTabKey={ownerTabKey} />
           ),
         )}
         {/* p22e：turn 总耗时并入活动组卡实时走秒；纯 text 轮次不显示计时。
@@ -229,6 +234,7 @@ function ActivityGroupCard({
   onAddDiffComment,
   activityOverride,
   onActivityOverrideClear,
+  ownerTabKey,
 }: {
   item: Extract<RenderItem, { type: "activity_group" }>;
   /** 当前 turn 运行中且是末条消息——running 组卡只在此时走秒（历史消息异常无 ms 的 thought 不走秒） */
@@ -240,6 +246,8 @@ function ActivityGroupCard({
   activityOverride?: boolean | null;
   /** P25：手动点击单卡 → 清除全局覆写 */
   onActivityOverrideClear?: () => void;
+  /** P36 R3：所属窗格 tabKey（预览文件事件归属） */
+  ownerTabKey?: string;
 }) {
   // P32 AC-2.6：组内含 diff → 组默认展开（写操作收组后仍可见）；其余折叠。
   // 初始值只在挂载时计算，之后纯手动/覆写驱动——流式重渲染不会强开已手动收起的组。
@@ -325,7 +333,7 @@ function ActivityGroupCard({
                 文件变更
               </div>
               {fileChanges.map((f) => (
-                <FileChangeRow key={f.path} change={f} diffs={diffs} diffComments={diffComments} onAddDiffComment={onAddDiffComment} />
+                <FileChangeRow key={f.path} change={f} diffs={diffs} diffComments={diffComments} onAddDiffComment={onAddDiffComment} ownerTabKey={ownerTabKey} />
               ))}
             </div>
           )}
@@ -341,6 +349,7 @@ function ActivityGroupCard({
               onAddDiffComment={onAddDiffComment}
               activityOverride={activityOverride}
               onActivityOverrideClear={onActivityOverrideClear}
+              ownerTabKey={ownerTabKey}
             />
           ))}
         </div>
@@ -355,11 +364,14 @@ function FileChangeRow({
   diffs,
   diffComments,
   onAddDiffComment,
+  ownerTabKey,
 }: {
   change: { path: string; added: number; removed: number };
   diffs: Array<Extract<ToolContent, { kind: "diff" }>>;
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
+  /** P36 R3：所属窗格 tabKey（预览文件事件归属） */
+  ownerTabKey?: string;
 }) {
   const [open, setOpen] = useState(false);
   const name = change.path.split("/").filter(Boolean).pop() ?? change.path;
@@ -375,6 +387,20 @@ function FileChangeRow({
         <span title={change.path}>{name}</span>
         {change.added > 0 && <span style={{ color: "var(--success)" }}>+{change.added}</span>}
         {change.removed > 0 && <span style={{ color: "var(--danger)" }}>−{change.removed}</span>}
+      </button>
+      <button
+        type="button"
+        className="tool-preview-btn"
+        aria-label={`预览 ${change.path}`}
+        title={`预览文件 ${change.path}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          window.dispatchEvent(
+            new CustomEvent("ainone:open-file", { detail: { path: change.path, tabKey: ownerTabKey } }),
+          );
+        }}
+      >
+        <EyeIcon style={{ width: 12, height: 12, strokeWidth: 1.75 }} />
       </button>
       {open && (
         <div className="mt-1">
