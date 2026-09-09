@@ -194,24 +194,60 @@ export function toolOutputFallback(rawOutput: unknown): string | null {
 
 // —— P36 反馈：危险命令识别（rm 等删除类命令 execute 卡红色警示）——
 // claude 桥对 rm 命令报 kind=execute（非 delete），纯 kind 分支无危险语义。
-// 命令级检测：解析首 token（穿透 env= 前缀 / sudo），basename 命中危险清单 → danger。
+// 命令级检测：按顶层控制操作符（&& || ; |）切段（引号/$()/反引号内不分），每段首
+// 命令（穿透 env= 前缀 / sudo / env，绝对路径取 basename）命中危险清单 → danger。
 // 保守清单起步：文件/目录删除 + 磁盘覆写类。宁可漏报不误报（find -delete、git clean 不收）。
 const DANGEROUS_COMMANDS = new Set(["rm", "rmdir", "shred", "unlink", "mkfs", "mkfs.ext4", "mkfs.xfs", "truncate"]);
 
-/** execute 命令是否具危险语义（渲染层 data-risk="danger" → 红色边框/图标）。
- *  引号内不做解析（首 token 在引号内是病态命令，不识别也不误伤）。 */
-export function isRiskyCommand(command: string): boolean {
-  const tokens = command.trim().split(/\s+/);
-  if (tokens.length === 0) return false;
+/** 单段命令的首命令是否危险（env/sudo 穿透 + basename 归一） */
+function segmentIsRisky(segment: string): boolean {
+  const tokens = segment.trim().split(/\s+/);
   for (const t of tokens) {
-    // 穿透 env 赋值前缀（FOO=1 …）
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue;
-    // 穿透 sudo / env
+    if (t.length === 0) continue;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue; // env 赋值前缀
     if (t === "sudo" || t === "env") continue;
-    // 管道/分隔符后续段不判（只看首命令）
-    if (/^[|;&]$/.test(t)) return false;
     const base = t.split("/").pop() ?? t;
     return DANGEROUS_COMMANDS.has(base);
   }
   return false;
+}
+
+/** execute 命令是否具危险语义（渲染层 data-risk="danger" → 红色边框/图标）。
+ *  多段命令（bun … && rm …）任意段命中即危险；引号/子命令内不切不判。 */
+export function isRiskyCommand(command: string): boolean {
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+  let subDepth = 0;
+  let segStart = 0;
+  const segments: string[] = [];
+  let i = 0;
+  while (i < command.length) {
+    const ch = command[i];
+    if (escaped) { escaped = false; i += 1; continue; }
+    if (ch === "\\") { escaped = true; i += 1; continue; }
+    if (inSingle) { if (ch === "'") inSingle = false; i += 1; continue; }
+    if (inDouble) {
+      if (ch === '"') inDouble = false;
+      else if (ch === "$" && command[i + 1] === "(") subDepth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === "'") { inSingle = true; i += 1; continue; }
+    if (ch === '"') { inDouble = true; i += 1; continue; }
+    if (ch === "$" && command[i + 1] === "(") { subDepth += 1; i += 2; continue; }
+    if (ch === ")") { if (subDepth > 0) subDepth -= 1; i += 1; continue; }
+    if (subDepth === 0) {
+      const two = command.slice(i, i + 2);
+      if (two === "&&" || two === "||" || ch === ";" || ch === "|") {
+        segments.push(command.slice(segStart, i));
+        i += two.length === 2 ? 2 : 1;
+        segStart = i;
+        continue;
+      }
+    }
+    i += 1;
+  }
+  segments.push(command.slice(segStart));
+  return segments.some(segmentIsRisky);
 }

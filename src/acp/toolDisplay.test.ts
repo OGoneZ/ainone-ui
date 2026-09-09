@@ -165,10 +165,18 @@ describe("isRiskyCommand（P36 危险命令警示）", () => {
     expect(isRiskyCommand("/usr/sbin/rmdir d")).toBe(true);
   });
 
+  it("多段命令：任意段命中即危险（用户实测场景 bun … && rm …）", () => {
+    expect(
+      isRiskyCommand('bun /x/tmp/hello.ts && rm /x/tmp/hello.ts && echo "已删除"'),
+    ).toBe(true);
+    expect(isRiskyCommand("echo done; rm -rf tmp | tee log")).toBe(true);
+  });
+
   it("安全命令不误报", () => {
     expect(isRiskyCommand("git status && npm run build")).toBe(false);
     expect(isRiskyCommand("ls -la")).toBe(false);
     expect(isRiskyCommand("echo rm")).toBe(false); // echo 的参数不算首命令
+    expect(isRiskyCommand('echo "rm -rf now"')).toBe(false); // 引号内不判
     expect(isRiskyCommand("")).toBe(false);
   });
 });
