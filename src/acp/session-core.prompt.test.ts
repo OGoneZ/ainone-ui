@@ -121,7 +121,7 @@ describe("session-core · prompt 循环边界（防回归）", () => {
     const agentTexts = events.filter((e) => e.type === "agent_text").length;
     expect(agentTexts).toBeLessThanOrEqual(1000); // drain 派发 ≤ 上限条数
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("收尾补派达上限"));
-    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn" });
+    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn", outputTokens: null });
     await session.dispose();
   });
 
@@ -141,7 +141,7 @@ describe("session-core · prompt 循环边界（防回归）", () => {
 
     await expect(p).resolves.toBeUndefined();
     expect(events.some((e) => e.type === "usage")).toBe(true);
-    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn" });
+    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn", outputTokens: null });
     await session.dispose();
   });
 
@@ -160,7 +160,7 @@ describe("session-core · prompt 循环边界（防回归）", () => {
 
     await p;
     expect(events).toContainEqual({ type: "usage", used: 10, size: 100, cost: null });
-    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn" });
+    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn", outputTokens: null });
     await session.dispose();
   });
 
@@ -177,7 +177,7 @@ describe("session-core · prompt 循环边界（防回归）", () => {
     await p;
 
     expect(events.filter((e) => e.type === "agent_text")).toHaveLength(2);
-    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn" });
+    expect(events[events.length - 1]).toEqual({ type: "turn_stop", stopReason: "end_turn", outputTokens: null });
     await session.dispose();
   });
 
