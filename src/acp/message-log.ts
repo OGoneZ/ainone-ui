@@ -39,7 +39,17 @@ export type BlockMsg =
 
 export type ChatMsg =
   | { role: "user"; text: string }
-  | { role: "assistant"; blocks: BlockMsg[] };
+  | {
+      role: "assistant";
+      blocks: BlockMsg[];
+      /** P38：turn 总耗时（墙钟毫秒，起点→终点）。turn 收口（含用户取消）写入并随
+       *  JSONL 持久化——历史会话重开也能显示冻结总耗时。异常路径（进程死亡/出错）
+       *  不写。旧日志缺省 → 不显示。 */
+      turnMs?: number;
+      /** P38：turn 平均输出速率（tok/s，rate.finalize 冻结值）。纯 tool turn（无文本
+       *  输出）不写。旧日志缺省 → 不显示徽标。 */
+      rateTokPerS?: number;
+    };
 
 export interface LogStore {
   /** 读回当前日志全量文本（可能为空串） */
@@ -78,7 +88,13 @@ function isChatMsg(o: unknown): o is ChatMsg {
   const m = o as Record<string, unknown>;
   if (m.role === "user") return typeof m.text === "string";
   if (m.role === "assistant") {
-    return Array.isArray(m.blocks) && m.blocks.every(isBlock);
+    return (
+      Array.isArray(m.blocks) &&
+      m.blocks.every(isBlock) &&
+      // P38：turn 元数据可选 number——坏类型（如字符串）拒收整条，与 ms/startTs 同策略
+      (m.turnMs === undefined || typeof m.turnMs === "number") &&
+      (m.rateTokPerS === undefined || typeof m.rateTokPerS === "number")
+    );
   }
   return false;
 }

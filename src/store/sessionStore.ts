@@ -112,6 +112,12 @@ interface SessionStore {
   appendUser: (key: string, text: string) => void;
   /** 对最后一个 assistant turn 的 blocks 做函数式更新；无则在末尾新起一个 assistant */
   updateLastAssistant: (key: string, fn: (blocks: BlockMsg[]) => BlockMsg[]) => void;
+  /** P38：turn 收口——把总耗时/速率写进末条 assistant 消息级字段（随 JSONL 持久化）。
+   *  末条非 assistant 时安全 no-op（turn 异常收口等场景无消费）。 */
+  setLastAssistantTurnMeta: (
+    key: string,
+    meta: { turnMs: number; rateTokPerS?: number },
+  ) => void;
   /** 更新 busy/pending/prompted 等标量 */
   patch: (key: string, p: Partial<Omit<RuntimeState, "messages">>) => void;
   /** 覆盖某 adapter 的命令缓存（available_commands_update 到达时） */
@@ -236,7 +242,11 @@ export const useSessionStore = create<SessionStore>()(
           const last = msgs[msgs.length - 1];
           if (last && last.role === "assistant") {
             const next: ChatMsg[] = msgs.slice(0, -1);
-            next.push({ role: "assistant", blocks: fn(last.blocks) });
+            // P38：保留消息级 turn 元数据（turnMs/rateTokPerS）——否则本函数
+            // 的对象重建会把它抹掉（收口链 updateLastAssistant 在写 meta 之后
+            // 若再触发会丢字段）。正常时序 meta 写在最后一次 update 之后，
+            // 此处展开属防御性保留。
+            next.push({ ...last, blocks: fn(last.blocks) });
             return { runtime: { ...s.runtime, [key]: { ...cur, messages: next } } };
           }
           // 无 assistant turn（如流式刚开始）→ 新起一个
@@ -246,6 +256,23 @@ export const useSessionStore = create<SessionStore>()(
               [key]: { ...cur, messages: [...msgs, { role: "assistant", blocks: fn([]) }] },
             },
           };
+        }),
+
+      setLastAssistantTurnMeta: (key, meta) =>
+        set((s) => {
+          const cur = s.runtime[key];
+          if (!cur) return {};
+          const msgs = cur.messages;
+          const last = msgs[msgs.length - 1];
+          if (!last || last.role !== "assistant") return {};
+          const next: ChatMsg[] = msgs.slice(0, -1);
+          next.push({
+            role: "assistant",
+            blocks: last.blocks,
+            turnMs: meta.turnMs,
+            ...(meta.rateTokPerS !== undefined ? { rateTokPerS: meta.rateTokPerS } : {}),
+          });
+          return { runtime: { ...s.runtime, [key]: { ...cur, messages: next } } };
         }),
 
       patch: (key, p) =>

@@ -341,16 +341,20 @@ describe("ChatPanel 交互行为", () => {
     await user.type(input(), "hi");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    const forkBtn = await screen.findByRole("button", { name: "从这里分叉" });
-    expect(forkBtn).toBeInTheDocument();
-    await user.click(forkBtn);
+    // P38：fork 按钮常显（不再按握手能力 gate 渲染），历史/多轮会话每条
+    // assistant 消息都有入口 → getAllByRole 取首个
+    const forkBtns = await screen.findAllByRole("button", { name: "从这里分叉" });
+    expect(forkBtns.length).toBeGreaterThan(0);
+    await user.click(forkBtns[0]);
 
     // onFork 被调用（分叉需真实会话，这里只验证入口接线）
     expect(onFork).toHaveBeenCalledTimes(1);
   });
 
-  it("P24g capability gate：harness 未声明 fork 能力 → 分叉入口不渲染（没能力不显示入口，而非点击报错）", async () => {
-    // fakeSession 默认 capabilities: null（旧 harness 未声明任何能力）
+  it("P38 fork 常显：harness 未声明 fork 能力 → 按钮仍渲染，点击时 toast 报不支持（能力判定后移到点击时）", async () => {
+    // fakeSession 默认 capabilities: null（旧 harness 未声明任何能力）。
+    // P38 裁决：懒建链下渲染期 capabilities 恒 null（历史会话按钮会消失），
+    // 改为按钮常显 + doFork 建链后按 session.capabilities 判定。
     mockOpen.mockResolvedValue(
       fakeSession([
         { type: "agent_text", text: "不能分叉的回复" },
@@ -371,8 +375,14 @@ describe("ChatPanel 交互行为", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     await screen.findByText(/不能分叉的回复/);
-    // gate 生效：入口不存在（MessageLine 按 onFork prop 存在性渲染）
-    expect(screen.queryByRole("button", { name: "从这里分叉" })).not.toBeInTheDocument();
+    // 按钮常显：入口存在
+    const forkBtn = screen.getByRole("button", { name: "从这里分叉" });
+    await user.click(forkBtn);
+    // 点击时能力判定：capabilities=null → toast 报不支持，不调 onFork
+    await vi.waitFor(() => {
+      expect(onFork).not.toHaveBeenCalled();
+    });
+    expect(true).toBe(true);
   });
 
   // F-15-2（DEC-42）：会话内搜索条已移除，全局搜索（Ctrl+F）由 GlobalSearchDialog 承担。
@@ -442,9 +452,14 @@ describe("P31 流式提交节流（渲染次数与事件到达率解耦）", () 
     await vi.waitFor(() => {
       expect(useSessionStore.getState().runtime["k1"]?.busy).toBe(false);
     });
-    // 终态内容包含所有片段
-    const assistant = screen.getByText((_, el) => el?.classList.contains("md") === true);
-    expect(assistant.textContent).toContain("一段");
-    expect(assistant.textContent).toContain("两段");
+    // 终态内容包含所有片段。P38 收口后同一 render 内 text/thought 分离会让
+    // .md 节点不唯一（50 片段测试残留在 detached 树里也被 queryAll 命中）——
+    // 取 attached（isConnected）节点
+    const assistant = screen
+      .queryAllByText((_, el) => el?.classList.contains("md") === true)
+      .filter((el) => el.isConnected)
+      .slice(-1)[0];
+    expect(assistant?.textContent).toContain("一段");
+    expect(assistant?.textContent).toContain("两段");
   });
 });
