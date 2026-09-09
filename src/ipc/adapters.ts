@@ -131,14 +131,17 @@ export interface HarnessConfigView {
   model: string;
   sourceFile: string;
   present: boolean;
+  /** P39 上下文窗口 tokens 回显（空串 = 未设置，保存时落默认 1000000） */
+  contextTokens: string;
 }
 
-/** 配置代写：保存输入（apiKey 留空 = 保留既有） */
+/** 配置代写：保存输入（apiKey 留空 = 保留既有；contextTokens 留空 = 默认 1000000） */
 export interface HarnessConfigInput {
   program: string;
   endpoint: string;
   apiKey: string;
   model: string;
+  contextTokens?: string;
 }
 
 export async function harnessConfigRead(adapterId: string): Promise<HarnessConfigView> {

@@ -5,7 +5,7 @@
 // ②写回配置文件（claude-code/codex/omp：Rust 定点替换+写前备份；claude-code/codex 提示新会话生效）。
 // 探测失败展示结构化原因 + 重试。
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { probeModels, writeHarnessSettings, supportsWrite } from "@/ipc/harnessMeta";
 import { harnessConfigSave } from "@/ipc/adapters";
@@ -142,6 +142,11 @@ export function ModelSwitchPanel({
   const [probeError, setProbeError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
+  // P39 R4：键盘高亮（瞬态选择，与「当前模型」的 aria-selected/.active 正交）。
+  // -1 = 无高亮；↑↓ 在 filtered 范围内循环移动；过滤词变化重置 0。
+  const [kbIdx, setKbIdx] = useState(0);
+  const filterRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
 
   const writable = supportsWrite(adapterId);
   // configOptions 里 category=model 的 select 项 → 会话级切换可用（omp/pi 实测有）
@@ -178,12 +183,45 @@ export function ModelSwitchPanel({
   useEffect(() => {
     if (open) {
       setFilter("");
+      setKbIdx(0);
       void doProbe();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, baseUrl, formContext?.endpoint, formContext?.apiKey]);
 
   const filtered = models?.filter((m) => m.toLowerCase().includes(filter.toLowerCase())) ?? [];
+
+  // P39 R4：过滤结果变化 → 高亮重置第一项（越界钳位；空列表归 -1）
+  useEffect(() => {
+    setKbIdx((i) => (filtered.length === 0 ? -1 : Math.min(Math.max(i, 0), filtered.length - 1)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, models, probeError, probing]);
+
+  // P39 R4：键盘高亮行滚入可视区（P26c slash 菜单同款 block:nearest）
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || kbIdx < 0) return;
+    list.querySelector(".msm-row[data-kb-active='true']")?.scrollIntoView({ block: "nearest" });
+  }, [kbIdx]);
+
+  /** P39 R4：过滤框键盘导航——↑↓ 循环移动高亮、Enter 确认高亮项（走 pick 同一
+   *  链路，三处入口语义自动一致）、Esc 交 radix Dialog 关闭（不在此拦截） */
+  function onFilterKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (filtered.length === 0) return;
+      e.preventDefault();
+      setKbIdx((i) => {
+        const base = i < 0 ? 0 : i;
+        return e.key === "ArrowDown" ? (base + 1) % filtered.length : (base - 1 + filtered.length) % filtered.length;
+      });
+      return;
+    }
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      if (kbIdx < 0 || kbIdx >= filtered.length) return; // 无高亮 → 不动作
+      e.preventDefault();
+      void pick(filtered[kbIdx]);
+    }
+  }
 
   async function pick(model: string) {
     setSaving(model);
@@ -241,6 +279,8 @@ export function ModelSwitchPanel({
           endpoint: formContext.endpoint,
           apiKey: formContext.apiKey,
           model,
+          // P39：点选模型走配置代写时上下文窗口落默认 1M（与设置页保存同语义）
+          contextTokens: "",
         });
         logger.info("meta", "model-created", { adapterId, model, path: written });
         const t = switchResultToast({
@@ -290,12 +330,16 @@ export function ModelSwitchPanel({
           </DialogTitle>
         </DialogHeader>
 
+        {/* P39 R4：打开即聚焦（autoFocus），直接打字过滤；↑↓/Enter 键盘导航 */}
         <input
+          ref={filterRef}
           className="msm-filter"
           type="text"
           placeholder="过滤模型…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={onFilterKeyDown}
+          autoFocus
           aria-label="过滤模型"
         />
 
@@ -317,14 +361,17 @@ export function ModelSwitchPanel({
             ) : filtered.length === 0 ? (
               <div className="msm-state">无匹配「{filter}」的模型</div>
             ) : (
-              <ul className="msm-list" role="listbox" aria-label="模型列表">
-                {filtered.map((m) => (
+              <ul className="msm-list" role="listbox" aria-label="模型列表" ref={listRef}>
+                {filtered.map((m, i) => (
                   <li key={m}>
                     <button
                       type="button"
                       role="option"
                       aria-selected={m === currentModel}
-                      className={m === currentModel ? "msm-row active" : "msm-row"}
+                      data-kb-active={i === kbIdx ? "true" : undefined}
+                      className={
+                        (m === currentModel ? "msm-row active" : "msm-row") + (i === kbIdx ? " msm-row-kb" : "")
+                      }
                       disabled={saving !== null}
                       onClick={() => void pick(m)}
                     >

@@ -202,6 +202,7 @@ describe("ModelSwitchPanel", () => {
         endpoint: "https://form.example.com/v1",
         apiKey: "sk-form",
         model: "m-b",
+        contextTokens: "",
       }),
     );
     // 新建分叉不调定点替换
@@ -225,6 +226,7 @@ describe("ModelSwitchPanel", () => {
         endpoint: "https://form.example.com/v1",
         apiKey: "sk-form",
         model: "m-b",
+        contextTokens: "",
       }),
     );
     expect(writeHarnessSettings).not.toHaveBeenCalled();

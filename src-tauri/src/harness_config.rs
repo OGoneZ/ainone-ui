@@ -30,6 +30,8 @@ pub struct HarnessConfigView {
     pub source_file: String,
     /// 配置文件是否已存在（false = 保存时将新建）
     pub present: bool,
+    /// 上下文窗口 tokens 回显（空串 = 未设置，保存时落默认 1000000）
+    pub context_tokens: String,
 }
 
 /// 保存输入
@@ -42,7 +44,17 @@ pub struct HarnessConfigInput {
     /// 留空 = 保留既有 key
     pub api_key: String,
     pub model: String,
+    /// 上下文窗口 tokens（仅 claude-code 消费；None/留空 = 默认 1000000）
+    #[serde(default)]
+    pub context_tokens: Option<String>,
 }
+
+/// Claude 通道默认上下文窗口（P39：GLM/DeepSeek 等第三方模型原生 1M，
+/// Claude Code 对未知网关模型兜底 200k 提前压缩——env 覆盖对非 claude- 模型名直接生效）。
+pub const DEFAULT_CLAUDE_CONTEXT_TOKENS: u64 = 1_000_000;
+
+/// Claude Code env 范围上限（autoCompactWindow 接受 100k~1M，超出被客户端 cap 无意义）。
+const MAX_CLAUDE_CONTEXT_TOKENS: u64 = 1_000_000;
 
 /// 纯函数：目标配置文件路径（home 注入便于单测）。
 pub fn config_file_for(adapter_id: &str, home: &Path) -> Option<PathBuf> {
@@ -57,9 +69,9 @@ pub fn config_file_for(adapter_id: &str, home: &Path) -> Option<PathBuf> {
 }
 
 /// 纯函数：读回显（文本由调用方读好后传入，缺失传 None）。
-/// key 明文不出现在视图里，只报 has_api_key。
-pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, String) {
-    let empty = (String::new(), false, String::new());
+/// key 明文不出现在视图里，只报 has_api_key；context_tokens 空串 = 未设置。
+pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, String, String) {
+    let empty = (String::new(), false, String::new(), String::new());
     let Some(raw) = raw else { return empty };
     match adapter_id {
         "claude-code" => {
@@ -73,7 +85,13 @@ pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, Str
             // P32a：key 判定统一走 harness_meta::claude_key_present（双字段单一实现）
             let has_key = crate::harness_meta::claude_key_present(&v);
             let model = v.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
-            (endpoint, has_key, model)
+            let context_tokens = v
+                .get("env")
+                .and_then(|e| e.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            (endpoint, has_key, model, context_tokens)
         }
         "codex" => {
             let Ok(doc) = raw.parse::<toml_edit::DocumentMut>() else { return empty };
@@ -107,16 +125,18 @@ pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, Str
             // 这里（无 AppHandle 上下文的读路径）以 keys 环境注入检查兜底。
             // 注意：读回显只在命令线程发生，codex_key_present 通过全局目录解析。
             let has_key = codex_key_present();
-            (endpoint, has_key, model)
+            (endpoint, has_key, model, String::new())
         }
         "pi" => {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else { return empty };
-            read_pi_provider(&v)
+            let (endpoint, has_key, model) = read_pi_provider(&v);
+            (endpoint, has_key, model, String::new())
         }
         "omp" => {
             // YAML 与 pi 的 JSON 同构；扫 providers 下各层的 baseUrl/apiKey/model id，
             // ainone 优先、无则首个含 baseUrl 的 provider（用户自配名各异，S6 反馈缺陷）
-            yaml_providers_scan(raw)
+            let (endpoint, has_key, model) = yaml_providers_scan(raw);
+            (endpoint, has_key, model, String::new())
         }
         "opencode" => {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else { return empty };
@@ -133,7 +153,7 @@ pub fn read_view_text(adapter_id: &str, raw: Option<&str>) -> (String, bool, Str
                 .and_then(|x| x.as_str())
                 .is_some_and(|s| !s.trim().is_empty());
             let model = v.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
-            (endpoint, has_key, model)
+            (endpoint, has_key, model, String::new())
         }
         _ => empty,
     }
@@ -360,9 +380,31 @@ fn json_set_path(v: &mut serde_json::Value, path: &str, value: serde_json::Value
     Ok(())
 }
 
+/// 纯函数：解析用户输入的上下文 tokens——None/空串 = 默认 1M；
+/// 非数字或 0 报错；超上限钳到 1M（Claude Code 客户端本身也会 cap）。
+fn parse_context_tokens(raw: Option<&str>) -> Result<u64, String> {
+    let Some(s) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(DEFAULT_CLAUDE_CONTEXT_TOKENS);
+    };
+    let n: u64 = s
+        .parse()
+        .map_err(|_| format!("上下文大小须为正整数（收到 \"{s}\"）"))?;
+    if n == 0 {
+        return Err("上下文大小须为正整数".into());
+    }
+    Ok(n.min(MAX_CLAUDE_CONTEXT_TOKENS))
+}
+
 /// 纯函数：Claude settings 合并写（endpoint/key/model + DEFAULT_*_MODEL 三键组）。
 /// key 为空串 = 不动既有 AUTH_TOKEN（保留既有密钥纪律）。
-pub fn claude_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str) -> Result<String, String> {
+/// context_tokens：Some(n) 显式写 env.CLAUDE_CODE_MAX_CONTEXT_TOKENS；None = 不动既有。
+pub fn claude_merge_write(
+    raw: Option<&str>,
+    endpoint: &str,
+    key: &str,
+    model: &str,
+    context_tokens: Option<u64>,
+) -> Result<String, String> {
     let base_raw = raw.unwrap_or("{}");
     let mut sets: Vec<(&str, serde_json::Value)> = vec![
         ("env.ANTHROPIC_BASE_URL", serde_json::Value::String(endpoint.into())),
@@ -373,6 +415,12 @@ pub fn claude_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &
     ];
     if !key.trim().is_empty() {
         sets.push(("env.ANTHROPIC_AUTH_TOKEN", serde_json::Value::String(key.into())));
+    }
+    if let Some(n) = context_tokens {
+        sets.push((
+            "env.CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+            serde_json::Value::String(n.to_string()),
+        ));
     }
     json_merge_set(base_raw, &sets)
 }
@@ -696,13 +744,14 @@ pub fn harness_config_read(app: tauri::AppHandle, adapter_id: String) -> Result<
     let path = config_file_for(&adapter_id, &home).ok_or_else(|| format!("{adapter_id} 不支持配置代写"))?;
     let present = path.exists();
     let raw = present.then(|| std::fs::read_to_string(&path).ok()).flatten();
-    let (endpoint, has_key, model) = read_view_text(&adapter_id, raw.as_deref());
+    let (endpoint, has_key, model, context_tokens) = read_view_text(&adapter_id, raw.as_deref());
     Ok(HarnessConfigView {
         endpoint,
         has_api_key: has_key,
         model,
         source_file: path.to_string_lossy().into_owned(),
         present,
+        context_tokens,
     })
 }
 
@@ -719,8 +768,11 @@ pub fn harness_config_save(app: tauri::AppHandle, input: HarnessConfigInput) -> 
     }
     let existing = path.exists().then(|| std::fs::read_to_string(&path).ok()).flatten();
 
+    // P39：上下文窗口解析——留空/缺省 = 默认 1M；非法值/超上限报错不写盘
+    let context_tokens = parse_context_tokens(input.context_tokens.as_deref())?;
+
     let new_text = match input.program.as_str() {
-        "claude-code" => claude_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,
+        "claude-code" => claude_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model, Some(context_tokens))?,
         "codex" => codex_merge_write(existing.as_deref(), &input.endpoint, &input.model)?,
         "pi" => pi_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,
         "omp" => omp_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,
@@ -842,7 +894,7 @@ mod tests {
     fn claude_merge_keeps_unrelated_keys() {
         // 验收 3.1：permissions/hooks/API_TIMEOUT_MS 等 Preserve；
         // 只换 BASE_URL / model / DEFAULT_*_MODEL；key 留空 = 保留 sk-old
-        let out = claude_merge_write(Some(CLAUDE_FULL), "https://new.example.com", "", "new-model").unwrap();
+        let out = claude_merge_write(Some(CLAUDE_FULL), "https://new.example.com", "", "new-model", Some(DEFAULT_CLAUDE_CONTEXT_TOKENS)).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "https://new.example.com");
         assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-old");
@@ -852,11 +904,30 @@ mod tests {
         assert_eq!(v["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "new-model");
         assert_eq!(v["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "new-model");
         assert!(v.get("hooks").is_some());
+        // P39：显式传值 → env 键写入（字符串形态与 Claude Code env 表一致）
+        assert_eq!(v["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1000000");
+    }
+
+    #[test]
+    fn claude_merge_none_context_tokens_keeps_existing() {
+        // P39：context_tokens=None = 不动既有（用户手写 500000 不能被应用抹掉）
+        let raw = r#"{"env":{"CLAUDE_CODE_MAX_CONTEXT_TOKENS":"500000"}}"#;
+        let out = claude_merge_write(Some(raw), "https://x.com", "", "m", None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "500000");
+    }
+
+    #[test]
+    fn claude_merge_none_context_tokens_omits_key_when_absent() {
+        // P39：context_tokens=None 且原文无该键 → 不新增（None 语义 = 完全不触碰）
+        let out = claude_merge_write(Some("{}"), "https://x.com", "", "m", None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("env").and_then(|e| e.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS")).is_none());
     }
 
     #[test]
     fn claude_merge_writes_new_key_when_given() {
-        let out = claude_merge_write(Some(CLAUDE_FULL), "https://new.example.com", "sk-new", "m").unwrap();
+        let out = claude_merge_write(Some(CLAUDE_FULL), "https://new.example.com", "sk-new", "m", None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-new");
     }
@@ -864,7 +935,7 @@ mod tests {
     #[test]
     fn claude_merge_creates_env_when_missing() {
         // 验收 3.2：无 env 对象的新文件 → 创建 env 并写入
-        let out = claude_merge_write(None, "https://x.com", "sk", "m").unwrap();
+        let out = claude_merge_write(None, "https://x.com", "sk", "m", None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "https://x.com");
         assert_eq!(v["model"], "m");
@@ -873,7 +944,19 @@ mod tests {
     #[test]
     fn claude_merge_rejects_corrupt_input() {
         // 验收 3.3：损坏 JSON → Err，调用方保证不写盘
-        assert!(claude_merge_write(Some("{broken"), "https://x", "", "m").is_err());
+        assert!(claude_merge_write(Some("{broken"), "https://x", "", "m", None).is_err());
+    }
+
+    #[test]
+    fn parse_context_tokens_defaults_and_validates() {
+        // P39：空/缺省 = 默认 1M；非法值与 0 报错；超上限钳到 1M
+        assert_eq!(parse_context_tokens(None).unwrap(), DEFAULT_CLAUDE_CONTEXT_TOKENS);
+        assert_eq!(parse_context_tokens(Some("")).unwrap(), DEFAULT_CLAUDE_CONTEXT_TOKENS);
+        assert_eq!(parse_context_tokens(Some("  ")).unwrap(), DEFAULT_CLAUDE_CONTEXT_TOKENS);
+        assert_eq!(parse_context_tokens(Some("500000")).unwrap(), 500_000);
+        assert!(parse_context_tokens(Some("abc")).is_err());
+        assert!(parse_context_tokens(Some("0")).is_err());
+        assert_eq!(parse_context_tokens(Some("99999999")).unwrap(), MAX_CLAUDE_CONTEXT_TOKENS);
     }
 
     #[test]
@@ -1056,31 +1139,39 @@ base_url = "https://old/v1"
 
     #[test]
     fn read_view_roundtrip() {
-        let (ep, has_key, model) = read_view_text(
+        let (ep, has_key, model, ctx) = read_view_text(
             "claude-code",
-            Some(r#"{"env":{"ANTHROPIC_BASE_URL":"https://x","ANTHROPIC_AUTH_TOKEN":"sk"},"model":"m[1m]"}"#),
+            Some(r#"{"env":{"ANTHROPIC_BASE_URL":"https://x","ANTHROPIC_AUTH_TOKEN":"sk","CLAUDE_CODE_MAX_CONTEXT_TOKENS":"1000000"},"model":"m[1m]"}"#),
         );
         assert_eq!(ep, "https://x");
         assert!(has_key);
         assert_eq!(model, "m[1m]");
+        assert_eq!(ctx, "1000000");
 
-        let (ep, has_key, model) = read_view_text("pi", Some(r#"{"providers":{"ainone":{"baseUrl":"https://p","apiKey":"sk","models":[{"id":"pm"}]}}}"#));
+        // 未设置 → 空串（保存时落默认 1M）
+        let (_, _, _, ctx) = read_view_text(
+            "claude-code",
+            Some(r#"{"env":{"ANTHROPIC_BASE_URL":"https://x","ANTHROPIC_AUTH_TOKEN":"sk"},"model":"m"}"#),
+        );
+        assert_eq!(ctx, "");
+
+        let (ep, has_key, model, _) = read_view_text("pi", Some(r#"{"providers":{"ainone":{"baseUrl":"https://p","apiKey":"sk","models":[{"id":"pm"}]}}}"#));
         assert_eq!(ep, "https://p");
         assert!(has_key);
         assert_eq!(model, "pm");
 
-        let (ep, _, model) = read_view_text("codex", Some(CODEX_TOML));
+        let (ep, _, model, _) = read_view_text("codex", Some(CODEX_TOML));
         // 无 ainone provider → 回落读活跃 provider（model_provider="codex"）的 base_url
         assert_eq!(ep, "https://old/v1");
         assert_eq!(model, "gpt-5.4");
 
-        let (_, has_key, _) = read_view_text("codex", Some(CODEX_TOML));
+        let (_, has_key, _, _) = read_view_text("codex", Some(CODEX_TOML));
         // keys 未存 → false（本机测试环境无 app 配置目录上下文，走 stub 判定）
         let _ = has_key;
 
         // 缺失/损坏 → 全空
-        assert_eq!(read_view_text("pi", None), (String::new(), false, String::new()));
-        assert_eq!(read_view_text("pi", Some("junk")), (String::new(), false, String::new()));
+        assert_eq!(read_view_text("pi", None), (String::new(), false, String::new(), String::new()));
+        assert_eq!(read_view_text("pi", Some("junk")), (String::new(), false, String::new(), String::new()));
     }
 
     #[test]
@@ -1090,7 +1181,7 @@ base_url = "https://old/v1"
         // 全流程的闭环保障，防「写成功但回显错乱」类回归。
         let existing = "providers:\n  zhubaoduo:\n    type: openai\n    api: openai-completions\n    baseUrl: https://token.zhubaoduo.com/v1\n    apiKey: sk-real\n    models:\n      - id: duo-king-6.6\n        context: 128000\n        maxTokens: 8192\n";
         let written = omp_merge_write(Some(existing), "https://token.zhubaoduo.com/v1", "", "claude-opus-4-7").unwrap();
-        let (ep, has_key, model) = read_view_text("omp", Some(&written));
+        let (ep, has_key, model, _) = read_view_text("omp", Some(&written));
         assert_eq!(ep, "https://token.zhubaoduo.com/v1", "写后回显 endpoint 一致");
         assert!(has_key, "写后（key 继承）回显 has_key=true");
         assert_eq!(model, "claude-opus-4-7", "写后回显模型名一致（读首个 provider 模型）");
@@ -1098,7 +1189,7 @@ base_url = "https://old/v1"
         let written2 = omp_merge_write(Some(&written), "https://token.zhubaoduo.com/v1", "", "glm-5.3-flash").unwrap();
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&written2).unwrap();
         assert_eq!(v["providers"]["ainone"]["apiKey"].as_str(), Some("sk-real"), "二次保存 key 不蒸发");
-        let (ep2, has_key2, model2) = read_view_text("omp", Some(&written2));
+        let (ep2, has_key2, model2, _) = read_view_text("omp", Some(&written2));
         assert_eq!(ep2, "https://token.zhubaoduo.com/v1");
         assert!(has_key2);
         assert_eq!(model2, "glm-5.3-flash");
@@ -1109,7 +1200,7 @@ base_url = "https://old/v1"
         // pi 同流程闭环：自配 provider + 新建 ainone → 回显应取 ainone（应用代写值最可信）
         let existing = r#"{"providers":{"myprov":{"baseUrl":"https://p.example","apiKey":"sk-pi","models":[{"id":"old"}]}}}"#;
         let written = pi_merge_write(Some(existing), "https://p.example", "", "m-new").unwrap();
-        let (ep, has_key, model) = read_view_text("pi", Some(&written));
+        let (ep, has_key, model, _) = read_view_text("pi", Some(&written));
         assert_eq!(ep, "https://p.example");
         assert!(has_key);
         assert_eq!(model, "m-new");
@@ -1120,21 +1211,21 @@ base_url = "https://old/v1"
         // S6 反馈缺陷回归：用户自配 provider 名各异（omp 配的是 "zhubaoduo"），
         // 只认 ainone 会让回显全空 → 应回落到首个含 baseUrl 的 provider
         let omp_yaml = "providers:\n  zhubaoduo:\n    type: openai\n    api: openai-completions\n    baseUrl: https://token.zhubaoduo.com/v1\n    apiKey: sk-user\n    models:\n      - id: duo-king-6.6\n        context: 128000\n";
-        let (ep, has_key, model) = read_view_text("omp", Some(omp_yaml));
+        let (ep, has_key, model, _) = read_view_text("omp", Some(omp_yaml));
         assert_eq!(ep, "https://token.zhubaoduo.com/v1");
         assert!(has_key);
         assert_eq!(model, "duo-king-6.6");
 
         // pi 同理：自配 provider 名 → 回落读出
         let pi_json = r#"{"providers":{"my-gw":{"baseUrl":"https://mygw/v1","apiKey":"sk","models":[{"id":"m1"}]}}}"#;
-        let (ep, has_key, model) = read_view_text("pi", Some(pi_json));
+        let (ep, has_key, model, _) = read_view_text("pi", Some(pi_json));
         assert_eq!(ep, "https://mygw/v1");
         assert!(has_key);
         assert_eq!(model, "m1");
 
         // ainone 与用户自配并存 → 优先 ainone（应用代写值最可信）
         let both = r#"{"providers":{"my-gw":{"baseUrl":"https://mygw/v1"},"ainone":{"baseUrl":"https://ainone/v1","apiKey":"sk","models":[{"id":"m2"}]}}}"#;
-        let (ep, _, model) = read_view_text("pi", Some(both));
+        let (ep, _, model, _) = read_view_text("pi", Some(both));
         assert_eq!(ep, "https://ainone/v1");
         assert_eq!(model, "m2");
     }

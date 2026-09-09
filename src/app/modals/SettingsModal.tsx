@@ -69,6 +69,8 @@ interface EditableAdapter {
   cfgEndpoint?: string;
   cfgKey?: string;
   cfgModel?: string;
+  /** P39 上下文窗口 tokens（仅 claude-code 渲染输入框；空串 = 默认 1M） */
+  cfgContextTokens?: string;
   /** 配置表单状态：reading / saving / 已写入路径 / 错误 */
   cfgBusy?: boolean;
   cfgMsg?: string | null;
@@ -447,6 +449,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
         cfgModel: view.model,
         cfgPresent: view.present,
         cfgHasKey: view.hasApiKey,
+        cfgContextTokens: view.contextTokens ?? "",
       });
     } catch (e) {
       update(id, { cfgBusy: false, cfgErr: String(e instanceof Error ? e.message : e) });
@@ -489,6 +492,12 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
       update(id, { cfgErr: "endpoint 与模型名不能为空" });
       return;
     }
+    // P39：上下文 tokens 可选校验（非空须为正整数；空 = 默认 1M，Rust 侧兜底）
+    const ctx = item.cfgContextTokens?.trim() ?? "";
+    if (ctx && !/^\d+$/.test(ctx)) {
+      update(id, { cfgErr: "上下文大小须为正整数" });
+      return;
+    }
     update(id, { cfgBusy: true, cfgMsg: null, cfgErr: null });
     try {
       const written = await harnessConfigSave({
@@ -496,6 +505,7 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
         endpoint: item.cfgEndpoint ?? "",
         apiKey: item.cfgKey ?? "",
         model: item.cfgModel ?? "",
+        contextTokens: ctx,
       });
       update(id, { cfgBusy: false, cfgMsg: `已写入 ${written}`, cfgKey: "", cfgPresent: true, cfgHasKey: item.cfgKey ? true : item.cfgHasKey });
     } catch (e) {
@@ -692,6 +702,19 @@ export function SettingsModal({ open, onClose, onSaved, theme, onThemeChange }: 
                   onChange={(e) => update(a.id, { cfgEndpoint: e.target.value })}
                 />
               </label>
+              {/* P39 上下文窗口（仅 claude-code）：Claude Code 对第三方网关模型兜底 200k，
+                  GLM/DeepSeek 等原生 1M——留空写默认 1000000（env 覆盖，会话级切模型同样生效） */}
+              {a.id === "claude-code" && (
+                <label className="ns-label">
+                  上下文窗口 tokens（留空 = 默认 1M）
+                  <input
+                    placeholder="1000000"
+                    value={a.cfgContextTokens ?? ""}
+                    onChange={(e) => update(a.id, { cfgContextTokens: e.target.value })}
+                    data-testid={`cfg-ctx-${a.id}`}
+                  />
+                </label>
+              )}
               {/* 模型选择：像右侧边栏一样——平时显示当前生效模型（回显），点击打开
                   ModelSwitchPanel 自动探测（表单 endpoint + key 直传），点选即写回。
                   配置文件不存在时由 ModelSwitchPanel 分叉走配置代写新建。 */}

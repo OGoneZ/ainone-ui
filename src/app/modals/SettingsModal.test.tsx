@@ -57,7 +57,7 @@ function defaultHandlers() {
     adapters_list: () => ADAPTERS,
     adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/usr/local/bin/omp", source: "ProcessPath", bridge: null, cli: null, auth: { state: "none", detail: "" } }),
     adapters_save: () => null,
-    harness_config_read: () => ({ endpoint: "", hasApiKey: false, model: "", sourceFile: "/tmp/x", present: false }),
+    harness_config_read: () => ({ endpoint: "", hasApiKey: false, model: "", sourceFile: "/tmp/x", present: false, contextTokens: "" }),
   };
 }
 
@@ -330,7 +330,7 @@ function p29Handlers() {
       bridge: null, cli: { display: "Oh My Pi", installable: true }, auth: { state: "none", detail: "" },
     }),
     adapters_save: () => null,
-    harness_config_read: () => ({ endpoint: "https://old.example.com", hasApiKey: true, model: "old-model", sourceFile: "/home/x/.omp/agent/models.yml", present: true }),
+    harness_config_read: () => ({ endpoint: "https://old.example.com", hasApiKey: true, model: "old-model", sourceFile: "/home/x/.omp/agent/models.yml", present: true, contextTokens: "" }),
   };
 }
 
@@ -510,6 +510,66 @@ describe("P30 权限模式开关", () => {
     await screen.findByText("Codex");
     expect(screen.queryByTestId("perm-switch-omp")).not.toBeInTheDocument();
     expect(screen.queryByTestId("perm-switch-codex")).not.toBeInTheDocument();
+  });
+});
+
+// —— P39 上下文窗口配置（仅 claude-code）：输入框回显 + 保存携带 contextTokens ——
+describe("P39 上下文窗口 tokens 输入", () => {
+  const claudeCfgHandlers = (contextTokens: string) => ({
+    adapters_list: () => CLAUDE_ADAPTER,
+    adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/bin/claude-agent-acp", source: "Home", bridge: null, cli: null, auth: { state: "subscription", detail: "" } }),
+    permission_mode_read: () => null,
+    harness_config_read: () => ({ endpoint: "https://x", hasApiKey: true, model: "saver/glm-5.3-flash", sourceFile: "/home/x/.claude/settings.json", present: true, contextTokens }),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(cleanup);
+
+  it("claude-code 卡片渲染上下文输入框并回显既有值；omp 卡片不渲染", async () => {
+    // adapters_list 返回 claude+omp 两张卡（handler 里 omp 不在列表 → 单独断言 omp 无输入框无意义，改为直接断言输入框仅此一处）
+    const handlers = {
+      adapters_list: () => [
+        ...CLAUDE_ADAPTER,
+        { id: "omp", name: "Oh My Pi", program: "omp-acp", args: [], cwd: ".", logo: "#0ea5e9" },
+      ],
+      adapter_status: () => ({ available: true, state: "ready", resolvedPath: "/bin/x", source: "Home", bridge: null, cli: null, auth: { state: "subscription", detail: "" } }),
+      permission_mode_read: () => null,
+      harness_config_read: () => ({ endpoint: "https://x", hasApiKey: true, model: "saver/glm-5.3-flash", sourceFile: "/home/x/.claude/settings.json", present: true, contextTokens: "500000" }),
+    };
+    const calls = mockTauriIpc({ handlers });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    await userEvent.setup().click(await screen.findByTestId("cfg-toggle-claude-code"));
+    const input = await screen.findByTestId("cfg-ctx-claude-code");
+    await vi.waitFor(() => expect(input).toHaveValue("500000"));
+    // omp 卡片无此输入框
+    await userEvent.setup().click(screen.getByTestId("cfg-toggle-omp"));
+    expect(screen.queryByTestId("cfg-ctx-omp")).not.toBeInTheDocument();
+  });
+
+  it("留空保存 → contextTokens 传空串（Rust 落默认 1M）", async () => {
+    const calls = mockTauriIpc({ handlers: claudeCfgHandlers("") });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("cfg-toggle-claude-code"));
+    await vi.waitFor(() => expect(screen.getByTestId("cfg-form-claude-code")).toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.getByTestId("cfg-ctx-claude-code")).toHaveValue(""));
+    await user.click(screen.getByTestId("cfg-save-claude-code"));
+    await vi.waitFor(() => expect(screen.getByText(/已写入/)).toBeInTheDocument());
+    const saveCall = calls.find((c) => c.cmd === "harness_config_save");
+    expect(saveCall!.args.input.contextTokens).toBe("");
+  });
+
+  it("非数字输入保存 → 前端拦截报错，不发请求", async () => {
+    const calls = mockTauriIpc({ handlers: claudeCfgHandlers("abc") });
+    render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("cfg-toggle-claude-code"));
+    await vi.waitFor(() => expect(screen.getByTestId("cfg-ctx-claude-code")).toHaveValue("abc"));
+    await user.click(screen.getByTestId("cfg-save-claude-code"));
+    expect(await screen.findByText("上下文大小须为正整数")).toBeInTheDocument();
+    expect(calls.find((c) => c.cmd === "harness_config_save")).toBeUndefined();
   });
 });
 
