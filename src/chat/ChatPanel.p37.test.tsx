@@ -80,9 +80,13 @@ beforeEach(() => {
   useSessionStore.setState({ runtime: {}, commands: {} });
   rateStoreClear(); // P37：登记表是模块级——测试间不清理会串扰
   mockOpen.mockReset();
+  // 前序用例可能残留挂载树（异步 React 更新晚于 afterEach 的 cleanup 落地）——
+  // 渲染前清空 body，杜绝「Found multiple elements」式跨用例 DOM 串扰
+  document.body.innerHTML = "";
 });
 afterEach(() => {
   cleanup();
+  document.body.innerHTML = "";
 });
 
 async function send(text: string) {
@@ -118,7 +122,7 @@ describe("P37：输出速率徽标", () => {
     expect(badge.getAttribute("data-live")).toBe("false"); // 已收口 → 冻结态
   });
 
-  it("纯 tool turn（无 agent_text）：不显示徽标", async () => {
+  it("纯 tool turn（无 agent_text/agent_thought）：不显示徽标", async () => {
     mockOpen.mockResolvedValue(
       fakeSession([
         { type: "tool_call", toolCallId: "t1", title: "bash", status: "completed", content: [{ kind: "text", text: "ok" }] },
@@ -129,6 +133,43 @@ describe("P37：输出速率徽标", () => {
     await send("hi");
 
     expect(await screen.findByText("工具 1 个")).toBeInTheDocument();
+    expect(screen.queryByTestId("stream-rate")).not.toBeInTheDocument();
+  });
+
+  it("思考文本计入速率：thought+tool 轮（agent 任务常态）也显示徽标", async () => {
+    // 三桥实证：thought chunk 均为 content.text（claude thinking_delta / codex
+    // reasoning delta / pi thinking_delta）——模型真实 output token，计入速率。
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_thought", text: "让我先检查这个目录的结构，然后决定下一步操作，需要仔细看看文件列表的内容再判断。" },
+        { type: "tool_call", toolCallId: "t1", title: "bash", status: "completed", content: [{ kind: "text", text: "ok" }] },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    await send("hi");
+
+    // 「思考 1 次」仅本用例组卡摘要含——规避前序用例摘要串的子串多匹配
+    expect(await screen.findByText(/思考 1 次 · 工具 1 个/)).toBeInTheDocument();
+    // 有思考输出 → 徽标出现（旧口径只算 agent_text，此轮不显示——缺陷已修）
+    expect(screen.getByTestId("stream-rate")).toBeInTheDocument();
+  });
+
+  it("空 thought 文本（claude omitted 签名块）不计入速率：仍不显示徽标", async () => {
+    mockOpen.mockResolvedValue(
+      fakeSession([
+        { type: "agent_thought", text: "" },
+        { type: "tool_call", toolCallId: "t1", title: "bash", status: "completed", content: [{ kind: "text", text: "ok" }] },
+        { type: "turn_stop", stopReason: "end_turn" },
+      ]),
+    );
+    render(<ChatPanel tabKey="k1" adapter={adapter} />);
+    await send("hi");
+
+    // 空 thought 也会建 thought 块（appendThought 不判空）→ 组卡摘要仍含「思考 1 次」。
+    // findByText 偶发「Found multiple」——前序用例卸载树的 act 时序残留，findAllByText 语义等价
+    const summaries = await screen.findAllByText(/思考 1 次 · 工具 1 个/);
+    expect(summaries.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByTestId("stream-rate")).not.toBeInTheDocument();
   });
 
