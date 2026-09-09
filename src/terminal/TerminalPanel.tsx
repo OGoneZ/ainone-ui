@@ -17,6 +17,8 @@ import { createTerminal, type TerminalSession } from "@/ipc/pty";
 import { installImeCompositionGuard } from "@/terminal/imeCompositionGuard";
 import { useTerminalStore } from "@/store/terminalStore";
 import { TerminalIcon } from "@/components/ui/icons";
+import { FilePreview } from "@/sidebar/FilePreview";
+import { logger } from "@/lib/logger";
 
 export interface TerminalPanelProps {
   tabKey: string;
@@ -67,6 +69,10 @@ export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPan
   const [exited, setExited] = useState(false);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [spawnError, setSpawnError] = useState<string | null>(null);
+  // P36 S6：终端窗格的文件预览浮层——terminal tab 只渲染本面板（无 ChatPanel），
+  // 文件树的 ainone:open-file 此前无人接收，点击文件无反应。detail.tabKey 归属
+  // 判定与 ChatPanel 同款：别人的事件忽略，旧 string detail 按面板即当前窗格接收。
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   // P26f：onNormalExit 走 ref（openTerminal 的 useCallback 依赖不含它，避免引用变化误重建）
   const onNormalExitRef = useRef<(() => void) | undefined>(undefined);
   onNormalExitRef.current = onNormalExit;
@@ -187,6 +193,27 @@ export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPan
     return () => obs.disconnect();
   }, [applyTheme]);
 
+  // P36 S6：文件树单击 → 预览浮层（terminal tab 的唯一 open-file 接收方）
+  useEffect(() => {
+    const onOpenFile = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail === "object" && detail !== null) {
+        const d = detail as { path?: unknown; tabKey?: unknown };
+        if (d.tabKey !== undefined && d.tabKey !== tabKey) return;
+        if (typeof d.path !== "string") return;
+        setPreviewPath(d.path);
+        return;
+      }
+      // 旧 string detail（无归属）：文件树挂在当前终端窗格旁 → 本面板接收
+      if (typeof detail === "string" && detail) {
+        logger.info("preview", "open-file-legacy", { path: detail, tabKey });
+        setPreviewPath(detail);
+      }
+    };
+    window.addEventListener("ainone:open-file", onOpenFile);
+    return () => window.removeEventListener("ainone:open-file", onOpenFile);
+  }, [tabKey]);
+
   // 重新激活（tab 切回）：聚焦输入 + 重 fit（隐藏期间容器尺寸可能已变）
   useEffect(() => {
     if (!active) return;
@@ -200,6 +227,10 @@ export function TerminalPanel({ tabKey, cwd, active, onNormalExit }: TerminalPan
 
   return (
     <div className="panel terminal-panel" data-tab-key={tabKey}>
+      {/* P36 S6：窗格内右侧预览浮层（.panel 为 absolute 宿主，与 ChatPanel 同布局） */}
+      {previewPath && (
+        <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
+      )}
       {spawnError ? (
         <div className="terminal-error" role="alert">
           <TerminalIcon style={{ width: 16, height: 16 }} />
