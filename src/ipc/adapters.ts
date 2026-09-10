@@ -142,6 +142,8 @@ export interface HarnessConfigInput {
   apiKey: string;
   model: string;
   contextTokens?: string;
+  /** 探测到的网关全量模型（claude-code availableModels 全量并入用；缺省 = 只并入 model） */
+  probeModels?: string[];
 }
 
 export async function harnessConfigRead(adapterId: string): Promise<HarnessConfigView> {

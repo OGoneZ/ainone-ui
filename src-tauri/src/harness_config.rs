@@ -47,6 +47,10 @@ pub struct HarnessConfigInput {
     /// 上下文窗口 tokens（仅 claude-code 消费；None/留空 = 默认 1000000）
     #[serde(default)]
     pub context_tokens: Option<String>,
+    /// 探测到的网关全量模型（claude-code allowlist 全量并入用；None = 未探测）。
+    /// #[serde(default)] 兼容旧前端调用（不传 = 行为同前：只并入 model 单条）。
+    #[serde(default)]
+    pub probe_models: Option<Vec<String>>,
 }
 
 /// Claude 通道默认上下文窗口（P39：GLM/DeepSeek 等第三方模型原生 1M，
@@ -772,7 +776,25 @@ pub fn harness_config_save(app: tauri::AppHandle, input: HarnessConfigInput) -> 
     let context_tokens = parse_context_tokens(input.context_tokens.as_deref())?;
 
     let new_text = match input.program.as_str() {
-        "claude-code" => claude_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model, Some(context_tokens))?,
+        "claude-code" => {
+            let merged = crate::harness_meta::merge_available_models(
+                existing.as_deref().and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                    .as_ref().and_then(|v| v.get("availableModels")),
+                input.probe_models.as_deref().unwrap_or(&[]),
+            );
+            let mut text = claude_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model, Some(context_tokens))?;
+            // allowlist 合并（serde_json 二次定点，重序列化键序由 preserve_order 保证）
+            if let Some(list) = merged {
+                let mut v: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("settings.json 解析失败: {e}"))?;
+                v["availableModels"] = serde_json::Value::Array(
+                    list.into_iter().map(serde_json::Value::String).collect(),
+                );
+                text = serde_json::to_string_pretty(&v)
+                    .map_err(|e| format!("settings.json 序列化失败: {e}"))?;
+            }
+            text
+        }
         "codex" => codex_merge_write(existing.as_deref(), &input.endpoint, &input.model)?,
         "pi" => pi_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,
         "omp" => omp_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,

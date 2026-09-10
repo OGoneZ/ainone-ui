@@ -67,13 +67,21 @@ pub fn harness_meta(adapter_id: String) -> Option<HarnessMeta> {
 }
 
 /// 定点写回 harness 配置（model/baseUrl；写前备份）。
+/// probe_models：设置页探测到的网关全量模型（claude-code allowlist 并入用；可省略）。
 #[tauri::command]
 pub fn harness_settings_write(
     adapter_id: String,
     model: Option<String>,
     base_url: Option<String>,
+    probe_models: Option<Vec<String>>,
 ) -> Result<WriteOutcome, String> {
-    harness_settings_write_inner(&adapter_id, model.as_deref(), base_url.as_deref(), None)
+    harness_settings_write_inner(
+        &adapter_id,
+        model.as_deref(),
+        base_url.as_deref(),
+        None,
+        probe_models.as_deref(),
+    )
 }
 
 // ---------- 读取 ----------
@@ -302,11 +310,13 @@ pub struct WriteOutcome {
 }
 
 /// 定点写回 model / baseUrl（Option 均为 None = 无事可做返回错误）。
+/// probe_models：设置页探测到的网关全量模型（claude allowlist 并入用；None = 未探测）。
 pub(crate) fn harness_settings_write_inner(
     adapter_id: &str,
     model: Option<&str>,
     base_url: Option<&str>,
     home: Option<&Path>,
+    probe_models: Option<&[String]>,
 ) -> Result<WriteOutcome, String> {
     if model.is_none() && base_url.is_none() {
         return Err("没有要写回的内容".into());
@@ -320,7 +330,7 @@ pub(crate) fn harness_settings_write_inner(
     let path = settings_path(kind, &home);
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
     let updated = match kind {
-        HarnessConfigKind::Claude => write_claude(&raw, model, base_url)?,
+        HarnessConfigKind::Claude => write_claude(&raw, model, base_url, probe_models)?,
         HarnessConfigKind::Codex => write_codex(&raw, model, base_url)?,
         HarnessConfigKind::Omp => write_omp(&raw, base_url, model)?,
         // pi 无验证过的定点替换语义 → 引导走配置代写（三格齐落盘；错误含 adapter id
@@ -362,7 +372,13 @@ pub(crate) fn harness_settings_write_inner(
 
 /// Claude settings.json：serde_json 定点改写 model / env.ANTHROPIC_BASE_URL，其余键序结构不变
 /// （serde_json::Value 保序（preserve_order 未开时按 BTreeMap——为保序这里走定点文本替换）。
-pub(crate) fn write_claude(raw: &str, model: Option<&str>, base_url: Option<&str>) -> Result<String, String> {
+/// probe_models：探测链路拿到的网关全量模型（None = 探测未走/失败，allowlist 只并入 model）。
+pub(crate) fn write_claude(
+    raw: &str,
+    model: Option<&str>,
+    base_url: Option<&str>,
+    probe_models: Option<&[String]>,
+) -> Result<String, String> {
     let mut v: serde_json::Value =
         serde_json::from_str(raw).map_err(|e| format!("settings.json 解析失败: {e}"))?;
     if let Some(m) = model {
@@ -379,12 +395,18 @@ pub(crate) fn write_claude(raw: &str, model: Option<&str>, base_url: Option<&str
                 }
             }
         }
-        // availableModels allowlist 合并：网关模型并入后，新会话的 configOptions
-        // 选择器即包含它，set_config_option 不再拒绝（连接器 applyAvailableModelsAllowlist
-        // 把用户条目逐字透出为可选值）。
-        if let Some(list) = merge_available_models(v.get("availableModels"), m) {
-            v["availableModels"] =
-                serde_json::Value::Array(list.into_iter().map(serde_json::Value::String).collect());
+        // availableModels allowlist 合并：探测到的网关全量模型并入后，新会话的
+        // configOptions 选择器即包含它们，set_config_option 不再拒绝（连接器
+        // applyAvailableModelsAllowlist 把用户条目逐字透出为可选值）——同时根治
+        // CLI /model 被滞后白名单拦（网关上新模型、白名单只有历史切换痕迹）。
+        if model.is_some() {
+            // 探测列表并入 model 本身（probe 失败时至少保证当前模型可切）
+            let mut entries: Vec<String> = probe_models.unwrap_or(&[]).to_vec();
+            entries.push(m.to_string());
+            if let Some(list) = merge_available_models(v.get("availableModels"), &entries) {
+                v["availableModels"] =
+                    serde_json::Value::Array(list.into_iter().map(serde_json::Value::String).collect());
+            }
         }
     }
     if let Some(b) = base_url {
@@ -404,15 +426,18 @@ pub(crate) fn write_claude(raw: &str, model: Option<&str>, base_url: Option<&str
 /// 纯函数：合并 Claude settings.json 顶层 availableModels allowlist（claude-code 会话级
 /// 任意网关模型切换的官方逃生门——连接器把用户条目逐字透出为 configOptions 可选值）。
 /// 合并策略：
-///   键缺失 → 种子 ["opus","sonnet","haiku"] + model（allowlist 是限制性白名单，
-///            只写 model 会把 SDK 档位挤出 picker；default 由连接器恒保留不写入）
+///   键缺失 → 种子 ["opus","sonnet","haiku"] + entries（allowlist 是限制性白名单，
+///            只写探测模型会把 SDK 档位挤出 picker；default 由连接器恒保留不写入）
 ///   是数组 → 只追加去重（用户手写 allowlist 视为有意限制，绝不注入种子）
 ///   非字符串数组（损坏）→ None 不动（连接器对非数组按无 allowlist 处理，行为不变）
-/// 保序追加 + trim + 幂等（同 model 二次写零变化）。
-pub(crate) fn merge_available_models(existing: Option<&serde_json::Value>, model: &str) -> Option<Vec<String>> {
+/// 保序追加 + trim + 幂等（同批 entries 二次写零变化）。
+pub(crate) fn merge_available_models(
+    existing: Option<&serde_json::Value>,
+    entries: &[String],
+) -> Option<Vec<String>> {
     const SEED: [&str; 3] = ["opus", "sonnet", "haiku"];
-    let entry = model.trim();
-    if entry.is_empty() {
+    let entries: Vec<&str> = entries.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if entries.is_empty() {
         return None;
     }
     let had_key = existing.is_some();
@@ -434,8 +459,10 @@ pub(crate) fn merge_available_models(existing: Option<&serde_json::Value>, model
         return None;
     }
     let mut list = existing.unwrap_or_else(|| SEED.iter().map(|s| s.to_string()).collect());
-    if !list.iter().any(|m| m == entry) {
-        list.push(entry.to_string());
+    for entry in entries {
+        if !list.iter().any(|m| m == entry) {
+            list.push(entry.to_string());
+        }
     }
     Some(list)
 }
@@ -1085,7 +1112,7 @@ wire_api = "responses"
 
     #[test]
     fn write_claude_updates_model_and_defaults() {
-        let out = write_claude(CLAUDE, Some("saver/new-model"), Some("https://new.example.com/")).unwrap();
+        let out = write_claude(CLAUDE, Some("saver/new-model"), Some("https://new.example.com/"), None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["model"], "saver/new-model");
         assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "https://new.example.com/");
@@ -1101,7 +1128,7 @@ wire_api = "responses"
     #[test]
     fn write_claude_seeds_allowlist_on_first_model_write() {
         // 无 availableModels 键 → 种子三档位 + 追加模型；无关键保留
-        let out = write_claude(CLAUDE, Some("gemini-3.7-flash"), None).unwrap();
+        let out = write_claude(CLAUDE, Some("gemini-3.7-flash"), None, None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(
             v["availableModels"],
@@ -1113,9 +1140,21 @@ wire_api = "responses"
     }
 
     #[test]
+    fn write_claude_allowlist_merges_full_probe_list() {
+        // 探测列表全量并入：CLI /model 与网关同步（网关上新模型不再被滞后白名单拦）
+        let probe = vec!["deepseek/deepseek-v4.1-flash".to_string(), "saver/glm-5.3-flash".to_string()];
+        let out = write_claude(CLAUDE, Some("deepseek/deepseek-v4.1-flash"), None, Some(&probe)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["availableModels"],
+            serde_json::json!(["opus", "sonnet", "haiku", "deepseek/deepseek-v4.1-flash", "saver/glm-5.3-flash"])
+        );
+    }
+
+    #[test]
     fn write_claude_allowlist_merge_is_idempotent() {
-        let once = write_claude(CLAUDE, Some("gemini-3.7-flash"), None).unwrap();
-        let twice = write_claude(&once, Some("gemini-3.7-flash"), None).unwrap();
+        let once = write_claude(CLAUDE, Some("gemini-3.7-flash"), None, None).unwrap();
+        let twice = write_claude(&once, Some("gemini-3.7-flash"), None, None).unwrap();
         assert_eq!(once, twice, "同模型二次写应字节级等价");
     }
 
@@ -1123,7 +1162,7 @@ wire_api = "responses"
     fn write_claude_existing_allowlist_appends_without_seed() {
         // 用户手写 allowlist = 有意限制 → 只追加，绝不注入档位种子
         let raw = r#"{"model":"m1","availableModels":["custom-1"]}"#;
-        let out = write_claude(raw, Some("gemini-3.7-flash"), None).unwrap();
+        let out = write_claude(raw, Some("gemini-3.7-flash"), None, None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["availableModels"], serde_json::json!(["custom-1", "gemini-3.7-flash"]));
     }
@@ -1131,7 +1170,7 @@ wire_api = "responses"
     #[test]
     fn write_claude_allowlist_cleans_blank_and_dup_entries() {
         let raw = r#"{"model":"m1","availableModels":["custom-1","custom-1","  ","custom-2"]}"#;
-        let out = write_claude(raw, Some("custom-2"), None).unwrap();
+        let out = write_claude(raw, Some("custom-2"), None, None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         // 空白剔除、去重、保序；custom-2 已在列表（trim 后）→ 不重复追加
         assert_eq!(v["availableModels"], serde_json::json!(["custom-1", "custom-2"]));
@@ -1141,7 +1180,7 @@ wire_api = "responses"
     fn write_claude_corrupt_allowlist_left_untouched() {
         // 非字符串数组（用户配置损坏）→ 原样保留、不合并、不报错
         let raw = r#"{"model":"m1","availableModels":"oops"}"#;
-        let out = write_claude(raw, Some("new-model"), None).unwrap();
+        let out = write_claude(raw, Some("new-model"), None, None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["availableModels"], "oops");
         assert_eq!(v["model"], "new-model");
@@ -1149,7 +1188,7 @@ wire_api = "responses"
 
     #[test]
     fn write_claude_baseurl_only_does_not_create_allowlist() {
-        let out = write_claude(CLAUDE, None, Some("https://x.example.com")).unwrap();
+        let out = write_claude(CLAUDE, None, Some("https://x.example.com"), None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("availableModels").is_none(), "base_url-only 写不得创建 allowlist 键");
     }
@@ -1211,10 +1250,10 @@ wire_api = "responses"
 
     #[test]
     fn write_requires_target_and_kind() {
-        assert!(harness_settings_write_inner("omp", None, None, None).is_err());
-        assert!(harness_settings_write_inner("pi", Some("m"), None, None).is_err());
+        assert!(harness_settings_write_inner("omp", None, None, None, None).is_err());
+        assert!(harness_settings_write_inner("pi", Some("m"), None, None, None).is_err());
         // pi 无定点替换语义（写回落到配置代写链路）；opencode 已支持（P32b）；未登记 id 拦截
-        assert!(harness_settings_write_inner("custom-x", Some("m"), None, None).is_err());
+        assert!(harness_settings_write_inner("custom-x", Some("m"), None, None, None).is_err());
     }
 
     // —— P32b：opencode 定点写回（write_opencode，与配置代写结构同构） ——
@@ -1259,7 +1298,7 @@ wire_api = "responses"
         std::fs::create_dir_all(dir.join(".config/opencode")).unwrap();
         let p = dir.join(".config/opencode/opencode.json");
         std::fs::write(&p, r#"{"provider":{"ainone":{"options":{"baseURL":"https://old/v1","apiKey":"sk"}},"models":{"m1":{"name":"m1"}}},"model":"ainone/m1"}"#).unwrap();
-        let r = harness_settings_write_inner("opencode", Some("oc-n2"), None, Some(&dir)).unwrap();
+        let r = harness_settings_write_inner("opencode", Some("oc-n2"), None, Some(&dir), None).unwrap();
         assert!(r.backup.ends_with(".ainone-bak"));
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
@@ -1270,7 +1309,7 @@ wire_api = "responses"
     #[test]
     fn write_claude_missing_env_base_errors() {
         let raw = r#"{"model":"m"}"#;
-        assert!(write_claude(raw, None, Some("https://x.com")).is_err());
+        assert!(write_claude(raw, None, Some("https://x.com"), None).is_err());
     }
 
     #[test]
@@ -1280,7 +1319,7 @@ wire_api = "responses"
         std::fs::create_dir_all(dir.join(".claude")).unwrap();
         let p = dir.join(".claude/settings.json");
         std::fs::write(&p, CLAUDE).unwrap();
-        let r = harness_settings_write_inner("claude-code", Some("saver/n2"), None, Some(&dir)).unwrap();
+        let r = harness_settings_write_inner("claude-code", Some("saver/n2"), None, Some(&dir), None).unwrap();
         assert!(r.backup.ends_with(".ainone-bak"));
         // 备份内容 = 原始
         assert_eq!(std::fs::read_to_string(p.with_file_name("settings.json.ainone-bak")).unwrap(), CLAUDE);
@@ -1288,7 +1327,7 @@ wire_api = "responses"
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(v["model"], "saver/n2");
         // 二次写不覆盖首次备份
-        harness_settings_write_inner("claude-code", Some("saver/n3"), None, Some(&dir)).unwrap();
+        harness_settings_write_inner("claude-code", Some("saver/n3"), None, Some(&dir), None).unwrap();
         assert_eq!(std::fs::read_to_string(p.with_file_name("settings.json.ainone-bak")).unwrap(), CLAUDE);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1301,9 +1340,9 @@ wire_api = "responses"
         std::fs::create_dir_all(dir.join(".omp/agent")).unwrap();
         std::fs::write(dir.join(".codex/config.toml"), CODEX).unwrap();
         std::fs::write(dir.join(".omp/agent/models.yml"), OMP).unwrap();
-        let r = harness_settings_write_inner("codex", Some("gpt-5.6"), None, Some(&dir)).unwrap();
+        let r = harness_settings_write_inner("codex", Some("gpt-5.6"), None, Some(&dir), None).unwrap();
         assert!(r.path.ends_with("config.toml"));
-        let r = harness_settings_write_inner("omp", None, Some("https://n.example.com/v1"), Some(&dir)).unwrap();
+        let r = harness_settings_write_inner("omp", None, Some("https://n.example.com/v1"), Some(&dir), None).unwrap();
         assert!(r.path.ends_with("models.yml"));
         assert!(std::fs::read_to_string(dir.join(".omp/agent/models.yml")).unwrap().contains("n.example.com"));
         let _ = std::fs::remove_dir_all(&dir);

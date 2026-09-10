@@ -274,6 +274,9 @@ export function ModelSwitchPanel({
         if (!formContext.endpoint.trim()) {
           throw new Error("表单 endpoint 为空，无法写入配置");
         }
+        // claude-code availableModels 全量并入：白名单与网关同步，根治 CLI /model
+        // 被滞后 allowlist 拦（网关上新模型、白名单只留历史切换痕迹）。
+        const probed = models ?? undefined;
         const written = await harnessConfigSave({
           program: adapterId,
           endpoint: formContext.endpoint,
@@ -281,6 +284,7 @@ export function ModelSwitchPanel({
           model,
           // P39：点选模型走配置代写时上下文窗口落默认 1M（与设置页保存同语义）
           contextTokens: "",
+          probeModels: probed,
         });
         logger.info("meta", "model-created", { adapterId, model, path: written });
         const t = switchResultToast({
@@ -289,7 +293,8 @@ export function ModelSwitchPanel({
         });
         toast[t.kind](t.message(model), { description: t.detail(`${written}`) });
       } else if (writable) {
-        const out = await writeHarnessSettings(adapterId, { model });
+        // claude-code availableModels 全量并入（同上）：models = 本次探测结果
+        const out = await writeHarnessSettings(adapterId, { model }, models ?? undefined);
         logger.info("meta", "model-written", { adapterId, model, path: out.path });
         const detail = `配置已写入 ${out.path}（备份 ${out.backup}）`;
         const t = switchResultToast({

@@ -23,15 +23,19 @@ export async function fetchHarnessMeta(adapterId: string): Promise<HarnessMeta |
   return invoke<HarnessMeta | null>("harness_meta", { adapterId });
 }
 
-/** 定点写回 model / baseUrl（写前自动备份 .ainone-bak） */
+/** 定点写回 model / baseUrl（写前自动备份 .ainone-bak）。
+ *  probeModels：探测到的网关全量模型（claude-code availableModels 全量并入用；
+ *  缺省 = 探测未走/失败，行为同前只并入 model 单条）。 */
 export async function writeHarnessSettings(
   adapterId: string,
   patch: { model?: string; baseUrl?: string },
+  probeModels?: string[],
 ): Promise<WriteOutcome> {
   return invoke<WriteOutcome>("harness_settings_write", {
     adapterId,
     model: patch.model ?? null,
     baseUrl: patch.baseUrl ?? null,
+    probeModels: probeModels ?? null,
   });
 }
 

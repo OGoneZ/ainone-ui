@@ -102,7 +102,7 @@ describe("ModelSwitchPanel", () => {
     await userEvent.click(screen.getByRole("option", { name: /m-b/ }));
     expect(props.onSessionModelChange).toHaveBeenCalledWith("m-b");
     await waitFor(() => expect(props.onWritten).toHaveBeenCalled());
-    expect(writeHarnessSettings).toHaveBeenCalledWith("omp", { model: "m-b" });
+    expect(writeHarnessSettings).toHaveBeenCalledWith("omp", { model: "m-b" }, ["m-a", "m-b", "m-c"]);
     expect(toast.success).toHaveBeenCalled();
     await waitFor(() => expect(props.onClose).toHaveBeenCalled());
   });
@@ -143,7 +143,7 @@ describe("ModelSwitchPanel", () => {
     await screen.findByText("m-b");
     await userEvent.click(screen.getByRole("option", { name: /m-b/ }));
     // 持久写回继续
-    await waitFor(() => expect(writeHarnessSettings).toHaveBeenCalledWith("claude-code", { model: "m-b" }));
+    await waitFor(() => expect(writeHarnessSettings).toHaveBeenCalledWith("claude-code", { model: "m-b" }, ["m-a", "m-b", "m-c"]));
     // warning 提示对新会话生效，不弹成功谎报
     expect(toast.warning).toHaveBeenCalled();
     expect(vi.mocked(toast.warning).mock.calls[0][0]).toContain("对新会话生效");
@@ -203,6 +203,7 @@ describe("ModelSwitchPanel", () => {
         apiKey: "sk-form",
         model: "m-b",
         contextTokens: "",
+        probeModels: ["m-a", "m-b", "m-c"],
       }),
     );
     // 新建分叉不调定点替换
@@ -227,6 +228,7 @@ describe("ModelSwitchPanel", () => {
         apiKey: "sk-form",
         model: "m-b",
         contextTokens: "",
+        probeModels: ["m-a", "m-b", "m-c"],
       }),
     );
     expect(writeHarnessSettings).not.toHaveBeenCalled();
