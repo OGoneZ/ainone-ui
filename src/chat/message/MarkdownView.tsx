@@ -31,6 +31,14 @@ const STREAMDOWN_COMPONENTS = {
   ),
 };
 
+// P42 前缀冻结：live=true 时块级 settled/tail 分离——已完成块走 static Streamdown
+// （memo 恒命中，零重扫），增长尾块走 streaming。消掉 streamdown 每 commit 全文
+// remend + 全文 Lexer.lex 的 O(n²) 重扫（bench/streamdown-parse.bench.mjs 实测）。
+// 块切分直接用 streamdown 导出的 parseMarkdownIntoBlocks，保证与库内切分一致。
+// settled/tail 的插件组沿用 P31 两组常量：settled 用完整组（含 code 高亮，走缓存），
+// tail 用 streaming 组（无 code，零高亮开销）。
+import { FrozenMarkdownBlocks } from "./FrozenMarkdown";
+
 /** P11：assistant 正文 markdown 渲染（导出供测试与复用；批注选区监听在容器上）。
  *  P32 R5：memo 化——MessageLine 重渲染（如 diffComments/activityOverride 变化）
  *  时，text/live/onSelect 引用未变的块跳过整棵 Streamdown 子树 reconcile。
@@ -64,15 +72,28 @@ export const MarkdownView = memo(function MarkdownView({
           禁止改回 JSX 内联字面量。 */}
       {/* F-R5 图片 lightbox（DEC-24）：md 内 img 全部可点击放大（缩放/Esc 关闭） */}
       <PhotoProvider>
-        <Streamdown
-          mode={live ? "streaming" : "static"}
-          parseIncompleteMarkdown={live}
-          plugins={live ? STREAMDOWN_PLUGINS_STREAMING : STREAMDOWN_PLUGINS}
-          shikiTheme={STREAMDOWN_SHIKI_THEME}
-          components={STREAMDOWN_COMPONENTS}
-        >
-          {text}
-        </Streamdown>
+        {/* P42：live 走块级前缀冻结（settled static + tail streaming）；
+            static 保持单 Streamdown 快路径（整段一次解析后 memo 恒命中）。 */}
+        {live ? (
+          <FrozenMarkdownBlocks
+            text={text}
+            live
+            pluginsFull={STREAMDOWN_PLUGINS}
+            pluginsStreaming={STREAMDOWN_PLUGINS_STREAMING}
+            shikiTheme={STREAMDOWN_SHIKI_THEME}
+            components={STREAMDOWN_COMPONENTS}
+          />
+        ) : (
+          <Streamdown
+            mode="static"
+            parseIncompleteMarkdown={false}
+            plugins={STREAMDOWN_PLUGINS}
+            shikiTheme={STREAMDOWN_SHIKI_THEME}
+            components={STREAMDOWN_COMPONENTS}
+          >
+            {text}
+          </Streamdown>
+        )}
       </PhotoProvider>
     </div>
   );

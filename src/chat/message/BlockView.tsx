@@ -3,7 +3,6 @@
 // 配合 MessageLine 的稳定 key（tool:toolCallId 等），流式新增块不拖动既有块。
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import type { BlockMsg } from "@/acp/message-log";
@@ -14,6 +13,7 @@ import { kindIcon, previewTargetOf, toolCommand, toolOutputFallback, toolSubtitl
 import type { DiffComment } from "@/chat/logic/diffComments";
 import { shouldAutoOpen } from "@/chat/logic/disclosure";
 import { MarkdownView } from "./MarkdownView";
+import { FrozenMarkdownBlocks } from "./FrozenMarkdown";
 import { DiffView } from "./DiffView";
 import { ToolTextView } from "./ToolTextView";
 import {
@@ -37,7 +37,9 @@ const TOOL_STATUS_LABEL: Record<string, string> = {
 // P41：thinking 分支的 Streamdown props 提为模块级常量（照 MarkdownView P31 惯例）。
 // 内联字面量每次渲染新引用 → Streamdown 顶层 memo 比较器失败 + shikiTheme context
 // 每帧新值 → thought 流式期间全部已完成块被强制重渲染。
+// P42：thought 无 mermaid/图片，插件组不含 mermaid；streaming 组无 code（P31 同款）。
 const THOUGHT_PLUGINS = { code, math };
+const THOUGHT_PLUGINS_STREAMING = { math };
 const THOUGHT_SHIKI_THEME: [string, string] = ["github-light", "github-dark"];
 
 function ThoughtView({
@@ -131,15 +133,15 @@ function ThoughtView({
         >
           {/* P11 F-R8（DEC-25）：thinking 展开体走 markdown 渲染（thinking 同样可能
               含代码围栏/公式/列表）；小字号沿用外层 13px。不用 PhotoProvider
-              （AC-R8-3：thinking 是过程性内容，批注选区明确降级不开放）。 */}
-          <Streamdown
-            mode={live ? "streaming" : "static"}
-            parseIncompleteMarkdown={live}
-            plugins={THOUGHT_PLUGINS}
+              （AC-R8-3：thinking 是过程性内容，批注选区明确降级不开放）。
+              P42：live 走块级前缀冻结（与 MarkdownView 同一实现，settled/tail 分离）。 */}
+          <FrozenMarkdownBlocks
+            text={text}
+            live={live}
+            pluginsFull={THOUGHT_PLUGINS}
+            pluginsStreaming={THOUGHT_PLUGINS_STREAMING}
             shikiTheme={THOUGHT_SHIKI_THEME}
-          >
-            {text}
-          </Streamdown>
+          />
         </div>
       )}
     </div>
