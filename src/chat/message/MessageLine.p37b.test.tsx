@@ -11,7 +11,6 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { MessageLine } from "@/chat/message/MessageLine";
 import type { ChatMsg } from "@/store/sessionStore";
 import type { AdapterWithStatus } from "@/ipc/adapters";
-import { useSessionStore } from "@/store/sessionStore";
 
 const adapter = {
   id: "omp", name: "Oh My Pi", program: "omp", args: [], cwd: ".", logo: "#7c3aed",

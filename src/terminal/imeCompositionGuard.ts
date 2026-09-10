@@ -22,7 +22,7 @@
 export function installImeCompositionGuard(textarea: HTMLTextAreaElement): () => void {
   let sawCompositionStart = false;
   let pendingTextareaFallback = false;
-  let fallbackMarkerTimer: number | undefined;
+  let fallbackMarkerTimer: ReturnType<typeof setTimeout> | undefined;
   let fallbackValue = "";
   let fallbackSelectionStart = 0;
   let fallbackSelectionEnd = 0;

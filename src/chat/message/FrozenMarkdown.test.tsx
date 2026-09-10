@@ -2,8 +2,7 @@
 // 锁定 WHY：流式长回复的性能生命线——settled 块零重渲染、尾块承接追加、
 // live→false 收口后内容与「整段单 Streamdown」完全一致（视觉不变性）。
 import { describe, it, expect } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
-import { createRef } from "react";
+import { render, cleanup } from "@testing-library/react";
 import { parseMarkdownIntoBlocks } from "streamdown";
 import { FrozenMarkdownBlocks } from "./FrozenMarkdown";
 

@@ -8,7 +8,7 @@ import { createStreamPacer } from "@/chat/hooks/streamPacer";
 const codeLine = "export function handler(req: Request): Promise<Response> { const data = await req.json(); return Response.json({ ok: true, data }); }\n";
 const textLine = "这是一段普通文本，包含 **加粗** 与 `inline code`，用于无围栏对照场景的持续揭示。\n";
 
-function feed(p: ReturnType<typeof createStreamPacer>, totalKB: number, line: string, stepBytes = 256) {
+function feed(totalKB: number, line: string, stepBytes = 256) {
   const bytes = new TextEncoder().encode(line).length;
   const lines = Math.ceil((totalKB * 1024) / bytes);
   const chunks: string[] = [];
@@ -37,7 +37,7 @@ describe("基准 B：streamPacer tick", () => {
     for (const kb of [16, 64, 256, 1024]) {
       const p = createStreamPacer({});
       p.onChunk("```ts\n"); // 开 fence，不闭合
-      const chunks = feed(p, kb, codeLine);
+      const chunks = feed(kb, codeLine);
       for (const c of chunks) p.onChunk(c);
       // 连续 tick（期间不再喂数据）：测「积压已成型后」单帧成本
       const times = timedTicks(p, 20);
@@ -53,7 +53,7 @@ describe("基准 B：streamPacer tick", () => {
     console.log("\n--- B2 无围栏（正常揭示，pending 恒小）---");
     for (const totalKB of [16, 64, 256, 1024]) {
       const p = createStreamPacer({});
-      const chunks = feed(p, totalKB, textLine);
+      const chunks = feed(totalKB, textLine);
       // 模拟真实流式：边喂边 tick（60 帧窗口内把全部数据喂完）
       let ci = 0;
       const times: number[] = [];
@@ -76,7 +76,7 @@ describe("基准 B：streamPacer tick", () => {
     for (const kb of [64, 256, 1024]) {
       const p = createStreamPacer({});
       p.onChunk("```ts\n");
-      for (const c of feed(p, kb, codeLine)) p.onChunk(c);
+      for (const c of feed(kb, codeLine)) p.onChunk(c);
       const t0 = performance.now();
       p.tick(1000); // 单次 tick，pending = kb
       const dt = performance.now() - t0;

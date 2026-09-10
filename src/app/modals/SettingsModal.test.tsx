@@ -619,7 +619,7 @@ describe("P39 上下文窗口 tokens 输入", () => {
       permission_mode_read: () => null,
       harness_config_read: () => ({ endpoint: "https://x", hasApiKey: true, model: "saver/glm-5.3-flash", sourceFile: "/home/x/.claude/settings.json", present: true, contextTokens: "500000" }),
     };
-    const calls = mockTauriIpc({ handlers });
+    mockTauriIpc({ handlers });
     render(<SettingsModal open={true} onClose={() => {}} onSaved={() => {}} theme="auto" onThemeChange={() => {}} />);
     await userEvent.setup().click(await screen.findByTestId("cfg-toggle-claude-code"));
     const input = await screen.findByTestId("cfg-ctx-claude-code");
