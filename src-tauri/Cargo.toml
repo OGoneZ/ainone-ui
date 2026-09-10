@@ -62,7 +62,9 @@ portable-pty = "0.9"
 serde_yaml_ng = "0.10.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = "2.0.2"
+# v2_34：is_web_process_responsive() —— WebKit 官方「web 进程是否响应」判据，
+# P40 卡死看门狗用它替代自采 /proc 的 PID 猜测（见 webview_resilience.rs）
+webkit2gtk = { version = "2.0.2", features = ["v2_34"] }
 
 [features]
 webdriver = ["dep:tauri-plugin-webdriver"]

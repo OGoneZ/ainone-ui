@@ -101,6 +101,7 @@ pub fn run() {
             harness_meta::harness_meta,
             harness_meta::harness_settings_write,
             harness_meta::models_probe,
+            webview_resilience::webview_heartbeat,
             agent::agent_spawn,
             agent::agent_stdin_write,
             agent::agent_kill,

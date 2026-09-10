@@ -824,6 +824,20 @@ function App() {
     }
   }, [theme]);
 
+  // P40 卡死看门狗心跳：WebKitWebProcess 卡死时（libpas 空转，11GB 堆 + 100% CPU）
+  // 崩溃信号不触发，页面永久白屏只能手动重启。Rust 侧看门狗据「心跳断流」判定
+  // 无响应并自动 reload（见 webview_resilience.rs）。此处只负责在页面还活着时
+  // 周期上报——一旦 JS 主线程被占死，定时器停摆即断流，正是判据本身。
+  // busy（有 turn 在跑）时 Rust 不据心跳判定（长 turn 心跳本就稀疏）。
+  useEffect(() => {
+    const hb = setInterval(() => {
+      const runtime = useSessionStore.getState().runtime;
+      const busy = Object.values(runtime).some((r) => r?.busy);
+      void invoke("webview_heartbeat", { busy }).catch(() => {});
+    }, 5000);
+    return () => clearInterval(hb);
+  }, []);
+
   async function reloadAdapters() {
     setAdapters(await listAdapters());
   }
