@@ -44,14 +44,14 @@ function renderMsg(blocks: BlockMsg[], streaming: boolean) {
   const msg: ChatMsg = { role: "assistant", blocks };
   useSessionStore.setState({ runtime: {}, commands: {} });
   return render(
-    <MessageLine msg={msg} adapter={adapter} busy={streaming} isLast={streaming} />,
+    <MessageLine msg={msg} index={0} adapter={adapter} busy={streaming} isLast={streaming} />,
   );
 }
 
 /** 流式时序模拟：rerender 换 blocks，保持 busy && isLast */
 function rerenderMsg(view: ReturnType<typeof render>, blocks: BlockMsg[], streaming = true) {
   const msg: ChatMsg = { role: "assistant", blocks };
-  view.rerender(<MessageLine msg={msg} adapter={adapter} busy={streaming} isLast={streaming} />);
+  view.rerender(<MessageLine msg={msg} index={0} adapter={adapter} busy={streaming} isLast={streaming} />);
 }
 
 describe("思考块 live 判定与渲染位置解耦（P32 AC-1.1/1.3）", () => {

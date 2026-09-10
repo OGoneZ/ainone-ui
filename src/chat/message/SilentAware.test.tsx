@@ -37,11 +37,11 @@ const toolBlock = (over: Partial<Extract<BlockMsg, { kind: "tool" }>>): BlockMsg
 function renderStreaming() {
   const msg: ChatMsg = { role: "assistant", blocks: [toolBlock({ status: "pending" })] };
   useSessionStore.setState({ runtime: {}, commands: {} });
-  const view = render(<MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} />);
+  const view = render(<MessageLine msg={msg} index={0} adapter={adapter} busy={true} isLast={true} />);
   return {
     update: (blocks: BlockMsg[]) => {
       const next: ChatMsg = { role: "assistant", blocks };
-      view.rerender(<MessageLine msg={next} adapter={adapter} busy={true} isLast={true} />);
+      view.rerender(<MessageLine msg={next} index={0} adapter={adapter} busy={true} isLast={true} />);
     },
     unmount: view.unmount,
   };
@@ -89,7 +89,7 @@ describe("ToolBlock diff 边沿自动展开（P30 AC-3.1/3.2/3.3）", () => {
       ],
     };
     useSessionStore.setState({ runtime: {}, commands: {} });
-    const view = render(<MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} />);
+    const view = render(<MessageLine msg={msg} index={0} adapter={adapter} busy={true} isLast={true} />);
     expect(screen.getByText("/b.ts")).toBeTruthy();
     const next: ChatMsg = {
       role: "assistant",
@@ -100,7 +100,7 @@ describe("ToolBlock diff 边沿自动展开（P30 AC-3.1/3.2/3.3）", () => {
         }),
       ],
     };
-    view.rerender(<MessageLine msg={next} adapter={adapter} busy={true} isLast={true} />);
+    view.rerender(<MessageLine msg={next} index={0} adapter={adapter} busy={true} isLast={true} />);
     expect(screen.getByText("/b.ts")).toBeTruthy(); // 保持展开
   });
 });
@@ -135,7 +135,7 @@ describe("静默感知（P30 AC-3.4）", () => {
       commands: {},
     });
     const view = render(
-      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} lastEventAt={now - 35_000} />,
+      <MessageLine msg={msg} index={0} adapter={adapter} busy={true} isLast={true} lastEventAt={now - 35_000} />,
     );
     // useElapsedTicker 用 Date.now 取差值：35s ≥ 30s → 提示可见
     expect(screen.getByTestId("silent-hint")).toBeTruthy();
@@ -144,7 +144,7 @@ describe("静默感知（P30 AC-3.4）", () => {
     // lastEventAt 距今 5s → 不显示
     cleanup();
     const view2 = render(
-      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} lastEventAt={now - 5_000} />,
+      <MessageLine msg={msg} index={0} adapter={adapter} busy={true} isLast={true} lastEventAt={now - 5_000} />,
     );
     expect(screen.queryByTestId("silent-hint")).toBeNull();
     view2.unmount();
@@ -153,7 +153,7 @@ describe("静默感知（P30 AC-3.4）", () => {
   it("lastEventAt 缺省（旧数据/兼容）→ 不显示提示也不报错", () => {
     const msg: ChatMsg = { role: "assistant", blocks: [{ kind: "text", text: "hi" }] };
     const view = render(
-      <MessageLine msg={msg} adapter={adapter} busy={true} isLast={true} />,
+      <MessageLine msg={msg} index={0} adapter={adapter} busy={true} isLast={true} />,
     );
     expect(screen.queryByTestId("silent-hint")).toBeNull();
     view.unmount();

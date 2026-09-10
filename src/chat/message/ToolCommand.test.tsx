@@ -29,7 +29,7 @@ function renderMsg(blocks: BlockMsg[]) {
   const msg: ChatMsg = { role: "assistant", blocks };
   useSessionStore.setState({ runtime: {}, commands: {} });
   // in_progress 块独立渲染不入组（折叠卡不展开）→ 直接可见展开态
-  render(<MessageLine msg={msg} adapter={adapter} busy={false} isLast={false} />);
+  render(<MessageLine msg={msg} index={0} adapter={adapter} busy={false} isLast={false} />);
 }
 
 const toolBlock = (over: Partial<Extract<BlockMsg, { kind: "tool" }>>): BlockMsg => ({

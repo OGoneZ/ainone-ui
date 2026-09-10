@@ -28,6 +28,8 @@ import { createRevealScheduler } from "@/chat/hooks/revealScheduler";
 import { createStreamRate } from "@/chat/hooks/streamRate";
 import { rateStoreOf, rateStoreDrop } from "@/chat/hooks/streamRateStore";
 import { overlayRevealedText } from "@/chat/hooks/overlayRevealed";
+// P43：稳定回调——MessageLine/BlockView 的 memo 依赖回调 prop 引用稳定
+import { useStableCallback } from "@/chat/hooks/useStableCallback";
 import { createFollowBottom } from "@/chat/hooks/followBottom";
 import { ChevronDownIcon } from "@/components/ui/icons";
 import { useQueueStore } from "@/store/queueStore";
@@ -157,7 +159,9 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // F-7-6 打字机 placeholder：80ms/字循环打出建议语；reduced-motion 直接显全文。
   // P32 R3：非激活窗格（display:none 渲染照跑）或用户已输入时暂停——
   // 旧实现无条件 12.5 渲染/s × 每 tab，后台窗格纯浪费。
-  const typeText = useTypewriter(typewriterHint(adapter), active && input.length === 0);
+  // P43：busy 期间占位符被 Composer 抑制（显示「运行中…」），打字机 interval 却照跑
+  // → 每秒 12.5 次 ChatPanel 全量渲染零产出。加 !busy 停跑。
+  const typeText = useTypewriter(typewriterHint(adapter), active && input.length === 0 && !busy);
 
   // @ 候选（F-11-3）：菜单展开才计算（扁平化 + fuzzy 过滤）
   const atMatches = useMemo(() => {
@@ -909,7 +913,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   // P38：按钮常显（渲染期 gate 已摘）——能力判定后移到这里：ensureSession
   // 建链（历史会话首次点击约 1~2s，期间 starting 遮罩反馈）后按真实
   // capabilities 判定，不支持 fork 的 harness 明确报错而非隐藏入口。
-  async function doFork() {
+  async function doForkImpl() {
     if (busy) {
       toast.warning("当前 turn 运行中，等待结束后再分叉");
       return;
@@ -941,10 +945,14 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     }
   }
 
+  // P43：稳定引用壳——MessageLine memo 依赖 onFork 引用稳定（见 addDiffComment 处说明）
+  const doFork = useStableCallback(doForkImpl);
+
   // —— F-8-6 消息回溯：确认后截断消息列表 + 本地日志 ——
-  function askRewind(index: number) {
+  // P43：稳定引用 + index 形参（index 由 MessageLine 行内绑定，父级不再新建内联箭头）
+  const askRewind = useStableCallback((index: number) => {
     setRewindTarget(index);
-  }
+  });
   async function doRewind() {
     if (rewindTarget === null) return;
     // H7：busy 保护——运行中回溯会 dispose 在跑的 turn，排队内容还会以全量上下文续跑
@@ -1402,14 +1410,15 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   // —— F-12-1 编辑重试：进入编辑态（回填输入框 + 聚焦） ——
-  function startEdit(index: number) {
+  // P43：稳定引用（见 addDiffComment 处说明）
+  const startEdit = useStableCallback((index: number) => {
     const msg = messages[index];
     if (!msg || msg.role !== "user") return;
     setEditTarget({ index, original: msg.text });
     setInput(msg.text);
     slashRef.current?.focus();
     logger.debug("chat", "edit-start", { index });
-  }
+  });
   // Esc 退出编辑态（不改动消息列表）；判定走 ref（keydown 监听闭包来自首帧挂载）
   function cancelEdit() {
     const cur = editTargetRef.current;
@@ -1420,10 +1429,12 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   }
 
   // —— F-12-5 diff 行内评论：收集 → 随消息发送 → 清空 ——
-  function addDiffComment(c: DiffComment) {
+  // P43：本组四个回调经 useStableCallback 包装，引用恒定——MessageLine/BlockView
+  // 用 memo 跳过历史行重渲染，回调若每帧新引用会直接击穿 memo（见 useStableCallback）。
+  const addDiffComment = useStableCallback((c: DiffComment) => {
     setDiffComments((prev) => [...prev, c]);
     logger.info("chat", "diff-comment-add", { path: c.path, line: c.line });
-  }
+  });
   function removeDiffComment(idx: number) {
     setDiffComments((prev) => prev.filter((_, i) => i !== idx));
   }
@@ -1778,6 +1789,7 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
               >
                 <MessageLine
                   msg={m}
+                  index={vi.index}
                   adapter={adapter}
                   busy={busy}
                   isLast={vi.index === messages.length - 1}
@@ -1796,8 +1808,8 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
                   // P38：fork 按钮常显（不再 gate 握手能力）——能力判定后移到
                   // doFork 点击时（建链后 session.capabilities），历史会话免发消息即可分叉
                   onFork={onFork ? doFork : undefined}
-                  onRewind={onRewind ? () => askRewind(vi.index) : undefined}
-                  onEdit={m.role === "user" ? () => startEdit(vi.index) : undefined}
+                  onRewind={onRewind ? askRewind : undefined}
+                  onEdit={m.role === "user" ? startEdit : undefined}
                   diffComments={diffComments}
                   onAddDiffComment={addDiffComment}
                   activityOverride={activityOverride}

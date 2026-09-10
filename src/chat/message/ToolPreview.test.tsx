@@ -28,7 +28,7 @@ const adapter: AdapterWithStatus = {
 function renderMsg(blocks: BlockMsg[], ownerTabKey?: string) {
   const msg: ChatMsg = { role: "assistant", blocks };
   useSessionStore.setState({ runtime: {}, commands: {} });
-  render(<MessageLine msg={msg} adapter={adapter} busy={false} isLast={false} ownerTabKey={ownerTabKey} />);
+  render(<MessageLine msg={msg} index={0} adapter={adapter} busy={false} isLast={false} ownerTabKey={ownerTabKey} />);
 }
 
 const toolBlock = (over: Partial<Extract<BlockMsg, { kind: "tool" }>>): BlockMsg => ({

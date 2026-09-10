@@ -30,6 +30,7 @@ function renderAll(busy: boolean) {
     <MessageLine
       key={i}
       msg={m}
+      index={i}
       adapter={adapter}
       busy={busy}
       isLast={i === msgs.length - 1}

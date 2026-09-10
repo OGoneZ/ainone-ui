@@ -76,7 +76,81 @@ export function saveRailState(s: RailState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
-export function RightRail({ tabKey, adapter, sessionId, cwd, session, listSessions, onResumeSession, terminalOnly = false, open, tab, onSwitchTab, onToggle }: Props) {
+export function RightRail({ open, ...rest }: Props) {
+  // P43：折叠态在 hooks 之前分流——旧实现把 messages 订阅与 collectModifiedPaths
+  // 放在 `if (!open) return` 之前，右栏折叠时仍每帧全量扫描会话块（hook 不可
+  // 条件化，只能拆组件：CollapsedRail 零 hook，ExpandedRail 独享数据订阅）。
+  if (!open) {
+    return (
+      <CollapsedRail
+        terminalOnly={rest.terminalOnly ?? false}
+        onSwitchTab={rest.onSwitchTab}
+      />
+    );
+  }
+  return <ExpandedRail {...rest} />;
+}
+
+/** 折叠细栏杆：竖排 tab 名，点击展开。零 hook、零 store 订阅（P43） */
+function CollapsedRail({
+  terminalOnly,
+  onSwitchTab,
+}: {
+  terminalOnly: boolean;
+  onSwitchTab: (t: RailTab) => void;
+}) {
+  function switchTab(t: RailTab) {
+    onSwitchTab(t);
+    logger.debug("layout", "rightrail-tab", { tab: t });
+  }
+  return (
+    <aside className="rightrail rightrail-collapsed">
+      {!terminalOnly && (
+        <button
+          type="button"
+          className="rail-tab-btn vertical"
+          aria-label="展开元数据侧栏"
+          onClick={() => switchTab("meta")}
+        >
+          元数据
+        </button>
+      )}
+      <button
+        type="button"
+        className="rail-tab-btn vertical"
+        aria-label={terminalOnly ? "展开文件树" : "展开文件树"}
+        onClick={() => switchTab("files")}
+      >
+        文件
+      </button>
+      {!terminalOnly && (
+        <button
+          type="button"
+          className="rail-tab-btn vertical"
+          aria-label="展开历史消息"
+          onClick={() => switchTab("history")}
+        >
+          历史
+        </button>
+      )}
+    </aside>
+  );
+}
+
+/** 展开态：宽度拖拽 + 三 tab 内容。P43：messages 订阅只在此分支存在 */
+function ExpandedRail({
+  tabKey,
+  adapter,
+  sessionId,
+  cwd,
+  session,
+  listSessions,
+  onResumeSession,
+  terminalOnly = false,
+  tab,
+  onSwitchTab,
+  onToggle,
+}: Omit<Props, "open">) {
   // F-21-6 右栏宽度（拖宽把手，独立 key 持久化；clamp 220~min(520,40vw)）
   const [width, setWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-rightrail-width")) || 260, 220, sidebarMaxWidth()),
@@ -103,42 +177,7 @@ export function RightRail({ tabKey, adapter, sessionId, cwd, session, listSessio
   }
   function toggle() {
     onToggle();
-    logger.debug("layout", "rightrail-toggle", { open: !open });
-  }
-
-  if (!open) {
-    return (
-      <aside className="rightrail rightrail-collapsed">
-        {!terminalOnly && (
-          <button
-            type="button"
-            className="rail-tab-btn vertical"
-            aria-label="展开元数据侧栏"
-            onClick={() => switchTab("meta")}
-          >
-            元数据
-          </button>
-        )}
-        <button
-          type="button"
-          className="rail-tab-btn vertical"
-          aria-label={terminalOnly ? "展开文件树" : "展开文件树"}
-          onClick={() => switchTab("files")}
-        >
-          文件
-        </button>
-        {!terminalOnly && (
-          <button
-            type="button"
-            className="rail-tab-btn vertical"
-            aria-label="展开历史消息"
-            onClick={() => switchTab("history")}
-          >
-            历史
-          </button>
-        )}
-      </aside>
-    );
+    logger.debug("layout", "rightrail-toggle", { open: false });
   }
 
   return (

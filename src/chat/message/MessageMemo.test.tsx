@@ -34,7 +34,7 @@ const adapter: AdapterWithStatus = {
 let renderCount = 0;
 const CountingMessageLine = memo(function Counting(props: { msg: ChatMsg; busy: boolean; isLast: boolean }) {
   renderCount++;
-  return <MessageLine msg={props.msg} adapter={adapter} busy={props.busy} isLast={props.isLast} />;
+  return <MessageLine msg={props.msg} index={0} adapter={adapter} busy={props.busy} isLast={props.isLast} />;
 });
 
 describe("MessageLine memo（F-R7 AC-R7-1）", () => {

@@ -29,7 +29,7 @@ function renderMsg(blocks: BlockMsg[], { expandGroup = false } = {}) {
   const msg: ChatMsg = { role: "assistant", blocks };
   useSessionStore.setState({ runtime: {}, commands: {} });
   const view = render(
-    <MessageLine msg={msg} adapter={adapter} busy={false} isLast={false} />,
+    <MessageLine msg={msg} index={0} adapter={adapter} busy={false} isLast={false} />,
   );
   if (expandGroup) {
     for (const btn of screen.queryAllByText(/工具 \d+ 个|思考 \d+ 次/)) fireEvent.click(btn);

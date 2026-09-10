@@ -4,7 +4,7 @@
 // 也就跳过 Streamdown 对长文本的全量重解析。导出供测试。
 // 自 ChatPanel 拆出（P13 C3）：props 签名逐字保持，memo 语义不变。
 
-import { memo, useState, useEffect } from "react";
+import { memo, useState, useEffect, useMemo } from "react";
 import type { ChatMsg } from "@/store/sessionStore";
 import type { StreamRate } from "@/chat/hooks/streamRate";
 import type { ToolContent } from "@/acp/session-core";
@@ -42,6 +42,7 @@ function ActivityToggleHint() {
 
 export const MessageLine = memo(function MessageLine({
   msg,
+  index,
   adapter,
   busy,
   isLast,
@@ -60,6 +61,9 @@ export const MessageLine = memo(function MessageLine({
   onActivityOverrideClear,
 }: {
   msg: ChatMsg;
+  /** P43：本行在 messages 中的序号——onRewind/onEdit 由父级提供稳定回调 + 本
+   *  序号在行内自行绑定（父级不再为每行新建内联箭头，memo 得以命中）。 */
+  index: number;
   adapter: AdapterWithStatus;
   busy: boolean;
   isLast: boolean;
@@ -75,9 +79,10 @@ export const MessageLine = memo(function MessageLine({
   ownerTabKey?: string;
   onSelect?: (text: string, e: React.MouseEvent) => void;
   onFork?: () => void;
-  onRewind?: () => void;
-  /** F-12-1 编辑重试：仅 user 消息传入 */
-  onEdit?: () => void;
+  /** P43：稳定回调 + index 形参——避免父级每渲染新建内联箭头击穿 memo */
+  onRewind?: (index: number) => void;
+  /** F-12-1 编辑重试：仅 user 消息传入（P43：同上，index 由行内绑定） */
+  onEdit?: (index: number) => void;
   /** F-12-5 diff 行内评论：待发评论集（已评论行标记用）+ 收集回调 */
   diffComments?: DiffComment[];
   onAddDiffComment?: (c: DiffComment) => void;
@@ -114,7 +119,7 @@ export const MessageLine = memo(function MessageLine({
               aria-label="编辑并重发"
               title="编辑并重发"
               className="msg-action-btn"
-              onClick={onEdit}
+              onClick={() => onEdit(index)}
             >
               <EditIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
             </button>
@@ -125,7 +130,7 @@ export const MessageLine = memo(function MessageLine({
               aria-label="回溯到这里"
               title="回溯到这里"
               className="msg-action-btn"
-              onClick={onRewind}
+              onClick={() => onRewind(index)}
             >
               <RewindIcon style={{ width: 14, height: 14, strokeWidth: 1.75 }} />
             </button>
@@ -140,7 +145,13 @@ export const MessageLine = memo(function MessageLine({
   // 无条件入组会把刚带 diff 的写块瞬间收进折叠卡，边沿自动展开失去意义（AC-3.2 失效）。
   // 非流式（历史回填/turn 结束后）保持原分组语义。
   const streaming = busy && isLast;
-  const renderItems = streaming ? buildStreamingItems(msg.blocks) : buildActivityGroups(msg.blocks);
+  // P43：分组结果按「blocks 引用 + streaming 模式」缓存——非流式消息的 msg.blocks
+  // 引用稳定（store 只重建更新中那条），故历史行重渲染时不再重建全部 RenderItem
+  // 对象（每个 { type: "activity_group", blocks: group } 都是新引用 → 组卡 memo 失效）。
+  const renderItems = useMemo(
+    () => (streaming ? buildStreamingItems(msg.blocks) : buildActivityGroups(msg.blocks)),
+    [msg.blocks, streaming],
+  );
   // P32 AC-2.4：渲染项稳定键——块迁移（独立↔组卡）时 ToolBlock 实例不被卸载重挂，
   // open state / userToggledRef 得以跨分组存活（位置索引 key 是重挂丢 state 的根因）。
   // tool 块用 toolCallId（协议保证 turn 内唯一）；thought/text 段在 turn 内只追加不重排，
@@ -234,8 +245,10 @@ export const MessageLine = memo(function MessageLine({
   );
 });
 
-/** F-12-3 活动组卡：折叠态摘要 + 展开态时间线（含 F-12-4 文件变更子卡） */
-function ActivityGroupCard({
+/** F-12-3 活动组卡：折叠态摘要 + 展开态时间线（含 F-12-4 文件变更子卡）
+ *  P43：memo 化——配合 MessageLine 的 renderItems useMemo（item 引用稳定），
+ *  历史组卡在流式提交时跳过重渲染，顺带跳过 aggregateFileChanges 的 Myers diff。 */
+const ActivityGroupCard = memo(function ActivityGroupCard({
   item,
   live,
   onSelect,
@@ -281,13 +294,21 @@ function ActivityGroupCard({
   if (item.thoughts > 0) parts.push(`思考 ${item.thoughts} 次`);
   if (item.tools > 0) parts.push(`工具 ${item.tools} 个`);
   const summary = parts.join(" · ") || "活动";
-  // F-12-4 文件变更聚合：组内 tool 块的 diff content 按路径去重
-  const diffs = item.blocks.flatMap((b) =>
-    b.kind === "tool" ? b.content.filter((c): c is Extract<typeof c, { kind: "diff" }> => c.kind === "diff") : [],
-  );
-  const fileChanges = aggregateFileChanges(
-    diffs.map((d) => ({ path: d.diff.path, oldText: d.diff.oldText, newText: d.diff.newText })),
-  );
+  // F-12-4 文件变更聚合：组内 tool 块的 diff content 按路径去重。
+  // P43：useMemo 化——aggregateFileChanges 对每个文件跑 diff@9 的 Myers diff
+  // （O((N+M)·D)），大文件单次可达毫秒级；item.blocks 引用稳定时不得重跑。
+  // diffs 一并缓存：FileChangeRow 展开态需要原始 diff 对象（不只是汇总计数）。
+  const { diffs, fileChanges } = useMemo(() => {
+    const ds = item.blocks.flatMap((b) =>
+      b.kind === "tool" ? b.content.filter((c): c is Extract<typeof c, { kind: "diff" }> => c.kind === "diff") : [],
+    );
+    return {
+      diffs: ds,
+      fileChanges: aggregateFileChanges(
+        ds.map((d) => ({ path: d.diff.path, oldText: d.diff.oldText, newText: d.diff.newText })),
+      ),
+    };
+  }, [item.blocks]);
   // P30 AC-2.4：折叠态就透出改动规模——「改了什么」不该藏在展开态里（徽标行见 JSX）
   return (
     <div className="activity-group my-1.5">
@@ -365,7 +386,7 @@ function ActivityGroupCard({
       )}
     </div>
   );
-}
+});
 
 /** F-12-4 文件变更行：路径 + 增删徽标，点击展开该文件 diff */
 function FileChangeRow({

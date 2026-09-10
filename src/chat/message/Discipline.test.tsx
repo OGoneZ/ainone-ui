@@ -41,12 +41,12 @@ const bash = (over: Partial<Extract<BlockMsg, { kind: "tool" }>>): BlockMsg =>
 function renderMsg(blocks: BlockMsg[], streaming: boolean) {
   const msg: ChatMsg = { role: "assistant", blocks };
   useSessionStore.setState({ runtime: {}, commands: {} });
-  return render(<MessageLine msg={msg} adapter={adapter} busy={streaming} isLast={streaming} />);
+  return render(<MessageLine msg={msg} index={0} adapter={adapter} busy={streaming} isLast={streaming} />);
 }
 
 function rerenderMsg(view: ReturnType<typeof render>, blocks: BlockMsg[], streaming = true) {
   const msg: ChatMsg = { role: "assistant", blocks };
-  view.rerender(<MessageLine msg={msg} adapter={adapter} busy={streaming} isLast={streaming} />);
+  view.rerender(<MessageLine msg={msg} index={0} adapter={adapter} busy={streaming} isLast={streaming} />);
 }
 
 describe("工具块默认折叠/展开（P32 AC-2.1/2.2）", () => {
