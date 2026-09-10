@@ -394,6 +394,21 @@ pub(crate) fn write_claude(
                     env.insert(key.to_string(), serde_json::Value::String(m.to_string()));
                 }
             }
+            // 上下文窗口：网关/自定义模型 ID（如 deepseek/…）不在 Claude Code 的
+            // 模型表里，它按 200k 默认假设；CLAUDE_CODE_MAX_CONTEXT_TOKENS 是其
+            // 官方纠偏入口（docs/model-config「Correct the window for a gateway or
+            // custom model ID」：不含 claude- 且不含 [1m] 的 ID → 变量直接生效）。
+            // 设置页保存时写入该键；此处**切模型时确保它存在**（缺失则落默认 1M），
+            // 否则用户从侧栏切模型会掉回 200k——「设置页配的上下文对切换的模型不
+            // 生效」的根因。已有值一律保留（那是用户在设置页显式配置的）。
+            if !env.contains_key(crate::harness_config::CLAUDE_MAX_CONTEXT_KEY) {
+                env.insert(
+                    crate::harness_config::CLAUDE_MAX_CONTEXT_KEY.to_string(),
+                    serde_json::Value::String(
+                        crate::harness_config::DEFAULT_CLAUDE_CONTEXT_TOKENS.to_string(),
+                    ),
+                );
+            }
         }
         // availableModels allowlist 合并：探测到的网关全量模型并入后，新会话的
         // configOptions 选择器即包含它们，set_config_option 不再拒绝（连接器
@@ -1149,6 +1164,33 @@ wire_api = "responses"
             v["availableModels"],
             serde_json::json!(["opus", "sonnet", "haiku", "deepseek/deepseek-v4.1-flash", "saver/glm-5.3-flash"])
         );
+    }
+
+    // —— 上下文窗口：切模型链路必须保证该键存在（否则掉回 200k 桶） ——
+
+    #[test]
+    fn write_claude_fills_context_window_when_missing() {
+        // CLAUDE 常量无该键 → 切模型时补默认 1M（网关模型的官方纠偏入口）
+        let out = write_claude(CLAUDE, Some("deepseek/deepseek-v4.1-flash"), None, None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1000000");
+    }
+
+    #[test]
+    fn write_claude_preserves_user_configured_context_window() {
+        // 设置页显式配过（500000）→ 切模型一律保留，绝不覆盖成默认值
+        let raw = r#"{"env":{"ANTHROPIC_BASE_URL":"https://x/","CLAUDE_CODE_MAX_CONTEXT_TOKENS":"500000"}}"#;
+        let out = write_claude(raw, Some("some-model"), None, None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "500000");
+    }
+
+    #[test]
+    fn write_claude_baseurl_only_does_not_touch_context_window() {
+        // 仅改 URL（UrlEditPanel 链路）→ 不碰上下文键（与 allowlist 同一纪律）
+        let out = write_claude(CLAUDE, None, Some("https://x.example.com"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["env"].get("CLAUDE_CODE_MAX_CONTEXT_TOKENS").is_none());
     }
 
     #[test]

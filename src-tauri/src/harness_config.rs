@@ -57,6 +57,11 @@ pub struct HarnessConfigInput {
 /// Claude Code 对未知网关模型兜底 200k 提前压缩——env 覆盖对非 claude- 模型名直接生效）。
 pub const DEFAULT_CLAUDE_CONTEXT_TOKENS: u64 = 1_000_000;
 
+/// settings.json env 中的上下文窗口键名（harness_meta 的切模型链路与本模块的配置
+/// 代写共用同一常量，防两处字面量分叉——历史上正是该键只在代写链路写、切模型链路
+/// 不写，导致「设置页配的上下文对切换的模型不生效」）。
+pub const CLAUDE_MAX_CONTEXT_KEY: &str = "CLAUDE_CODE_MAX_CONTEXT_TOKENS";
+
 /// Claude Code env 范围上限（autoCompactWindow 接受 100k~1M，超出被客户端 cap 无意义）。
 const MAX_CLAUDE_CONTEXT_TOKENS: u64 = 1_000_000;
 
@@ -421,6 +426,8 @@ pub fn claude_merge_write(
         sets.push(("env.ANTHROPIC_AUTH_TOKEN", serde_json::Value::String(key.into())));
     }
     if let Some(n) = context_tokens {
+        // 键名与 CLAUDE_MAX_CONTEXT_KEY 必须一致（测试 env_key_matches_const 锁定，
+        // json_merge_set 走 &str 点路径，故此处保留字面量）
         sets.push((
             "env.CLAUDE_CODE_MAX_CONTEXT_TOKENS",
             serde_json::Value::String(n.to_string()),
@@ -1121,6 +1128,16 @@ mod tests {
         let out = claude_merge_write(Some("{}"), "https://x.com", "", "m", None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("env").and_then(|e| e.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS")).is_none());
+    }
+
+    #[test]
+    fn env_key_matches_const() {
+        // 字面量路径（json_merge_set 走 &str）必须与 CLAUDE_MAX_CONTEXT_KEY 一致，
+        // 否则代写链路与切模型链路会写到两个不同的键上（分叉回归）
+        assert_eq!(CLAUDE_MAX_CONTEXT_KEY, "CLAUDE_CODE_MAX_CONTEXT_TOKENS");
+        let out = claude_merge_write(Some("{}"), "https://x.com", "", "m", Some(500_000)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["env"][CLAUDE_MAX_CONTEXT_KEY], "500000");
     }
 
     #[test]
