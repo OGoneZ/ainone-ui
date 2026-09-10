@@ -104,11 +104,16 @@ fn now_ms() -> f64 {
 /// 流到前端的事件（channel 的 onmessage 会收到 { event, payload }）
 /// P32 R8：Stdout/Stderr payload 改 base64 字符串——Tauri v2 Channel 无二进制
 /// 支持，Vec<u8> 会被 serde_json 序列化成 number[]（体积 ~4x），base64 ~1.33x。
+/// P41：新增 StdoutBatch/StderrBatch——合帧批量转发（多条 base64 块一次 send）。
+/// 单条 Stdout/Stderr 变体保留（serde 兼容 + 前端旧逻辑兜底），新路径不再构造。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "payload", rename_all = "camelCase")]
 pub enum AgentEvent {
     Stdout(String),
     Stderr(String),
+    StdoutBatch(Vec<String>),
+    StderrBatch(Vec<String>),
     Error(String),
     Terminated {
         code: Option<i32>,
@@ -314,35 +319,123 @@ fn global_app_handle() -> Option<&'static AppHandle> {
     GLOBAL_APP.get()
 }
 
-/// 把事件接收端逐条转发到前端 Channel；前端断开则停止。
+/// 把事件接收端合并转发到前端 Channel；前端断开则停止。
+///
+/// P41 合帧：harness 高速输出时（实测峰值 ≈950 read 块/s、2 字符/块），逐条
+/// Channel.send = 逐条 webview.eval，IPC 洪峰在 WKWebView 侧无界堆积（tauri
+/// #13234 同形态）。此处把连续到达的 stdout/stderr 合并为一个 batch 一次发送：
+/// 起手阻塞 recv 一条（空闲零延迟），再 drain try_recv（64 条 / 64KB / 16ms
+/// 三上限先到），合批后与 Error/Terminated（单发、不合批）保持严格顺序——
+/// 同一 channel 串行 send，前端按序处理。
 pub fn pump_events(
     mut rx: tauri::async_runtime::Receiver<CommandEvent>,
     on_event: Channel<AgentEvent>,
 ) {
     tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            let js = match event {
-                CommandEvent::Stdout(b) => AgentEvent::Stdout(b64(&b)),
-                CommandEvent::Stderr(b) => AgentEvent::Stderr(b64(&b)),
-                CommandEvent::Error(e) => {
-                    log::warn!("[agent] 进程错误: {e}");
-                    AgentEvent::Error(e)
+        loop {
+            // 起手阻塞取一条：空闲时单条直发，不引入任何额外延迟
+            let Some(first) = rx.recv().await else { break };
+            let mut stdout: Vec<String> = Vec::new();
+            let mut stderr: Vec<String> = Vec::new();
+            let mut terminated: Option<AgentEvent> = None;
+
+            // 本轮起手事件进批；不可合批事件（Error/Terminated）直接结束本轮
+            let mut drain_deadline = match first {
+                CommandEvent::Stdout(b) => {
+                    stdout.push(b64(&b));
+                    Some(tokio::time::Instant::now())
                 }
-                CommandEvent::Terminated(p) => {
-                    log::info!("[agent] 进程退出 code={:?} signal={:?}", p.code, p.signal);
-                    // signal 透传：被信号终止（如 SIGKILL/OOM）时 code 为 null，
-                    // signal 是唯一死亡线索（此前单字段丢失，前端无法区分死因）
-                    AgentEvent::Terminated { code: p.code, signal: p.signal }
+                CommandEvent::Stderr(b) => {
+                    stderr.push(b64(&b));
+                    Some(tokio::time::Instant::now())
                 }
-                _ => continue,
+                other => {
+                    if let Some(ev) = classify(&other) {
+                        terminated = Some(ev);
+                    }
+                    None
+                }
             };
-            if on_event.send(js).is_err() {
-                log::warn!("[agent] 前端 channel 已断开，停止转发事件");
-                break;
+            // drain 窗口：16ms 合帧期；上限（64 条/64KB）或不可合批事件先到则截批
+            while let Some(started) = drain_deadline {
+                let sleep = tokio::time::sleep_until(started + std::time::Duration::from_millis(P41_BATCH_WINDOW_MS));
+                tokio::select! {
+                    biased;
+                    item = rx.recv() => {
+                        match item {
+                            Some(CommandEvent::Stdout(b)) => {
+                                stdout.push(b64(&b));
+                                if stdout.len() >= P41_BATCH_MAX_ITEMS
+                                    || stdout.iter().map(|s| s.len()).sum::<usize>() >= P41_BATCH_MAX_BYTES
+                                {
+                                    drain_deadline = None; // 条数/字节上限：立即截批
+                                }
+                            }
+                            Some(CommandEvent::Stderr(b)) => {
+                                stderr.push(b64(&b));
+                                if stderr.len() >= P41_BATCH_MAX_ITEMS
+                                    || stderr.iter().map(|s| s.len()).sum::<usize>() >= P41_BATCH_MAX_BYTES
+                                {
+                                    drain_deadline = None;
+                                }
+                            }
+                            Some(other) => {
+                                // Error/Terminated 到达：结束本轮 drain，事件按序收尾
+                                if let Some(ev) = classify(&other) {
+                                    terminated = Some(ev);
+                                }
+                                drain_deadline = None;
+                            }
+                            None => { drain_deadline = None; } // 管道关闭
+                        }
+                    }
+                    _ = sleep => { drain_deadline = None; } // 16ms 窗口到点
+                }
+            }
+
+            // 按序发送：batch（若有）→ terminated
+            if !stdout.is_empty() {
+                if on_event.send(AgentEvent::StdoutBatch(std::mem::take(&mut stdout))).is_err() {
+                    log::warn!("[agent] 前端 channel 已断开，停止转发事件");
+                    break;
+                }
+            }
+            if !stderr.is_empty() {
+                if on_event.send(AgentEvent::StderrBatch(std::mem::take(&mut stderr))).is_err() {
+                    log::warn!("[agent] 前端 channel 已断开，停止转发事件");
+                    break;
+                }
+            }
+            if let Some(ev) = terminated {
+                if on_event.send(ev).is_err() {
+                    log::warn!("[agent] 前端 channel 已断开，停止转发事件");
+                }
+                break; // Terminated 后无后续事件
             }
         }
     });
 }
+
+/// P41：不可合批事件分类（Error/Terminated），其余返回 None。
+fn classify(event: &CommandEvent) -> Option<AgentEvent> {
+    match event {
+        CommandEvent::Error(e) => Some(AgentEvent::Error(e.clone())),
+        CommandEvent::Terminated(p) => {
+            log::info!("[agent] 进程退出 code={:?} signal={:?}", p.code, p.signal);
+            // signal 透传：被信号终止（如 SIGKILL/OOM）时 code 为 null，
+            // signal 是唯一死亡线索（此前单字段丢失，前端无法区分死因）
+            Some(AgentEvent::Terminated { code: p.code, signal: p.signal })
+        }
+        _ => None,
+    }
+}
+
+/// P41 合帧窗口（毫秒）：16ms ≈ 一帧，空闲首条直发不受影响。
+const P41_BATCH_WINDOW_MS: u64 = 16;
+/// P41 单批条数上限（防极端碎片把 JSON 包撑爆）。
+const P41_BATCH_MAX_ITEMS: usize = 64;
+/// P41 单批字节上限（base64 后 ~85KB，低于 Tauri Channel 大包 IPC 阈值 8KB 路径影响可控）。
+const P41_BATCH_MAX_BYTES: usize = 64 * 1024;
 
 /// 清空进程表（退出时兜底）。
 pub fn on_exit_cleanup(app: &AppHandle) {

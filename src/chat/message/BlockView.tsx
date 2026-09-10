@@ -34,6 +34,12 @@ const TOOL_STATUS_LABEL: Record<string, string> = {
   error: "失败",
 };
 
+// P41：thinking 分支的 Streamdown props 提为模块级常量（照 MarkdownView P31 惯例）。
+// 内联字面量每次渲染新引用 → Streamdown 顶层 memo 比较器失败 + shikiTheme context
+// 每帧新值 → thought 流式期间全部已完成块被强制重渲染。
+const THOUGHT_PLUGINS = { code, math };
+const THOUGHT_SHIKI_THEME: [string, string] = ["github-light", "github-dark"];
+
 function ThoughtView({
   text,
   ms,
@@ -129,8 +135,8 @@ function ThoughtView({
           <Streamdown
             mode={live ? "streaming" : "static"}
             parseIncompleteMarkdown={live}
-            plugins={{ code, math }}
-            shikiTheme={["github-light", "github-dark"]}
+            plugins={THOUGHT_PLUGINS}
+            shikiTheme={THOUGHT_SHIKI_THEME}
           >
             {text}
           </Streamdown>

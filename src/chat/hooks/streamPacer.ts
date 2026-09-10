@@ -142,9 +142,9 @@ function createSegmenter(): GraphemeSegmenter | null {
   }
 }
 
-function toUnits(pending: string, seg: GraphemeSegmenter | null): string[] {
-  if (seg) return Array.from(seg.segment(pending), (s) => s.segment);
-  return Array.from(pending);
+function toUnits(text: string, seg: GraphemeSegmenter | null): string[] {
+  if (seg) return Array.from(seg.segment(text), (s) => s.segment);
+  return Array.from(text);
 }
 
 export function createStreamPacer(options: StreamPacerOptions = {}, now: () => number = Date.now): StreamPacer {
@@ -153,27 +153,46 @@ export function createStreamPacer(options: StreamPacerOptions = {}, now: () => n
   const seg = createSegmenter();
 
   let revealed = ""; // 已揭示全文
-  let pending = ""; // 未揭示积压
+  let pending = ""; // 未揭示积压（已切分字素的镜像计数用 pendingUnits）
+  let pendingUnits: string[] = []; // P41：增量切分——字素在 onChunk 时一次性切好，reveal 只做游标前移
+  let unitCursor = 0; // pendingUnits 的消费游标（已揭示单位数）
   let cps = opts.minCps; // 当前揭示速率（EMA 平滑后）
   let budget = 0; // 字符预算（cps × dt 累积）
   let lastTick: number | null = null;
   const minFrameMs = 1000 / opts.commitFps;
   const gate = createFenceGate();
 
+  /** 尚未揭示的字素数（游标右侧） */
+  function pendingUnitCount(): number {
+    return pendingUnits.length - unitCursor;
+  }
+
+  /** 压缩：游标左侧已消费单位出队（摊还 O(1)，防数组无界增长） */
+  function compactUnits(): void {
+    if (unitCursor > 0) {
+      pendingUnits = pendingUnits.slice(unitCursor);
+      unitCursor = 0;
+    }
+  }
+
   function reveal(n: number): void {
-    if (n <= 0 || pending.length === 0) return;
-    const units = toUnits(pending, seg);
-    const take = Math.min(n, units.length);
+    const available = pendingUnitCount();
+    const take = Math.min(n, available);
     if (take <= 0) return;
     // 逐字素过 fence 门：状态机对预算内字素全部消费（闭合判定在换行时发生，
     // 中途丢喂会让 line 错位）；返回 false 的字素进 gate.held（不进 revealed），
     // 闭合时随 drainHeld 整体放行——pending 与 gate 状态严格同步无重复消费。
+    let consumedChars = 0;
     for (let i = 0; i < take; i++) {
-      const r = gate.step(units[i]);
-      if (r === true) revealed += units[i];
+      const unit = pendingUnits[unitCursor + i];
+      const r = gate.step(unit);
+      if (r === true) revealed += unit;
       else if (typeof r === "string") revealed += r; // 闭合事件：阻塞区整体接回
+      consumedChars += unit.length;
     }
-    pending = units.slice(take).join("");
+    unitCursor += take;
+    pending = pending.slice(consumedChars);
+    compactUnits();
   }
 
   if (opts.reducedMotion) {
@@ -195,11 +214,16 @@ export function createStreamPacer(options: StreamPacerOptions = {}, now: () => n
     onChunk(text) {
       if (!text) return;
       pending += text;
+      // P41 增量切分：新到达文本即刻切成字素追加——Segmenter 只跑 O(新增)，
+      // tick/reveal 不再对全量 pending 重切（fence 积压 1MB 时曾 61ms/帧）
+      const units = toUnits(text, seg);
+      pendingUnits.push(...units);
     },
     tick(nowMs) {
       if (lastTick !== null) {
         const dt = Math.min(Math.max(0, nowMs - lastTick), 100); // 帧间隔钳制（markstream 同款）
         if (dt < minFrameMs) return false; // 跳帧：commitFps 上限
+        lastTick = nowMs;
         if (pending.length > 0) {
           // —— 比例控制器：目标速率 = pending / 目标延迟 ——
           const latency =
@@ -228,8 +252,11 @@ export function createStreamPacer(options: StreamPacerOptions = {}, now: () => n
     },
     flush() {
       // 揭示全部（含 fence 内与 held 阻塞区——终态必须完整）
-      revealed += pending + gate.drainHeld();
+      const rest = pendingUnits.slice(unitCursor).join("");
+      revealed += rest + gate.drainHeld();
       pending = "";
+      pendingUnits = [];
+      unitCursor = 0;
       budget = 0;
       lastTick = null;
     },

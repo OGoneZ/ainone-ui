@@ -28,6 +28,9 @@ export interface HarnessProcess {
 type AgentEvent =
   | { event: "stdout"; payload: string }
   | { event: "stderr"; payload: string }
+  // P41：Rust 合帧批量转发（多条 base64 块一次 send，峰值 eval/s 从 ~950 压到 ≤60）
+  | { event: "stdoutBatch"; payload: string[] }
+  | { event: "stderrBatch"; payload: string[] }
   | { event: "error"; payload: string }
   | { event: "terminated"; payload: { code: number | null; signal: number | null } };
 
@@ -69,6 +72,17 @@ export async function spawnHarness(
     switch (msg.event) {
       case "stdout":
         stdoutCtrl.enqueue(base64ToBytes(msg.payload));
+        break;
+      case "stdoutBatch":
+        // P41：批内按序 enqueue，行序与 Rust 读侧一致
+        for (const payload of msg.payload) stdoutCtrl.enqueue(base64ToBytes(payload));
+        break;
+      case "stderrBatch":
+        for (const payload of msg.payload) {
+          const bytes = base64ToBytes(payload);
+          stderrTailStr = (stderrTailStr + new TextDecoder().decode(bytes)).slice(-2048);
+          stderrCtrl.enqueue(bytes);
+        }
         break;
       case "stderr":
         stderrTailStr = (stderrTailStr + new TextDecoder().decode(base64ToBytes(msg.payload))).slice(-2048);
