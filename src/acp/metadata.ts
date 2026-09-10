@@ -37,15 +37,40 @@ export function stripModelSuffix(model: string | null): string | null {
   return model.trim().replace(/\[1m\]$/, "") || null;
 }
 
-/** P29 R3：从会话配置选项提取当前模型（category="model" 的 select 项 currentValue）。
- *  ACP 官方稳定通道（Session Config Options RFD 已 stabilized）；omp/pi 实测提供。 */
+/** 从 select 的选项集合里取选中值对应的展示名。
+ *  ACP 规范（Session Config Options → ConfigOptionValue）：
+ *    value = "The value identifier used when setting this option"（仅标识符，回传用）
+ *    name  = "Human-readable name to display"（界面展示用）
+ *  故展示必须取 name——网关别名场景下 value=opus / name=deepseek/deepseek-v4-flash，
+ *  用 value 会把真实模型显示成 "opus" 而误导用户。
+ *  options 有两种形态（SessionConfigSelectOptions）：扁平数组，或分组数组
+ *  （{groupId, name, options:[...]}）——两种都要能取到。
+ *  返回 null = 该值不在选项里（如恢复会话运行着选择器外的模型）→ 调用方回退 currentValue。 */
+function displayNameOf(options: unknown, value: string): string | null {
+  if (!Array.isArray(options)) return null;
+  for (const o of options as Array<Record<string, unknown>>) {
+    if (!o || typeof o !== "object") continue;
+    // 分组形态：下钻一层
+    if (Array.isArray(o.options)) {
+      const nested = displayNameOf(o.options, value);
+      if (nested) return nested;
+      continue;
+    }
+    if (o.value === value && typeof o.name === "string" && o.name.trim()) return o.name;
+  }
+  return null;
+}
+
+/** P29 R3：从会话配置选项提取当前模型（category="model" 的 select 项）。
+ *  ACP 官方稳定通道（Session Config Options RFD 已 stabilized）；omp/pi 实测提供。
+ *  返回选中项的 name（规范定义的展示名，见 displayNameOf），取不到时回退 currentValue。 */
 export function extractSessionModel(
-  configOptions: Array<{ category?: string | null; type: string; currentValue?: string | boolean }> | null | undefined,
+  configOptions: Array<{ category?: string | null; type: string; currentValue?: string | boolean; options?: unknown }> | null | undefined,
 ): string | null {
   if (!configOptions) return null;
   for (const opt of configOptions) {
     if (opt.category === "model" && opt.type === "select" && typeof opt.currentValue === "string" && opt.currentValue) {
-      return stripModelSuffix(opt.currentValue);
+      return stripModelSuffix(displayNameOf(opt.options, opt.currentValue) ?? opt.currentValue);
     }
   }
   return null;

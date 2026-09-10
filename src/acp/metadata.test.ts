@@ -91,4 +91,81 @@ describe("extractSessionModel", () => {
     expect(extractSessionModel([{ category: "model", type: "boolean", currentValue: true }])).toBeNull();
     expect(extractSessionModel(null)).toBeNull();
   });
+
+  // —— 展示名取 name（ACP 规范：value=标识符、name=Human-readable name to display）——
+
+  it("网关别名：展示 name 而非 value（第三方覆盖场景，2026-09-10 实测结构）", () => {
+    // claude-code + ANTHROPIC_DEFAULT_OPUS_MODEL 指向第三方模型时：
+    // currentValue=opus（别名），name 才是真实模型 —— 显示 value 会误导用户
+    expect(
+      extractSessionModel([
+        {
+          category: "model",
+          type: "select",
+          currentValue: "opus",
+          options: [
+            { value: "default", name: "Default (recommended)", description: "deepseek/deepseek-v4-flash" },
+            { value: "opus", name: "deepseek/deepseek-v4-flash", description: "Custom Opus model" },
+          ],
+        },
+      ]),
+    ).toBe("deepseek/deepseek-v4-flash");
+  });
+
+  it("官方原生：展示 name（Agent 指定的展示标签，规范如此）", () => {
+    expect(
+      extractSessionModel([
+        {
+          category: "model",
+          type: "select",
+          currentValue: "opus[1m]",
+          options: [
+            { value: "default", name: "Default (recommended)" },
+            { value: "opus[1m]", name: "Opus (1M context)" },
+          ],
+        },
+      ]),
+    ).toBe("Opus (1M context)");
+  });
+
+  it("分组形态 options（SessionConfigSelectGroup[]）也能取到展示名", () => {
+    // ACP 规范允许 options 为 {groupId, name, options:[...]} 分组数组
+    expect(
+      extractSessionModel([
+        {
+          category: "model",
+          type: "select",
+          currentValue: "model-2",
+          options: [
+            { groupId: "a", name: "Provider A", options: [{ value: "model-1", name: "Model 1" }] },
+            { groupId: "b", name: "Provider B", options: [{ value: "model-2", name: "Model 2" }] },
+          ],
+        },
+      ]),
+    ).toBe("Model 2");
+  });
+
+  it("选中值不在选项里（恢复会话运行选择器外模型）→ 回退 currentValue", () => {
+    expect(
+      extractSessionModel([
+        {
+          category: "model",
+          type: "select",
+          currentValue: "out-of-picker-model",
+          options: [{ value: "opus", name: "Opus" }],
+        },
+      ]),
+    ).toBe("out-of-picker-model");
+  });
+
+  it("选项缺 name / options 缺省 → 回退 currentValue 不崩", () => {
+    expect(
+      extractSessionModel([{ category: "model", type: "select", currentValue: "m-1" }]),
+    ).toBe("m-1");
+    expect(
+      extractSessionModel([
+        { category: "model", type: "select", currentValue: "m-1", options: [{ value: "m-1" }] },
+      ]),
+    ).toBe("m-1");
+  });
 });
