@@ -270,11 +270,11 @@ jobs:
         # P32 F-32-3：updater 消费清单（与上面人工下载清单 latest.json 解耦）。
         # tauri-action 已按 createUpdaterArtifacts=true 产出各平台更新产物及
         # 对应 .sig 签名文件（TAURI_SIGNING_PRIVATE_KEY 注入 build 作业后生成）。
-        # 产物命名（官方文档 v2.tauri.app/plugin/updater 实证）：
-        #   macOS: {app}.app.tar.gz(+.sig) —— 注意 tauri 打包时产物名即
-        #          "ainone-ui.app.tar.gz"，无平台前缀，双架构靠【所在目录】区分
-        #   Windows: {app}-setup.exe.nsis.zip(+.sig)
-        #   Linux: {app}.AppImage.tar.gz(+.sig)
+        # 产物命名（v2 官方文档 v2.tauri.app/plugin/updater 实证，注意与 v1Compatible
+        # 模式的命名不同——曾误按 v1 找 *.nsis.zip / *.AppImage.tar.gz 致清单空值）：
+        #   macOS:   {app}.app.tar.gz(+.sig) —— 打包名无平台前缀，双架构靠【所在目录】区分
+        #   Windows: {app}-setup.exe(+.sig)   —— 安装器本体即更新产物，直接复用
+        #   Linux:   {app}.AppImage(+.sig)    —— AppImage 本体即更新产物，直接复用
         # 平台键 = 插件运行期 target 判定（darwin-aarch64/darwin-x86_64/
         # windows-x86_64/linux-x86_64，插件源码 updater.rs::target()）。
         # macOS 双架构同名问题：artifact 展平前按各自 matrix 目录分桶取件。
@@ -288,8 +288,9 @@ jobs:
           #（展平发生在 installers 上传步骤），此处按目录特征分桶
           UPD_ARM=$(find . -name '*.app.tar.gz' | grep -i aarch64 | head -1)
           UPD_X64=$(find . -name '*.app.tar.gz' | grep -vi aarch64 | head -1)
-          UPD_NSIS=$(find . -name '*.nsis.zip' | head -1)
-          UPD_APPIMAGE=$(find . -name '*.AppImage.tar.gz' | head -1)
+          # Windows/Linux 的更新产物就是安装器本体（v2 模式），非 v1 的额外压缩包
+          UPD_NSIS=$(find . -name '*-setup.exe' | head -1)
+          UPD_APPIMAGE=$(find . -name '*.AppImage' | head -1)
 
           for f in "$UPD_ARM" "$UPD_X64" "$UPD_NSIS" "$UPD_APPIMAGE"; do
             [ -z "$f" ] && { echo "ERROR: updater bundle missing ($f)"; exit 1; }
