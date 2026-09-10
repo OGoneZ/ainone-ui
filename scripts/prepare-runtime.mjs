@@ -19,6 +19,7 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -140,7 +141,10 @@ async function main() {
   // 哈希对不上时在落位前拦截（下方 sha 校验），绝不覆盖成坏文件。
 
   const url = `${BUN_RELEASE_BASE}/bun-v${manifest.bun}/${entry.filename}`
-  const staging = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'ainone-bun-'))
+  // os.tmpdir() 跨平台正确：Windows → %TEMP%，macOS/Linux → $TMPDIR 或 /tmp。
+  // 不能写 process.env.TMPDIR || '/tmp'——Windows 无 TMPDIR，回退的 '/tmp' 会被
+  // 解析成当前盘的 \tmp\ 而 ENOENT（v0.3.1 Windows 腿实锤打回）。
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'ainone-bun-'))
   const zipPath = path.join(staging, entry.filename)
   try {
     console.log(`[prepare-runtime] 下载 ${url}`)
