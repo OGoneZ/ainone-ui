@@ -156,11 +156,15 @@ function App() {
   }, [railState]);
   // P29 R5：活跃会话句柄（ChatPanel 建链上抛 → RightRail → MetadataPanel 模型切换）
   const [activeSession, setActiveSession] = useState<{ setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null>(null);
+  // P39：活跃 ChatPanel 的建链句柄（Ctrl+P 面板打开时会话未建链 → 先建链再取 configOptions）
+  const [activeEnsure, setActiveEnsure] = useState<(() => Promise<boolean>) | null>(null);
   // P32d：活跃 tab 的 session/list 句柄（null = 未声明 list 能力；仅 active tab 上抛）
   const [activeListSessions, setActiveListSessions] = useState<(() => Promise<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>>) | null>(null);
   // P39 R3：Ctrl+P 呼出的模型切换面板（App 级，右栏模型行的键盘等效）。
   // open 与 activeTab 存在性解耦——tab 切走/关闭时 open 条件自然失效自动关。
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
+  // P39b：建链中提示（会话未建链时 Ctrl+P 先建链，期间 toast/遮罩反馈）
+  const [modelPanelConnecting, setModelPanelConnecting] = useState(false);
   // F-21-6 左侧栏宽度（拖宽把手，持久化；clamp 200~min(520,40vw)）
   const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
     clampWidth(Number(localStorage.getItem("ainone-sidebar-width")) || 240, 200, sidebarMaxWidth()),
@@ -428,12 +432,30 @@ function App() {
       // P39：Ctrl+P 呼出模型切换面板（右栏模型行的键盘等效）。会话 tab 才有
       // 模型语义——欢迎页（无 tab）/终端 tab 不动作；模态浮层开着时让位
       //（同 pane.temp-maximize 先例，事件 target 落在浮层内不响应）。
+      // P39b：会话未建链（configOptions 空）→ 先 ensureSession 建链再开面板，
+      // 否则面板打开即探测、点选/Enter 全部报「无 model 配置项」，与右栏
+      // 入口（会话必然已建链）行为不一致。
       if (matchShortcut(e, useKeymapStore.getState().defs, "app.switch-model", keymapOverrides)) {
         const t = e.target as Element | null;
         if (t?.closest?.("[role='dialog'], [cmdk-root]")) return;
         if (!activeTab || activeTab.kind === "terminal" || !activeAdapter) return;
         e.preventDefault();
-        setModelPanelOpen(true);
+        const hasOptions = Boolean(useSessionStore.getState().runtime[activeTab.key]?.configOptions);
+        if (hasOptions || !activeEnsure) {
+          setModelPanelOpen(true);
+          return;
+        }
+        setModelPanelConnecting(true);
+        activeEnsure()
+          .then((ok) => {
+            setModelPanelConnecting(false);
+            if (ok) setModelPanelOpen(true);
+            else toast.error("会话建立失败，无法切换模型");
+          })
+          .catch(() => {
+            setModelPanelConnecting(false);
+            toast.error("会话建立失败，无法切换模型");
+          });
         return;
       }
       // P26e：Ctrl+Shift+Space 临时全屏当前聚焦窗格（flexlayout maximizeToggle），
@@ -722,6 +744,7 @@ function App() {
         onRewind={() => {}}
         onActiveSession={t.key === activeKey ? setActiveSession : undefined}
         onSessionList={t.key === activeKey ? setActiveListSessions : undefined}
+        onEnsureSession={t.key === activeKey ? (fn?: () => Promise<boolean>) => setActiveEnsure(fn ?? null) : undefined}
       />
     );
   };
@@ -1500,6 +1523,16 @@ function App() {
 
       {/* P39 R3：Ctrl+P 呼出的模型切换面板（仅会话 tab；sessionOnly 语义同右栏）。
           activeTab 切走/关闭 → 渲染条件失效自动关闭；数据口径与 MetadataPanel 一致 */}
+      {modelPanelConnecting && (
+        <Dialog open={true} onOpenChange={() => {}}>
+          <DialogContent className="max-w-xs" showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>正在建立会话…</DialogTitle>
+            </DialogHeader>
+            <p className="hint">首次切换模型需要先连接 {activeAdapter?.name}，稍候即出模型列表</p>
+          </DialogContent>
+        </Dialog>
+      )}
       {modelPanelOpen && activeTab && activeTab.kind !== "terminal" && activeAdapter && (
         <ModelSwitchPanel
           open={true}

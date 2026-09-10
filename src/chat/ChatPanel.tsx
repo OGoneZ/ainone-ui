@@ -111,9 +111,12 @@ interface Props {
   onActiveSession?: (s: { setConfigOption?: (configId: string, value: string) => Promise<unknown> } | null) => void;
   /** P32d：session/list 句柄上抛（null = 未声明 list 能力 → 会话列表入口隐藏） */
   onSessionList?: (list: (() => Promise<Array<{ sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null }>>) | null) => void;
+  /** P39：建链句柄上抛（App 级 Ctrl+P 模型面板打开时若会话未建链 → 先建链取
+   *  configOptions；缺省 = 测试/旧调用方）。 */
+  onEnsureSession?: (fn?: () => Promise<boolean>) => void;
 }
 
-export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, onActiveSession, onSessionList, active = true, visible = true}: Props) {
+export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt, onFork, onForkNavigate, onRewind, onActiveSession, onSessionList, onEnsureSession, active = true, visible = true}: Props) {
   const rt = useSessionStore((s) => s.runtime[tabKey]);
   const messages = rt?.messages ?? [];
   const busy = rt?.busy ?? false;
@@ -283,6 +286,15 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
   const voiceToggleRef = useRef<(() => void) | null>(null);
   const registerVoiceToggle = useCallback((fn: () => void) => {
     voiceToggleRef.current = fn;
+  }, []);
+  // P39：建链句柄上抛（函数体在 ensureSession 定义后赋值，见下方 effect）
+  const ensureSessionRef = useRef<(() => Promise<boolean>) | null>(null);
+  useEffect(() => {
+    onEnsureSession?.(() => ensureSessionRef.current?.() ?? Promise.resolve(false));
+    return () => {
+      onEnsureSession?.(undefined);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // P25：Ctrl+O 全局展开/折叠覆写。三态循环：null→true(全展开)→false(全收起)→true；
   // 用户手动点单卡回调置 null（回局部态）
@@ -560,6 +572,17 @@ export function ChatPanel({ tabKey, adapter, resumeSessionId, cwd, onFirstPrompt
     ensurePromiseRef.current = p;
     return p;
   }
+
+  // P39：建链句柄实现（挂载后一次性赋 ref；App 级模型面板打开时调用）。
+  // 返回 boolean = 是否成功取得活跃会话（含已有会话短路）。
+  ensureSessionRef.current = async () => {
+    try {
+      await ensureSession();
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   async function doEnsureSession() {
     // L7：hadSession = 回收/回溯后重建链路 → 这才是 reopen 时点
