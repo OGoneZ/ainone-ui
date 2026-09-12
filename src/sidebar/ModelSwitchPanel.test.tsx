@@ -100,7 +100,9 @@ describe("ModelSwitchPanel", () => {
     const props = setup();
     await screen.findByText("m-b");
     await userEvent.click(screen.getByRole("option", { name: /m-b/ }));
-    expect(props.onSessionModelChange).toHaveBeenCalledWith("m-b");
+    // P45：omp 点选裸 id → 归一成 `<provider>/<id>` ref 再发（MODEL_OPTIONS 无
+    // 匹配项 → 回退 ainone/ 前缀；命中用例见 ompModelValue.test.ts）
+    expect(props.onSessionModelChange).toHaveBeenCalledWith("ainone/m-b");
     await waitFor(() => expect(props.onWritten).toHaveBeenCalled());
     expect(writeHarnessSettings).toHaveBeenCalledWith("omp", { model: "m-b" }, ["m-a", "m-b", "m-c"]);
     expect(toast.success).toHaveBeenCalled();
@@ -114,6 +116,34 @@ describe("ModelSwitchPanel", () => {
     await userEvent.click(screen.getByRole("option", { name: /m-b/ }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("P45 回归：omp 点选裸 id 时按 configOptions 反查命中 ref（不发裸 id）", async () => {
+    // 真机实测：omp 的 set_config_option 只认 `<provider>/<id>`；发裸 id 必报
+    // Unknown ACP model → 侧栏每次切模型都弹「当前会话不支持该模型」。
+    // 此处 configOptions 含真实形态的选项 → 应命中并发出其 value。
+    // 候选列表（探测结果）是裸 id；configOptions 里才是 ref
+    probeModels.mockResolvedValue(["m-a", "saver/glm-5.3"]);
+    const props = setup({
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "ainone/m-a",
+          options: [
+            { value: "ainone/m-a", name: "m-a", description: "ainone/m-a" },
+            { value: "ainone/saver/glm-5.3", name: "saver/glm-5.3", description: "ainone/saver/glm-5.3" },
+          ],
+        },
+      ] as unknown as AcpSessionConfigOption[],
+    });
+    await screen.findByText("saver/glm-5.3");
+    await userEvent.click(screen.getByRole("option", { name: /saver\/glm-5\.3/ }));
+    expect(props.onSessionModelChange).toHaveBeenCalledWith("ainone/saver/glm-5.3");
+    // 写回仍是裸 id（yml 的 id 就该是裸 id，ref 由 omp 自行拼接）
+    expect(writeHarnessSettings).toHaveBeenCalledWith("omp", { model: "saver/glm-5.3" }, ["m-a", "saver/glm-5.3"]);
   });
 
   it("不可写 harness（pi）但会话可切：仅会话级切换不写文件（AC-R5-5）", async () => {

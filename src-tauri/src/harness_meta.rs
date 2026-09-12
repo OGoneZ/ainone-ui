@@ -332,7 +332,21 @@ pub(crate) fn harness_settings_write_inner(
     let updated = match kind {
         HarnessConfigKind::Claude => write_claude(&raw, model, base_url, probe_models)?,
         HarnessConfigKind::Codex => write_codex(&raw, model, base_url)?,
-        HarnessConfigKind::Omp => write_omp(&raw, base_url, model)?,
+        // P45：omp 切模型走 merge 写（同「设置页保存」链路）——models.yml 的 models
+        // 目录需登记探测到的全量模型，OMP 才在 configOptions 里透出它们；行级定点
+        // 替换只改首个 `- id:` 行，选择器永远只有 1 个可选值（侧栏切模型无从下手）。
+        // 仅改 baseUrl（model=None）时仍走行级替换：merge 写要求 model 非空，且
+        // URL 编辑不该触碰 models 目录。api_key 传空 = 继承既有（与保存链路同纪律）。
+        HarnessConfigKind::Omp => match model {
+            Some(m) => crate::harness_config::omp_merge_write(
+                Some(&raw),
+                base_url.unwrap_or(""),
+                "",
+                m,
+                probe_models.unwrap_or(&[]),
+            )?,
+            None => write_omp(&raw, base_url, None)?,
+        },
         // pi 无验证过的定点替换语义 → 引导走配置代写（三格齐落盘；错误含 adapter id
         // 与可操作指引，避免裸报错让用户以为功能缺失——P35 R3.1）
         HarnessConfigKind::Pi => {
@@ -1387,6 +1401,36 @@ wire_api = "responses"
         let r = harness_settings_write_inner("omp", None, Some("https://n.example.com/v1"), Some(&dir), None).unwrap();
         assert!(r.path.ends_with("models.yml"));
         assert!(std::fs::read_to_string(dir.join(".omp/agent/models.yml")).unwrap().contains("n.example.com"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn omp_model_write_registers_probe_models_end_to_end() {
+        // P45 端到端：侧栏切模型（writeHarnessSettings 链路）落盘后，models.yml 的
+        // models 目录含探测到的全量模型——OMP 的 configOptions 才有它们可选。
+        // 仅改 baseUrl 时（model=None）不碰 models 目录（URL 编辑语义独立）。
+        let dir = std::env::temp_dir().join(format!("ainone-omp-probe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".omp/agent")).unwrap();
+        std::fs::write(dir.join(".omp/agent/models.yml"), OMP).unwrap();
+        let probed = vec!["glm-5.3".to_string(), "kimi-k3".to_string()];
+        harness_settings_write_inner("omp", Some("glm-5.3"), None, Some(&dir), Some(&probed)).unwrap();
+        let raw = std::fs::read_to_string(dir.join(".omp/agent/models.yml")).unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).unwrap();
+        let ids: Vec<&str> = v["providers"]["ainone"]["models"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["id"].as_str())
+            .collect();
+        assert_eq!(ids, vec!["glm-5.3", "kimi-k3"], "切模型即登记全量（选中项居首）");
+        // 既有 provider 的 key 不蒸发（merge 写纪律）
+        assert_eq!(v["providers"]["zhubaoduo"]["apiKey"].as_str(), Some("sk-xxx"));
+        // URL-only 写回不触碰 models 目录
+        harness_settings_write_inner("omp", None, Some("https://u.example.com/v1"), Some(&dir), Some(&probed)).unwrap();
+        let raw2 = std::fs::read_to_string(dir.join(".omp/agent/models.yml")).unwrap();
+        let v2: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw2).unwrap();
+        assert_eq!(v2["providers"]["ainone"]["models"].as_sequence().unwrap().len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
