@@ -11,6 +11,7 @@ import { probeModels, writeHarnessSettings, supportsWrite } from "@/ipc/harnessM
 import { harnessConfigSave } from "@/ipc/adapters";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
+import { resolveOmpSessionValue } from "./ompModelValue";
 import type { AcpSessionConfigOption } from "@/store/sessionStore";
 
 // ---------------------------------------------------------------------------
@@ -237,6 +238,10 @@ export function ModelSwitchPanel({
     // 实测全可达（claude-code/codex/opencode/omp/pi 均返回 model select）。
     // 只发 session/set_config_option + ACP 即时生效，绝不写配置文件——
     // 每会话独立模型，新会话不继承，全局配置（设置页）不被触碰。
+    // P45：omp 的 set_config_option 只认 `<provider>/<id>` ref，而候选列表来自
+    // 网关探测的裸 id（`set "<裸 id>"` → Unknown ACP model）→ 发送前经
+    // configOptions 反查归一；其余 harness 的 value 与裸 id 同形，原样传。
+    const sessionValue = adapterId === "omp" ? resolveOmpSessionValue(model, configOptions) : model;
     if (sessionOnly) {
       if (!sessionSwitchable || !onSessionModelChange) {
         const msg = `当前会话不支持模型切换（${adapterName} 无 model 配置项）`;
@@ -245,7 +250,7 @@ export function ModelSwitchPanel({
         setSaving(null);
         return;
       }
-      const ok = await onSessionModelChange(model);
+      const ok = await onSessionModelChange(sessionValue);
       if (ok) {
         const t = switchResultToast({ persisted: "none", sessionApplied: true });
         toast[t.kind](t.message(model), { description: "仅当前会话生效，其他会话与全局配置不变" });
@@ -264,7 +269,7 @@ export function ModelSwitchPanel({
       //    重复块），第二次可能把刚切好的会话级模型再切一遍。
       let sessionApplied = false;
       if (sessionSwitchable && onSessionModelChange) {
-        sessionApplied = await onSessionModelChange(model);
+        sessionApplied = await onSessionModelChange(sessionValue);
       }
       if (formContext) {
         // P35 R3.2：设置页表单链路（present true/false 同一通道）→ 走配置代写

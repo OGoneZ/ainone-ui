@@ -599,12 +599,22 @@ pub fn opencode_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model:
 /// 2026-09-09）。且旧实现把用户自配 provider 整体丢弃换成 ainone，endpoint 语义也变。
 ///
 /// 现语义（与 claude_merge_write「key 留空 = 保留既有」同一纪律）：
-///   - ainone provider 存在：只改 baseUrl/apiKey(显式时)/models 首项，其余字段保留；
+///   - ainone provider 存在：只改 baseUrl/apiKey(显式时)/models 目录，其余字段保留；
 ///     key 留空 = 继承 ainone 既有 apiKey。
 ///   - ainone 不存在但其他 provider 有：保留该 provider 原样，新建 ainone 继承其
 ///     endpoint/key（用户「在现网关上切模型」的语义，不给网关换地址）。
 ///   - 全新文件：最小 ainone 结构。
-pub fn omp_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str) -> Result<String, String> {
+///
+/// probe_models 全量登记（P45）：OMP 的 configOptions 只透出 models.yml 声明过的
+/// 模型，只写选中一条会让侧栏切模型无从下手（omp 实测 models.yml 单条 → 选择器
+/// 只有 1 个可选值）。空 = 探测未走/失败 → 退化为只登记选中模型（旧行为）。
+pub fn omp_merge_write(
+    raw: Option<&str>,
+    endpoint: &str,
+    key: &str,
+    model: &str,
+    probe_models: &[String],
+) -> Result<String, String> {
     let mut v: serde_yaml_ng::Value = match raw {
         Some(r) if !r.trim().is_empty() => serde_yaml_ng::from_str(r)
             .map_err(|e| format!("models.yml 解析失败: {e}"))?,
@@ -693,44 +703,77 @@ pub fn omp_merge_write(raw: Option<&str>, endpoint: &str, key: &str, model: &str
     // 模型条目完整声明（社区文档 omp.sh/docs/custom-models：省略元数据 = 无思考
     // 配置 + 16K 输出上限——思考模型因此被网关拒/截断）。anthropic-messages 下
     // OMP 按 anthropic budget/effort 形态发思考参数，glm-5.3-flash 实测 OK。
-    let thinking = serde_yaml_ng::Value::Mapping(serde_yaml_ng::mapping::Mapping::from_iter([
-        (serde_yaml_ng::Value::String("mode".into()), serde_yaml_ng::Value::String("effort".into())),
-        (
-            serde_yaml_ng::Value::String("efforts".into()),
-            serde_yaml_ng::Value::Sequence(vec![
-                serde_yaml_ng::Value::String("low".into()),
-                serde_yaml_ng::Value::String("high".into()),
-                serde_yaml_ng::Value::String("max".into()),
-            ]),
-        ),
-        (serde_yaml_ng::Value::String("defaultLevel".into()), serde_yaml_ng::Value::String("high".into())),
-    ]));
-    let model_item = serde_yaml_ng::Value::Mapping(serde_yaml_ng::mapping::Mapping::from_iter([
-        (
-            serde_yaml_ng::Value::String("id".into()),
-            serde_yaml_ng::Value::String(model.to_string()),
-        ),
-        (
-            serde_yaml_ng::Value::String("name".into()),
-            serde_yaml_ng::Value::String(model.to_string()),
-        ),
-        (serde_yaml_ng::Value::String("reasoning".into()), serde_yaml_ng::Value::Bool(true)),
-        (serde_yaml_ng::Value::String("thinking".into()), thinking),
-        (
-            serde_yaml_ng::Value::String("input".into()),
-            serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("text".into())]),
-        ),
-        (serde_yaml_ng::Value::String("tool_use".into()), serde_yaml_ng::Value::Bool(true)),
-        (
-            serde_yaml_ng::Value::String("contextWindow".into()),
-            serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(1_000_000u64)),
-        ),
-        (
-            serde_yaml_ng::Value::String("maxTokens".into()),
-            serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(131_072u64)),
-        ),
-    ]));
-    p.insert(serde_yaml_ng::Value::String("models".into()), serde_yaml_ng::Value::Sequence(vec![model_item]));
+    // 全部条目同一模板：探测到的网关模型与选中模型声明形态一致。
+    let model_item = |m: &str| {
+        let thinking = serde_yaml_ng::Value::Mapping(serde_yaml_ng::mapping::Mapping::from_iter([
+            (serde_yaml_ng::Value::String("mode".into()), serde_yaml_ng::Value::String("effort".into())),
+            (
+                serde_yaml_ng::Value::String("efforts".into()),
+                serde_yaml_ng::Value::Sequence(vec![
+                    serde_yaml_ng::Value::String("low".into()),
+                    serde_yaml_ng::Value::String("high".into()),
+                    serde_yaml_ng::Value::String("max".into()),
+                ]),
+            ),
+            (serde_yaml_ng::Value::String("defaultLevel".into()), serde_yaml_ng::Value::String("high".into())),
+        ]));
+        serde_yaml_ng::Value::Mapping(serde_yaml_ng::mapping::Mapping::from_iter([
+            (
+                serde_yaml_ng::Value::String("id".into()),
+                serde_yaml_ng::Value::String(m.to_string()),
+            ),
+            (
+                serde_yaml_ng::Value::String("name".into()),
+                serde_yaml_ng::Value::String(m.to_string()),
+            ),
+            (serde_yaml_ng::Value::String("reasoning".into()), serde_yaml_ng::Value::Bool(true)),
+            (serde_yaml_ng::Value::String("thinking".into()), thinking),
+            (
+                serde_yaml_ng::Value::String("input".into()),
+                serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("text".into())]),
+            ),
+            (serde_yaml_ng::Value::String("tool_use".into()), serde_yaml_ng::Value::Bool(true)),
+            (
+                serde_yaml_ng::Value::String("contextWindow".into()),
+                serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(1_000_000u64)),
+            ),
+            (
+                serde_yaml_ng::Value::String("maxTokens".into()),
+                serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(131_072u64)),
+            ),
+        ]))
+    };
+    // 模型目录全量登记（P45）：OMP 只透出 models.yml 里声明过的模型（configOptions
+    // 的 model select 选项 = 该列表），只写选中一条会让侧栏切模型无从下手。
+    // 顺序 = 选中模型（OMP 默认模型联动指向它，且既有测试以 models[0] 断言）→
+    // 既有 yml 条目 → 探测到的网关全量。后两类只补不覆盖：既有条目原样保留
+    //（含用户自定义的 name/thinking 等元数据），探测结果只追加未登记的同名模型
+    // ——与 key 继承同一条纪律（见上方 P32g 注释），用户配置不得被蒸发。
+    let existing_models: Vec<serde_yaml_ng::Value> = p
+        .get("models")
+        .and_then(|m| m.as_sequence())
+        .cloned()
+        .unwrap_or_default();
+    let mut seen: Vec<String> = Vec::new();
+    let mut models: Vec<serde_yaml_ng::Value> = Vec::new();
+    let mut push = |id: &str, item: serde_yaml_ng::Value, seen: &mut Vec<String>, models: &mut Vec<serde_yaml_ng::Value>| {
+        let id = id.trim();
+        if id.is_empty() || seen.iter().any(|s| s == id) {
+            return;
+        }
+        seen.push(id.to_string());
+        models.push(item);
+    };
+    push(model, model_item(model), &mut seen, &mut models);
+    for item in existing_models {
+        let Some(id) = item.get("id").and_then(|i| i.as_str()).map(String::from) else { continue };
+        push(&id, item, &mut seen, &mut models);
+    }
+    for m in probe_models {
+        let id = m.trim();
+        push(id, model_item(id), &mut seen, &mut models);
+    }
+    p.insert(serde_yaml_ng::Value::String("models".into()), serde_yaml_ng::Value::Sequence(models));
     serde_yaml_ng::to_string(&v).map_err(|e| format!("models.yml 序列化失败: {e}"))
 }
 
@@ -804,7 +847,13 @@ pub fn harness_config_save(app: tauri::AppHandle, input: HarnessConfigInput) -> 
         }
         "codex" => codex_merge_write(existing.as_deref(), &input.endpoint, &input.model)?,
         "pi" => pi_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,
-        "omp" => omp_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,
+        "omp" => omp_merge_write(
+            existing.as_deref(),
+            &input.endpoint,
+            &input.api_key,
+            &input.model,
+            input.probe_models.as_deref().unwrap_or(&[]),
+        )?,
         "opencode" => opencode_merge_write(existing.as_deref(), &input.endpoint, &input.api_key, &input.model)?,
         other => return Err(format!("{other} 不支持配置代写")),
     };
@@ -1239,7 +1288,7 @@ base_url = "https://old/v1"
     fn omp_merge_inherits_key_from_user_provider_when_blank() {
         let existing = "providers:\n  zhubaoduo:\n    type: openai\n    api: openai-completions\n    baseUrl: https://token.zhubaoduo.com/v1\n    apiKey: sk-keep\n    models:\n      - id: duo-king-6.6\n        context: 128000\n        maxTokens: 8192\n";
         // 场景：设置页在现网关上切模型（endpoint 不变、key 留空）→ key 必须继承
-        let out = omp_merge_write(Some(existing), "https://token.zhubaoduo.com/v1", "", "claude-opus-4-7").unwrap();
+        let out = omp_merge_write(Some(existing), "https://token.zhubaoduo.com/v1", "", "claude-opus-4-7", &[]).unwrap();
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
         let ainone = &v["providers"]["ainone"];
         assert_eq!(ainone["apiKey"].as_str(), Some("sk-keep"), "key 留空必须继承自配 provider 的 apiKey");
@@ -1254,7 +1303,7 @@ base_url = "https://old/v1"
     #[test]
     fn omp_merge_blank_key_no_inherit_source_omits_key() {
         // 无任何既有 key（全新/无 key 文件）+ 留空 → 不写 apiKey 行（与 UI 提示一致）
-        let out = omp_merge_write(None, "https://x", "", "m1").unwrap();
+        let out = omp_merge_write(None, "https://x", "", "m1", &[]).unwrap();
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
         assert!(v["providers"]["ainone"].get("apiKey").is_none());
         assert!(out.contains("baseUrl: https://x"));
@@ -1266,7 +1315,7 @@ base_url = "https://old/v1"
         // empty stop（glm-5.3-flash@aiapi 实测）；anthropic-messages + thinking
         // 声明（efforts 含 max、defaultLevel 高档）后 OMP 端到端回复正常。
         //OMP 官方 glm 家族声明（zai 缓存）同为 anthropic 协议 + low/high/max。
-        let out = omp_merge_write(None, "https://gw.example.com", "sk", "saver/glm-5.3-flash").unwrap();
+        let out = omp_merge_write(None, "https://gw.example.com", "sk", "saver/glm-5.3-flash", &[]).unwrap();
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
         let ainone = &v["providers"]["ainone"];
         assert_eq!(ainone["api"].as_str(), Some("anthropic-messages"), "必须用 anthropic 协议");
@@ -1285,14 +1334,69 @@ base_url = "https://old/v1"
     }
 
     #[test]
+    fn omp_merge_writes_all_probed_models() {
+        // P45：OMP 只透出 models.yml 声明过的模型（configOptions 的 model select
+        // 选项 = 该列表）。只登记选中一条 → 侧栏模型选择器只有 1 个可选值，
+        // 用户切模型无从下手（实测：切任意模型必报「当前会话不支持该模型」）。
+        let probed = vec!["glm-5.3".to_string(), "kimi-k3".to_string()];
+        let out = omp_merge_write(None, "https://gw.example.com", "sk", "claude-opus-4.7", &probed).unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let ids: Vec<&str> = v["providers"]["ainone"]["models"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["id"].as_str())
+            .collect();
+        // 选中模型居首（omp 默认模型联动指向它）；探测全量按序跟在后面
+        assert_eq!(ids, vec!["claude-opus-4.7", "glm-5.3", "kimi-k3"]);
+        // 探测条目与选中条目同模板（省略元数据 = OMP 按无思考处理 + 16K 输出上限）
+        let probed_item = &v["providers"]["ainone"]["models"][1];
+        assert_eq!(probed_item["reasoning"].as_bool(), Some(true));
+        assert_eq!(probed_item["thinking"]["defaultLevel"].as_str(), Some("high"));
+        assert!(probed_item["maxTokens"].as_u64().unwrap() >= 131_072);
+    }
+
+    #[test]
+    fn omp_merge_dedups_and_preserves_existing_models() {
+        // 去重 + 既有条目保留：用户手加的模型、既有条目的自定义元数据不得蒸发
+        //（与上方 P32g「key 留空 = 继承」同一条纪律，旧实现曾把用户配置整体重生成）。
+        let existing = "providers:\n  ainone:\n    baseUrl: https://old\n    apiKey: sk-old\n    models:\n      - id: duo-king-6.6\n        name: 我的自配模型\n";
+        let probed = vec![
+            "glm-5.3".to_string(),
+            "glm-5.3".to_string(), // 探测列表内重复
+            "duo-king-6.6".to_string(), // 与既有条目重复
+        ];
+        let out = omp_merge_write(Some(existing), "https://gw.example.com", "", "glm-5.3", &probed).unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let models = v["providers"]["ainone"]["models"].as_sequence().unwrap();
+        let ids: Vec<&str> = models.iter().filter_map(|m| m["id"].as_str()).collect();
+        assert_eq!(ids, vec!["glm-5.3", "duo-king-6.6"], "去重后仅两条，选中项居首");
+        // 既有条目的自定义 name 保留（未被探测结果覆盖）
+        assert_eq!(models[1]["name"].as_str(), Some("我的自配模型"));
+    }
+
+    #[test]
+    fn omp_merge_empty_probe_keeps_single_model() {
+        // 探测未走/失败（probe_models 空）→ 退化为只登记选中模型（旧行为，不报错）
+        let out = omp_merge_write(None, "https://x", "sk", "m1", &[]).unwrap();
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        assert_eq!(v["providers"]["ainone"]["models"].as_sequence().unwrap().len(), 1);
+        assert_eq!(v["providers"]["ainone"]["models"][0]["id"].as_str(), Some("m1"));
+        // 探测列表里的空白项被忽略（不产生无 id 条目）
+        let out2 = omp_merge_write(None, "https://x", "sk", "m1", &["".to_string(), "  ".to_string()]).unwrap();
+        let v2: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out2).unwrap();
+        assert_eq!(v2["providers"]["ainone"]["models"].as_sequence().unwrap().len(), 1);
+    }
+
+    #[test]
     fn omp_merge_explicit_key_overrides_and_corrupt_rejected() {
         // 显式填 key → 覆盖既有（不改继承语义）
         let existing = "providers:\n  ainone:\n    baseUrl: https://old\n    apiKey: sk-old\n    models:\n      - id: old\n";
-        let out = omp_merge_write(Some(existing), "https://new", "sk-new", "m").unwrap();
+        let out = omp_merge_write(Some(existing), "https://new", "sk-new", "m", &[]).unwrap();
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
         assert_eq!(v["providers"]["ainone"]["apiKey"].as_str(), Some("sk-new"));
         // 损坏 YAML → Err 不写盘（与 claude/codex 同纪律）
-        assert!(omp_merge_write(Some("{broken: ["), "https://x", "", "m").is_err());
+        assert!(omp_merge_write(Some("{broken: ["), "https://x", "", "m", &[]).is_err());
     }
 
     #[test]
@@ -1323,7 +1427,7 @@ base_url = "https://old/v1"
 
     #[test]
     fn omp_merge_generates_yaml() {
-        let out = omp_merge_write(None, "https://x", "sk", "m1").unwrap();
+        let out = omp_merge_write(None, "https://x", "sk", "m1", &[]).unwrap();
         assert!(out.contains("ainone:"));
         assert!(out.contains("baseUrl: https://x"));
         assert!(out.contains("id: m1"));
@@ -1395,13 +1499,13 @@ base_url = "https://old/v1"
         // （endpoint/key/模型名三格一致）——用户「探测→点选→保存→再打开设置」
         // 全流程的闭环保障，防「写成功但回显错乱」类回归。
         let existing = "providers:\n  zhubaoduo:\n    type: openai\n    api: openai-completions\n    baseUrl: https://token.zhubaoduo.com/v1\n    apiKey: sk-real\n    models:\n      - id: duo-king-6.6\n        context: 128000\n        maxTokens: 8192\n";
-        let written = omp_merge_write(Some(existing), "https://token.zhubaoduo.com/v1", "", "claude-opus-4-7").unwrap();
+        let written = omp_merge_write(Some(existing), "https://token.zhubaoduo.com/v1", "", "claude-opus-4-7", &[]).unwrap();
         let (ep, has_key, model, _) = read_view_text("omp", Some(&written));
         assert_eq!(ep, "https://token.zhubaoduo.com/v1", "写后回显 endpoint 一致");
         assert!(has_key, "写后（key 继承）回显 has_key=true");
         assert_eq!(model, "claude-opus-4-7", "写后回显模型名一致（读首个 provider 模型）");
         // 二次保存（用户再点选一次模型，仍留空 key）→ key 仍在（连续操作不蒸发）
-        let written2 = omp_merge_write(Some(&written), "https://token.zhubaoduo.com/v1", "", "glm-5.3-flash").unwrap();
+        let written2 = omp_merge_write(Some(&written), "https://token.zhubaoduo.com/v1", "", "glm-5.3-flash", &[]).unwrap();
         let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&written2).unwrap();
         assert_eq!(v["providers"]["ainone"]["apiKey"].as_str(), Some("sk-real"), "二次保存 key 不蒸发");
         let (ep2, has_key2, model2, _) = read_view_text("omp", Some(&written2));
