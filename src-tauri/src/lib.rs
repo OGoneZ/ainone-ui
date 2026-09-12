@@ -75,8 +75,8 @@ pub fn run() {
             // P35 白屏自愈：监听 WebKitWebProcess 崩溃（web-process-crashed），
             // 取证落日志 + 自动 reload（60s 窗口内 ≥3 次停止重载防崩溃循环）
             webview_resilience::install(app.handle());
-            // 启动即后台抓取 login shell PATH（8s 超时，永不阻塞 UI）
-            env_path::fetch_login_shell_path_async();
+            // 启动即后台抓取 login shell 全量环境（8s 超时，永不阻塞 UI）
+            env_path::fetch_login_shell_env_async();
             // P29：全局 AppHandle 存档——spawn 注入 codex keys env 等非命令上下文用
             agent::store_app_handle(app.handle().clone());
             log::info!("ainone-ui 启动完成");
@@ -106,7 +106,6 @@ pub fn run() {
             agent::agent_stdin_write,
             agent::agent_kill,
             agent::agent_kill_idle,
-            agent::get_base_env,
             sessions::sessions_list,
             sessions::sessions_upsert,
             sessions::sessions_remove,

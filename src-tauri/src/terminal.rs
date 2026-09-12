@@ -100,6 +100,12 @@ pub fn terminal_spawn(
     if let Some(cwd) = cwd.as_ref().filter(|c| !c.is_empty()) {
         cmd.cwd(cwd);
     }
+    // 打包版（launchd 拉起的 .app）只继承 12 个环境变量，用户 ~/.zshrc 的 export
+    // 一个都没有。先用登录 shell 环境 + 终端能力兜底铺底（login_shell_env_for_child
+    // 内含 TERM 缺失时的 xterm-256color），再由前端显式 env（PATH）覆盖——顺序即优先级。
+    for (k, v) in crate::env_path::login_shell_env_for_child() {
+        cmd.env(k, v);
+    }
     for (k, v) in &env {
         cmd.env(k, v);
     }

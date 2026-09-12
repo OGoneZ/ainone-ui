@@ -71,28 +71,6 @@ pub fn agent_kill_idle(app: AppHandle, agent_id: u64, last_activity_ms: f64) -> 
     Ok(())
 }
 
-/// 返回给 harness 子进程的基础环境。
-/// 插件 shell 的 spawn 若 `env` 为 None 会清空环境，故前端须显式传这份环境。
-/// PATH 用增强 PATH 整体替换（env_path.rs：用户目录 + nvm + login shell + 进程 PATH）。
-#[tauri::command]
-pub fn get_base_env() -> std::collections::HashMap<String, String> {
-    let keys = [
-        "HOME",
-        "SHELL",
-        "USER",
-        "LOGNAME",
-        "LANG",
-        "TERM",
-        "TMPDIR",
-    ];
-    let mut env: std::collections::HashMap<String, String> = keys
-        .iter()
-        .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
-        .collect();
-    env.insert("PATH".to_string(), crate::env_path::enhanced_path());
-    env
-}
-
 /// 当前 Unix 毫秒时间戳（回收留痕用）。
 fn now_ms() -> f64 {
     std::time::SystemTime::now()
@@ -178,6 +156,9 @@ pub async fn spawn_inner(
         .args(args)
         .set_raw_out(true)
         .env("PATH", crate::env_path::enhanced_path())
+        // 登录 shell 环境（rc 的 export + TERM 兜底）铺底，bridge 专属注入压在其上。
+        // 打包版只继承 12 个变量，此前 Skill 读 OPENAI_API_KEY 一类恒为空即此故。
+        .envs(crate::env_path::login_shell_env_for_child())
         .envs(bridge_env_inject(program));
     if !cwd.is_empty() {
         cmd = cmd.current_dir(cwd);
@@ -225,6 +206,7 @@ fn spawn_bridge(
         .args(args)
         .set_raw_out(true)
         .env("PATH", crate::env_path::enhanced_path())
+        .envs(crate::env_path::login_shell_env_for_child())
         .envs(bridge_env_inject(spec.program));
     if !cwd.is_empty() {
         cmd = cmd.current_dir(cwd);
